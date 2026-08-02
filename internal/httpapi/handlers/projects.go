@@ -82,6 +82,22 @@ func (h *ProjectHandler) Get(w http.ResponseWriter, r *http.Request) {
 	response.WriteJSON(w, http.StatusOK, map[string]any{"project": p})
 }
 
+// Unarchive handles POST /api/v1/projects/{id}/unarchive.
+func (h *ProjectHandler) Unarchive(w http.ResponseWriter, r *http.Request) {
+	projectID := request.PathParam(r, "id")
+	p, err := h.svc.Unarchive(r.Context(), projectID)
+	if err != nil {
+		if errors.Is(err, project.ErrNotFound) {
+			response.WriteError(w, r, http.StatusNotFound, "project_not_found", "project not found")
+			return
+		}
+		h.log.Error("unarchive project failed", "error", err, "request_id", request.RequestID(r))
+		response.WriteError(w, r, http.StatusInternalServerError, "internal_error", "could not unarchive project")
+		return
+	}
+	response.WriteJSON(w, http.StatusOK, map[string]any{"project": p})
+}
+
 // Archive handles POST /api/v1/projects/{id}/archive.
 func (h *ProjectHandler) Archive(w http.ResponseWriter, r *http.Request) {
 	projectID := request.PathParam(r, "id")

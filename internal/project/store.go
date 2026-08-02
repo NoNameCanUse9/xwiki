@@ -108,6 +108,26 @@ func (s *Store) List(ctx context.Context) ([]*Project, error) {
 	return out, rows.Err()
 }
 
+// Unarchive clears the archived flag (idempotent).
+func (s *Store) Unarchive(ctx context.Context, id string, at time.Time) error {
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE projects
+		SET archived_at = NULL, updated_at = ?
+		WHERE id = ?`,
+		at.UTC().Format(time.RFC3339), id)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // Archive marks a project archived. The first call records the timestamp;
 // later calls are idempotent and never overwrite it.
 func (s *Store) Archive(ctx context.Context, id string, at time.Time) error {

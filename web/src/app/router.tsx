@@ -6,6 +6,7 @@ import ProjectDetailPage from "@/routes/project-detail";
 import DocsViewerPage from "@/routes/docs-viewer";
 import TokensPage from "@/routes/tokens";
 import ApiDocsPage from "@/routes/api-docs";
+import UsersPage from "@/routes/users";
 
 export const router = createBrowserRouter([
   { path: "/login", element: <LoginPage /> },
@@ -17,6 +18,7 @@ export const router = createBrowserRouter([
       { path: "projects/:id", element: <ProjectDetailPage /> },
       { path: "projects/:id/docs/*", element: <DocsViewerPage /> },
       { path: "settings/tokens", element: <TokensPage /> },
+      { path: "settings/users", element: <UsersPage /> },
       { path: "api-docs", element: <ApiDocsPage /> },
     ],
   },

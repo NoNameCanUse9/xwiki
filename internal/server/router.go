@@ -43,6 +43,7 @@ func NewRouter(cfg *config.Config, log *slog.Logger, db *sql.DB, users *user.Sto
 	ch := handlers.NewChangesetHandler(cfg, projectsSvc, agentSvc, searchSvc, log)
 	th := handlers.NewTokenHandler(cfg, agentSvc, log)
 	xh := handlers.NewTransferHandler(cfg, projectsSvc, agentSvc, log)
+	uh := handlers.NewUserHandler(cfg, authSvc, users, log)
 	hh := handlers.NewHistoryHandler(cfg, projectsSvc, searchSvc, log)
 	sh := handlers.NewSearchHandler(cfg, searchSvc, projectsSvc, agentSvc, log)
 
@@ -72,6 +73,16 @@ func NewRouter(cfg *config.Config, log *slog.Logger, db *sql.DB, users *user.Sto
 			})
 		})
 		r.Post("/import/bundle", xh.ImportBundle)
+		r.Route("/users", func(r chi.Router) {
+			r.Group(func(r chi.Router) {
+				r.Use(middleware.SessionAuth(authSvc))
+				r.Use(middleware.AdminOnly)
+				r.Get("/", uh.List)
+				r.Post("/", uh.Create)
+				r.Post("/{id}/disable", uh.Disable)
+				r.Post("/{id}/enable", uh.Enable)
+			})
+		})
 		r.Route("/tokens", func(r chi.Router) {
 			r.Group(func(r chi.Router) {
 				r.Use(middleware.SessionAuth(authSvc))
@@ -88,6 +99,7 @@ func NewRouter(cfg *config.Config, log *slog.Logger, db *sql.DB, users *user.Sto
 				r.Get("/", ph.List)
 				r.Get("/{id}", ph.Get)
 				r.Post("/{id}/archive", ph.Archive)
+				r.Post("/{id}/unarchive", ph.Unarchive)
 				r.Get("/{id}/docs/tree", dh.Tree)
 				r.Get("/{id}/docs/home", dh.Home)
 				r.Get("/{id}/docs/pages/*", dh.Page)

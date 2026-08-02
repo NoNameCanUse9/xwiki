@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"log/slog"
 	"net/http"
 
@@ -36,6 +37,10 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	}
 	u, token, err := h.svc.Login(r.Context(), h.users, req.Username, req.Password)
 	if err != nil {
+		if errors.Is(err, auth.ErrDisabled) {
+			response.WriteError(w, r, http.StatusForbidden, "account_disabled", "account is disabled")
+			return
+		}
 		response.WriteError(w, r, http.StatusUnauthorized, "invalid_credentials", "invalid username or password")
 		return
 	}

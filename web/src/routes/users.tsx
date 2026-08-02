@@ -1,0 +1,206 @@
+import { useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
+import { ArrowLeft, Ban, CheckCircle2, UserPlus, Users } from "lucide-react";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  createUser,
+  disableUser,
+  enableUser,
+  listUsers,
+} from "@/lib/api/users";
+import { ApiError } from "@/lib/api/client";
+
+export default function UsersPage() {
+  const queryClient = useQueryClient();
+  const { data, isLoading } = useQuery({ queryKey: ["users"], queryFn: listUsers });
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [displayName, setDisplayName] = useState("");
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const onCreate = async () => {
+    setBusy(true);
+    try {
+      await createUser({
+        username,
+        password,
+        display_name: displayName || undefined,
+        is_admin: isAdmin,
+      });
+      toast.success(`用户 ${username} 已创建`);
+      setUsername("");
+      setPassword("");
+      setDisplayName("");
+      setIsAdmin(false);
+      await queryClient.invalidateQueries({ queryKey: ["users"] });
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        toast.error("用户名已存在");
+      } else {
+        toast.error(err instanceof Error ? err.message : "创建失败");
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onToggle = async (id: string, disabled: boolean) => {
+    try {
+      if (disabled) {
+        await enableUser(id);
+        toast.success("已启用");
+      } else {
+        await disableUser(id);
+        toast.success("已禁用");
+      }
+      await queryClient.invalidateQueries({ queryKey: ["users"] });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "操作失败");
+    }
+  };
+
+  return (
+    <div className="flex min-h-screen flex-col">
+      <header className="flex items-center justify-between border-b border-[var(--color-rule)] px-6 py-4">
+        <Link
+          to="/"
+          className="mono-label flex items-center gap-2 text-[var(--color-ink-3)] hover:text-[var(--color-accent)]"
+        >
+          <ArrowLeft className="size-3.5" />
+          workspace
+        </Link>
+        <span className="mono-label text-[var(--color-ink-3)]">
+          settings · users
+        </span>
+      </header>
+
+      <main className="flex-1 px-6 py-10 sm:px-10">
+        <div className="mx-auto w-full max-w-3xl space-y-8">
+          <div className="space-y-2">
+            <p className="mono-label text-[var(--color-accent)]">settings</p>
+            <h1 className="font-display text-3xl font-semibold leading-tight text-[var(--color-ink)]">
+              用户管理
+            </h1>
+            <p className="max-w-[58ch] text-[var(--color-ink-2)]">
+              创建成员账号、分配管理员角色、禁用离职账号。禁用后无法登录。
+            </p>
+          </div>
+
+          <section className="hairline-panel space-y-4 p-6">
+            <p className="mono-label text-[var(--color-ink-3)]">create user</p>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="u-name">用户名</Label>
+                <Input
+                  id="u-name"
+                  placeholder="alice"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="u-pass">密码（至少 8 位）</Label>
+                <Input
+                  id="u-pass"
+                  type="password"
+                  placeholder="••••••••"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="u-display">显示名</Label>
+                <Input
+                  id="u-display"
+                  placeholder="Alice"
+                  value={displayName}
+                  onChange={(e) => setDisplayName(e.target.value)}
+                />
+              </div>
+              <label className="flex cursor-pointer items-center gap-2 pt-7 text-sm text-[var(--color-ink-2)]">
+                <input
+                  type="checkbox"
+                  checked={isAdmin}
+                  onChange={(e) => setIsAdmin(e.target.checked)}
+                  className="size-4 accent-[var(--color-accent)]"
+                />
+                管理员
+              </label>
+            </div>
+            <div className="flex justify-end">
+              <Button onClick={() => void onCreate()} disabled={busy} className="gap-2">
+                <UserPlus className="size-4" />
+                {busy ? "创建中…" : "创建用户"}
+              </Button>
+            </div>
+          </section>
+
+          <section className="space-y-3">
+            <p className="mono-label text-[var(--color-ink-3)]">
+              users · {(data?.users ?? []).length}
+            </p>
+            {isLoading && <p className="mono-label text-[var(--color-ink-3)]">loading…</p>}
+            <div className="hairline-panel divide-y divide-[var(--color-rule)] px-5">
+              {data?.users.map((u) => (
+                <div key={u.id} className="flex items-center justify-between gap-3 py-3">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <Users className="size-4 shrink-0 text-[var(--color-ink-3)]" />
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium text-[var(--color-ink)]">
+                        {u.display_name || u.username}
+                        {u.is_admin && (
+                          <span className="mono-label ml-2 text-[var(--color-accent)]">
+                            admin
+                          </span>
+                        )}
+                        {u.disabled && (
+                          <span className="mono-label ml-2 text-[var(--color-destructive)]">
+                            disabled
+                          </span>
+                        )}
+                      </p>
+                      <p className="mono-label mt-0.5 text-[var(--color-ink-3)]">
+                        {u.username}
+                      </p>
+                    </div>
+                  </div>
+                  {u.username !== "admin" && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="shrink-0 gap-1.5 text-[var(--color-ink-3)]"
+                      onClick={() => void onToggle(u.id, u.disabled)}
+                    >
+                      {u.disabled ? (
+                        <>
+                          <CheckCircle2 className="size-3.5" />
+                          启用
+                        </>
+                      ) : (
+                        <>
+                          <Ban className="size-3.5" />
+                          禁用
+                        </>
+                      )}
+                    </Button>
+                  )}
+                </div>
+              ))}
+            </div>
+          </section>
+        </div>
+      </main>
+
+      <footer className="border-t border-[var(--color-rule)] px-6 py-4">
+        <p className="mono-label text-[var(--color-ink-3)]">
+          agentdocs · user management
+        </p>
+      </footer>
+    </div>
+  );
+}

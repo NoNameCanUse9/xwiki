@@ -91,3 +91,14 @@ HTTP 层（internal/httpapi）→ 服务层（internal/auth、internal/app）→
 - ZIP：archive/zip 流式打包树快照；导入解码 base64 走统一 changeset（单次提交）
 - Bundle：bundle create/fetch（fetch 建立 refs，unbundle 只写对象）；导入创建新项目保留完整历史
 - 附件：changeset encoding=base64（≤ 5 MiB）；读取 format=base64
+
+
+## 用户管理（补充）
+
+- users 表 disabled_at 列（迁移 00005）；登录链路校验禁用状态（403 account_disabled）
+- 管理端点 /api/v1/users 仅 admin（AdminOnly 中间件）
+- 保护：不能禁用自己、不能禁用 admin 账号；禁用只影响登录（数据与历史保留）
+
+## 项目恢复（补充）
+
+- unarchive 清空 archived_at（幂等）；恢复后写操作立即放行

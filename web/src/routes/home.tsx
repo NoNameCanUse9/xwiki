@@ -1,12 +1,12 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { Archive, BookOpenText, FileText, KeyRound, LogOut, FolderGit2 } from "lucide-react";
+import { Archive, BookOpenText, FileText, KeyRound, LogOut, FolderGit2, RotateCcw, Users } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import ThemeToggle from "@/components/theme-toggle";
 import ProjectCreateDialog from "@/components/project-create-dialog";
-import { archiveProject, listProjects } from "@/lib/api/projects";
+import { archiveProject, listProjects, unarchiveProject } from "@/lib/api/projects";
 import type { Project } from "@/lib/api/types";
 import { useAuthStore } from "@/stores/auth";
 
@@ -35,6 +35,19 @@ function ProjectCard({ project }: { project: Project }) {
     }
   };
 
+  const onUnarchive = async () => {
+    setBusy(true);
+    try {
+      await unarchiveProject(project.id);
+      toast.success(`项目 ${project.name} 已恢复`);
+      await queryClient.invalidateQueries({ queryKey: ["projects"] });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "恢复失败");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <div className="hairline-panel flex flex-col gap-3 p-5 transition-colors hover:border-[var(--color-rule-2)]">
       <div className="flex items-start justify-between gap-3">
@@ -54,7 +67,7 @@ function ProjectCard({ project }: { project: Project }) {
             {project.description || "—"}
           </p>
         </div>
-        {!project.archived && (
+        {!project.archived ? (
           <Button
             variant="ghost"
             size="sm"
@@ -64,6 +77,17 @@ function ProjectCard({ project }: { project: Project }) {
           >
             <Archive className="size-3.5" />
             归档
+          </Button>
+        ) : (
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={busy}
+            onClick={onUnarchive}
+            className="shrink-0 gap-1.5 text-[var(--color-accent)]"
+          >
+            <RotateCcw className="size-3.5" />
+            恢复
           </Button>
         )}
       </div>
@@ -140,6 +164,13 @@ export default function HomePage() {
           >
             <KeyRound className="size-4" />
             Agent Token
+          </Link>
+          <Link
+            to="/settings/users"
+            className="flex items-center gap-2 rounded-sm px-3 py-2 text-sm text-[var(--color-ink-2)] hover:bg-[var(--color-surface-accent)] hover:text-[var(--color-ink)]"
+          >
+            <Users className="size-4" />
+            用户管理
           </Link>
           <Button
             variant="outline"

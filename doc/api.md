@@ -285,3 +285,36 @@ invalid_import / invalid_upload / bundle_too_large
 | 18 | 路径无法逃逸仓库 | ✅ | validateDocPath + 穿越测试 |
 | 19 | 完整 Bundle 导出 | ✅ | 阶段八 export.bundle + 历史保留测试 |
 | 20 | Docker Compose 直接启动 | ✅ | 阶段一验证（含运行时） |
+
+
+---
+
+# 用户管理 API（补充）
+
+仅管理员（session cookie + is_admin）可访问；普通成员访问 → 403 admin_required。
+
+## POST /api/v1/users
+
+请求：`{"username":"alice","password":"password123","display_name":"Alice","is_admin":false}`
+
+- 201 `{"user":{id,username,display_name,is_admin,disabled,created_at}}`
+- 400 invalid_username / invalid_password · 409 username_conflict
+
+## GET /api/v1/users
+
+- 200 `{"users":[...]}`
+
+## POST /api/v1/users/{id}/disable | /enable
+
+- 200 `{"user":{...,"disabled":true|false}}`（幂等）
+- 400 cannot_disable_self / cannot_disable_admin · 404 user_not_found
+
+## 登录与禁用
+
+- 禁用账号登录 → 403 account_disabled（新增错误码）
+- 禁用不删除数据；重新启用后原会话失效、需重新登录
+
+## 项目恢复（补充）
+
+- `POST /api/v1/projects/{id}/unarchive` → 200 `{"project":{...,"archived":false}}`（幂等；恢复后即可写入）
+- 404 project_not_found

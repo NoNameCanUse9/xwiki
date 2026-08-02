@@ -112,3 +112,12 @@ func (s *Service) Archive(ctx context.Context, projectID string) (*Project, erro
 	}
 	return p, nil
 }
+
+// Unarchive restores an archived project (idempotent).
+func (s *Service) Unarchive(ctx context.Context, projectID string) (*Project, error) {
+	now := s.clock.Now().UTC()
+	if err := s.store.Unarchive(ctx, projectID, now); err != nil {
+		return nil, err
+	}
+	return s.store.GetByID(ctx, projectID)
+}

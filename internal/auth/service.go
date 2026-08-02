@@ -17,6 +17,7 @@ import (
 var (
 	ErrInvalidCredentials = errors.New("invalid credentials")
 	ErrSessionNotFound    = errors.New("session not found")
+	ErrDisabled           = errors.New("account is disabled")
 )
 
 type Session struct {
@@ -49,6 +50,9 @@ func (s *Service) Login(ctx context.Context, users *user.Store, username, passwo
 	u, err := users.GetByUsername(ctx, username)
 	if err != nil {
 		return nil, "", ErrInvalidCredentials
+	}
+	if u.Disabled() {
+		return nil, "", ErrDisabled
 	}
 	ok, err := VerifyPassword(password, u.PasswordHash)
 	if err != nil || !ok {

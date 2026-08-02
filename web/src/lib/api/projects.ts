@@ -25,3 +25,9 @@ export function archiveProject(id: string) {
     method: "POST",
   });
 }
+
+export function unarchiveProject(id: string) {
+  return api<ProjectResponse>(`/projects/${encodeURIComponent(id)}/unarchive`, {
+    method: "POST",
+  });
+}
