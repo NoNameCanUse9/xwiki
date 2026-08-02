@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
 )
 
 // loginAndGetCookie authenticates the seeded admin user and returns the
@@ -193,7 +192,8 @@ func TestTwoProjectsHaveIsolatedRepos(t *testing.T) {
 	refB := gitRevParse(t, projects[1].ID, svc.ReposRoot())
 	if refA == refB {
 		t.Fatal("both projects resolve to the same commit — history is not isolated")
-	}}
+	}
+}
 
 func gitRevParse(t *testing.T, projectID, reposRoot string) string {
 	t.Helper()

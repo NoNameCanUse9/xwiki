@@ -116,7 +116,7 @@ func TestServiceListAndArchive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second Archive: %v", err)
 	}
-	if !again.ArchivedAt.Equal(archived.ArchivedAt) {
+	if *again.ArchivedAt != *archived.ArchivedAt {
 		t.Fatal("second archive must not change timestamp")
 	}
 	// Archived projects remain visible in the list and via Get.

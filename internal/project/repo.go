@@ -255,3 +255,18 @@ func (r *Repo) HashBlob(ctx context.Context, content []byte) (string, error) {
 	}
 	return strings.TrimSpace(out.String()), nil
 }
+
+// gitOutputPlain runs git without --git-dir (repo-less commands like
+// `git bundle verify`).
+func gitOutputPlain(ctx context.Context, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git")
+	cmd.Args = append(cmd.Args, args...)
+	cmd.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1")
+	var out, errBuf bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &errBuf
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(errBuf.String()))
+	}
+	return strings.TrimSpace(out.String()), nil
+}

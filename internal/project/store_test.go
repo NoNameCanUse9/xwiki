@@ -108,7 +108,7 @@ func TestArchiveIsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !got2.ArchivedAt.Equal(got.ArchivedAt) {
+	if *got2.ArchivedAt != *got.ArchivedAt {
 		t.Fatal("second archive must not overwrite archived_at")
 	}
 	if err := s.Archive(context.Background(), "missing", time.Now().UTC()); !errors.Is(err, ErrNotFound) {

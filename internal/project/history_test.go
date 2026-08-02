@@ -14,7 +14,7 @@ func seedHistory(t *testing.T) (*Service, string) {
 	if _, err := svc.ApplyChangeset(context.Background(), pid, ChangesetInput{
 		BaseRevision: mustHead(t, svc, pid),
 		Message:      "add a",
-		Changes:     []Change{{Op: "create", Path: "docs/a.md", Content: "# A\n"}},
+		Changes:      []Change{{Op: "create", Path: "docs/a.md", Content: "# A\n"}},
 	}); err != nil {
 		t.Fatal(err)
 	}

@@ -19,11 +19,11 @@ type CommitSummary struct {
 
 // CommitDetail is a commit with its changed file list.
 type CommitDetail struct {
-	SHA     string         `json:"sha"`
-	Message string         `json:"message"`
-	Author  string         `json:"author"`
-	Date    string         `json:"date"`
-	Files   []FileChange   `json:"files"`
+	SHA     string       `json:"sha"`
+	Message string       `json:"message"`
+	Author  string       `json:"author"`
+	Date    string       `json:"date"`
+	Files   []FileChange `json:"files"`
 }
 
 // FileChange is one changed path inside a commit.
