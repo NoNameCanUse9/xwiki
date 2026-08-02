@@ -9,6 +9,8 @@ import { fileHistory } from "@/lib/api/history";
 import { searchProject } from "@/lib/api/search";
 import { getHome, getPage, getTree, type TreeEntry } from "@/lib/api/docs";
 import CommandPalette from "@/components/editor/command-palette";
+import RichEditor from "@/components/editor/rich-editor";
+import { FileRowActions, NewPageForm } from "@/components/editor/file-actions";
 
 function dirOf(filePath: string): string {
   const i = filePath.lastIndexOf("/");
@@ -57,9 +59,10 @@ interface DirNodeProps {
   expandedDirs: Set<string>;
   onToggle: (entry: TreeEntry) => void;
   onOpen: (entry: TreeEntry) => void;
+  onFileDeleted: (path: string) => void;
 }
 
-function DirNode({ projectId, dir, depth, expandedDirs, onToggle, onOpen }: DirNodeProps) {
+function DirNode({ projectId, dir, depth, expandedDirs, onToggle, onOpen, onFileDeleted }: DirNodeProps) {
   const { data } = useQuery({
     queryKey: ["tree", projectId, dir],
     queryFn: () => getTree(projectId, dir),
@@ -75,24 +78,35 @@ function DirNode({ projectId, dir, depth, expandedDirs, onToggle, onOpen }: DirN
       )}
       {data?.tree.map((entry) => (
         <div key={entry.path}>
-          <button
-            type="button"
-            onClick={() => (entry.type === "tree" ? onToggle(entry) : onOpen(entry))}
-            className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm text-[var(--color-ink-2)] hover:bg-[var(--color-surface-accent)] hover:text-[var(--color-ink)]"
+          <div
+            className="group flex items-center gap-1 rounded-sm pr-1 hover:bg-[var(--color-surface-accent)]"
             style={{ paddingLeft: `${8 + depth * 14}px` }}
-            title={entry.path}
           >
-            {entry.type === "tree" ? (
-              expandedDirs.has(entry.path) ? (
-                <FolderOpen className="size-3.5 shrink-0 text-[var(--color-accent)]" />
+            <button
+              type="button"
+              onClick={() => (entry.type === "tree" ? onToggle(entry) : onOpen(entry))}
+              className="flex min-w-0 flex-1 items-center gap-2 py-1.5 text-left text-sm text-[var(--color-ink-2)] hover:text-[var(--color-ink)]"
+              title={entry.path}
+            >
+              {entry.type === "tree" ? (
+                expandedDirs.has(entry.path) ? (
+                  <FolderOpen className="size-3.5 shrink-0 text-[var(--color-accent)]" />
+                ) : (
+                  <Folder className="size-3.5 shrink-0 text-[var(--color-accent)]" />
+                )
               ) : (
-                <Folder className="size-3.5 shrink-0 text-[var(--color-accent)]" />
-              )
-            ) : (
-              <FileText className="size-3.5 shrink-0 text-[var(--color-ink-3)]" />
+                <FileText className="size-3.5 shrink-0 text-[var(--color-ink-3)]" />
+              )}
+              <span className="truncate">{entry.name}</span>
+            </button>
+            {entry.type === "blob" && (
+              <FileRowActions
+                projectId={projectId}
+                path={entry.path}
+                onDeleted={() => onFileDeleted(entry.path)}
+              />
             )}
-            <span className="truncate">{entry.name}</span>
-          </button>
+          </div>
           {entry.type === "tree" && (
             <DirNode
               projectId={projectId}
@@ -101,6 +115,7 @@ function DirNode({ projectId, dir, depth, expandedDirs, onToggle, onOpen }: DirN
               expandedDirs={expandedDirs}
               onToggle={onToggle}
               onOpen={onOpen}
+              onFileDeleted={onFileDeleted}
             />
           )}
         </div>
@@ -116,6 +131,7 @@ export default function DocsViewerPage() {
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
+  const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -208,7 +224,37 @@ export default function DocsViewerPage() {
 
   const startEdit = () => {
     setDraft("");
+    setDirty(false);
     setEditing(true);
+  };
+
+  // Cmd/Ctrl+S saves; beforeunload guards against losing unsaved edits.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
+        e.preventDefault();
+        if (editing && !saving) void saveEdit();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editing, saving, draft, id, filePath]);
+
+  useEffect(() => {
+    if (!dirty) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [dirty]);
+
+  const cancelEdit = () => {
+    if (dirty && !window.confirm("有未保存的修改，确定放弃？")) return;
+    setEditing(false);
+    setDirty(false);
   };
 
   const saveEdit = async () => {
@@ -224,6 +270,7 @@ export default function DocsViewerPage() {
       setEditing(false);
       await queryClient.invalidateQueries({ queryKey: ["docs"] });
       await queryClient.invalidateQueries({ queryKey: ["tree"] });
+      setDirty(false);
     } catch (err) {
       if ((err as { status?: number })?.status === 409) {
         toast.error("文档已被他人修改，请刷新后重试");
@@ -252,6 +299,9 @@ export default function DocsViewerPage() {
             workspace
           </Link>
         </div>
+        <div className="border-b border-[var(--color-rule)] p-2">
+          <NewPageForm projectId={id} />
+        </div>
         <div className="flex-1 overflow-y-auto p-2">
           <DirNode
             projectId={id}
@@ -260,6 +310,9 @@ export default function DocsViewerPage() {
             expandedDirs={expandedDirs}
             onToggle={toggleDir}
             onOpen={openEntry}
+            onFileDeleted={(p) => {
+              if (filePath === p) navigate(`/projects/${id}/docs`);
+            }}
           />
         </div>
       </aside>
@@ -397,7 +450,7 @@ export default function DocsViewerPage() {
                   <p className="mono-label text-[var(--color-ink-3)]">
                     editing · {filePath}
                   </p>
-                  <Button variant="ghost" size="sm" onClick={() => setEditing(false)}>
+                  <Button variant="ghost" size="sm" onClick={cancelEdit}>
                     <RefreshCw className="mr-1.5 size-3.5" />
                     取消
                   </Button>
@@ -405,17 +458,18 @@ export default function DocsViewerPage() {
                 {rawQuery.isLoading ? (
                   <p className="mono-label text-[var(--color-ink-3)]">loading…</p>
                 ) : (
-                  <textarea
-                    aria-label="文档内容"
-                    value={draft}
-                    onChange={(e) => setDraft(e.target.value)}
-                    rows={22}
-                    spellCheck={false}
-                    className="code-card w-full resize-y p-4 font-mono text-sm leading-relaxed outline-none focus:border-[var(--color-accent)]"
-                  />
+                  <div className="code-card p-1">
+                    <RichEditor
+                      initialMarkdown={draft}
+                      onChange={(md) => {
+                        setDraft(md);
+                        setDirty(true);
+                      }}
+                    />
+                  </div>
                 )}
                 <div className="flex justify-end gap-2">
-                  <Button variant="outline" size="sm" onClick={() => setEditing(false)}>
+                  <Button variant="outline" size="sm" onClick={cancelEdit}>
                     放弃
                   </Button>
                   <Button size="sm" onClick={() => void saveEdit()} disabled={saving}>

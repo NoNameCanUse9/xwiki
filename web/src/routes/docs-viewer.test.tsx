@@ -140,15 +140,19 @@ describe("DocsViewerPage", () => {
     const user = userEvent.setup();
     renderPage("/projects/prj_1/docs/guide.md");
     await user.click(await screen.findByRole("button", { name: /编辑/ }));
-    const textarea = await screen.findByLabelText("文档内容");
-    await user.clear(textarea);
-    await user.type(textarea, "# Updated\n");
+    const editor = screen
+      .getAllByRole("textbox")
+      .find((el) => el.tagName !== "INPUT");
+    expect(editor).toBeTruthy();
+    await user.click(editor as HTMLElement);
+    await user.keyboard("{Control>}a{/Control}");
+    await user.keyboard("# Updated{Enter}");
     await user.click(screen.getByRole("button", { name: "保存" }));
     await vi.waitFor(() =>
       expect(changesetsApi.submitChangeset).toHaveBeenCalledWith("prj_1", {
         base_revision: "rev1",
         message: "",
-        changes: [{ op: "update", path: "guide.md", content: "# Updated\n" }],
+        changes: [{ op: "update", path: "guide.md", content: expect.stringContaining("# Updated") }],
       }),
     );
   });
@@ -207,7 +211,7 @@ describe("DocsViewerPage", () => {
     const user = userEvent.setup();
     renderPage("/projects/prj_1/docs/guide.md");
     await user.click(await screen.findByRole("button", { name: /编辑/ }));
-    await screen.findByLabelText("文档内容");
+    await screen.findAllByRole("textbox");
     await user.click(screen.getByRole("button", { name: "保存" }));
     expect(await screen.findByText("文档已被他人修改，请刷新后重试")).toBeInTheDocument();
   });
