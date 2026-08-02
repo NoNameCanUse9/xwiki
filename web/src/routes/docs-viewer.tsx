@@ -12,6 +12,7 @@ import CommandPalette from "@/components/editor/command-palette";
 import RichEditor from "@/components/editor/rich-editor";
 import { FileRowActions, NewPageForm } from "@/components/editor/file-actions";
 import FileMenu from "@/components/editor/file-menu";
+import ImportFilesButton from "@/components/editor/import-files";
 import AttachmentsPanel from "@/components/editor/attachments";
 import { enhanceRenderedMarkdown } from "@/components/editor/markdown-render";
 import {
@@ -690,6 +691,7 @@ export default function DocsViewerPage() {
                   <span className="mono-label text-[var(--color-ink-3)]">
                     {filePath}
                   </span>
+                  <ImportFilesButton projectId={id} />
                 </div>
                 <FileMenu
                   projectId={id}

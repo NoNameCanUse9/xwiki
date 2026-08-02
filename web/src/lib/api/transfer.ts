@@ -5,6 +5,13 @@ export interface ImportFile {
   content: string; // base64
 }
 
+export function importRepo(name: string, url: string) {
+  return api<{ project: { id: string; name: string }; commits: number }>(
+    `/import/repo?name=${encodeURIComponent(name)}&url=${encodeURIComponent(url)}`,
+    { method: "POST", body: "{}" },
+  );
+}
+
 export function importZip(
   projectId: string,
   baseRevision: string,

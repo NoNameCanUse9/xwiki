@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -140,6 +141,71 @@ func (s *Service) ExportBundle(ctx context.Context, projectID string) ([]byte, e
 		return nil, fmt.Errorf("bundle create: %w", err)
 	}
 	return os.ReadFile(tmpPath)
+}
+
+// ImportRepo clones a remote repository URL into a new project (bare).
+func (s *Service) ImportRepo(ctx context.Context, name, url string) (*BundleImportResult, error) {
+	if err := ValidateName(name); err != nil {
+		return nil, ErrInvalid
+	}
+	if !validRepoURL(url) {
+		return nil, ErrInvalid
+	}
+	projectID := id.New("prj")
+	now := s.clock.Now().UTC()
+	repoDir := filepath.Join(s.reposRoot, projectID, "repo.git")
+	if err := os.MkdirAll(filepath.Dir(repoDir), 0o755); err != nil {
+		return nil, err
+	}
+	cleanup := func() { _ = os.RemoveAll(filepath.Dir(repoDir)) }
+	cmd := exec.CommandContext(ctx, "git", "clone", "--bare", "--", url, repoDir)
+	cmd.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		cleanup()
+		return nil, fmt.Errorf("clone %s: %w: %s", url, err, strings.TrimSpace(string(out)))
+	}
+	// Normalize the default branch to main when the remote used another name.
+	if _, err := gitOutput(ctx, repoDir, "rev-parse", "--verify", "refs/heads/main"); err != nil {
+		head, err := gitOutput(ctx, repoDir, "for-each-ref", "--format=%(objectname)", "refs/heads/")
+		if err != nil || head == "" {
+			cleanup()
+			return nil, fmt.Errorf("repository has no branches")
+		}
+		branchName, _ := gitOutput(ctx, repoDir, "for-each-ref", "--format=%(refname:short)", "refs/heads/")
+		first := strings.SplitN(branchName, "\n", 2)[0]
+		if _, err := gitOutput(ctx, repoDir, "update-ref", "refs/heads/main", head, first); err != nil {
+			cleanup()
+			return nil, err
+		}
+	}
+	p := &Project{
+		ID: projectID, Name: name,
+		RepoDir:   filepath.ToSlash(filepath.Join("repos", projectID, "repo.git")),
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if err := s.store.Create(ctx, p); err != nil {
+		cleanup()
+		return nil, err
+	}
+	commits := 0
+	if out, err := gitOutput(ctx, repoDir, "rev-list", "--count", "HEAD"); err == nil {
+		fmt.Sscanf(out, "%d", &commits)
+	}
+	return &BundleImportResult{Project: p, Commits: commits}, nil
+}
+
+// validRepoURL restricts import sources to git-capable protocols.
+func validRepoURL(u string) bool {
+	for _, prefix := range []string{"http://", "https://", "git://", "ssh://", "file://"} {
+		if strings.HasPrefix(u, prefix) {
+			return true
+		}
+	}
+	// scp-like syntax: user@host:path
+	if strings.Contains(u, "@") && strings.Contains(u, ":") && !strings.HasPrefix(u, "/") {
+		return true
+	}
+	return false
 }
 
 // BundleImportResult reports a bundle import.

@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import ThemeToggle from "@/components/theme-toggle";
 import ProjectCreateDialog from "@/components/project-create-dialog";
+import ImportProjectDialog from "@/components/import-project-dialog";
 import { archiveProject, listProjects, unarchiveProject } from "@/lib/api/projects";
 import type { Project } from "@/lib/api/types";
 import { useAuthStore } from "@/stores/auth";
@@ -218,11 +219,14 @@ export default function HomePage() {
                   每个项目对应一个独立 Git 仓库，文档即版本。
                 </p>
               </div>
-              <ProjectCreateDialog
-                onCreated={() => {
-                  void queryClient.invalidateQueries({ queryKey: ["projects"] });
-                }}
-              />
+              <div className="flex items-center gap-2">
+                <ImportProjectDialog />
+                <ProjectCreateDialog
+                  onCreated={() => {
+                    void queryClient.invalidateQueries({ queryKey: ["projects"] });
+                  }}
+                />
+              </div>
             </div>
 
             {isLoading && (

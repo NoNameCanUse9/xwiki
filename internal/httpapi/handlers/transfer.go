@@ -79,6 +79,26 @@ func (h *TransferHandler) Import(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// ImportRepo handles POST /api/v1/import/repo?name=...&url=...（clone 远程仓库为新项目）。
+func (h *TransferHandler) ImportRepo(w http.ResponseWriter, r *http.Request) {
+	name := r.URL.Query().Get("name")
+	url := r.URL.Query().Get("url")
+	if name == "" || url == "" {
+		response.WriteError(w, r, http.StatusBadRequest, "invalid_import", "name and url query params required")
+		return
+	}
+	res, err := h.svc.ImportRepo(r.Context(), name, url)
+	if err != nil {
+		h.writeError(w, r, err)
+		return
+	}
+	_ = h.agentSvc.Audit(r.Context(), "user", middleware.ActorID(r), res.Project.ID,
+		"import.repo", "", url, request.RequestID(r))
+	response.WriteJSON(w, http.StatusCreated, map[string]any{
+		"project": res.Project, "commits": res.Commits,
+	})
+}
+
 // ImportBundle handles POST /api/v1/import/bundle?name=...
 func (h *TransferHandler) ImportBundle(w http.ResponseWriter, r *http.Request) {
 	name := r.URL.Query().Get("name")

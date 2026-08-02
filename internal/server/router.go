@@ -74,8 +74,12 @@ func NewRouter(cfg *config.Config, log *slog.Logger, db *sql.DB, users *user.Sto
 				r.Post("/password", h.Password)
 			})
 		})
-		r.Post("/import/bundle", xh.ImportBundle)
-		r.Route("/users", func(r chi.Router) {
+		    		r.Group(func(r chi.Router) {
+    			r.Use(middleware.SessionAuth(authSvc))
+    			r.Post("/import/bundle", xh.ImportBundle)
+    			r.Post("/import/repo", xh.ImportRepo)
+    		})
+r.Route("/users", func(r chi.Router) {
 			r.Group(func(r chi.Router) {
 				r.Use(middleware.SessionAuth(authSvc))
 				r.Use(middleware.AdminOnly)
