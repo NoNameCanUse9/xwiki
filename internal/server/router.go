@@ -15,11 +15,12 @@ import (
 	"agentdocs/internal/httpapi/handlers"
 	"agentdocs/internal/httpapi/middleware"
 	"agentdocs/internal/httpapi/response"
+	"agentdocs/internal/project"
 	"agentdocs/internal/user"
 	"agentdocs/web"
 )
 
-func NewRouter(cfg *config.Config, log *slog.Logger, db *sql.DB, users *user.Store, authSvc *auth.Service) http.Handler {
+func NewRouter(cfg *config.Config, log *slog.Logger, db *sql.DB, users *user.Store, authSvc *auth.Service, projectsSvc *project.Service) http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(middleware.RequestID)
@@ -34,6 +35,7 @@ func NewRouter(cfg *config.Config, log *slog.Logger, db *sql.DB, users *user.Sto
 	}))
 
 	h := handlers.NewAuthHandler(cfg, authSvc, users, log)
+	ph := handlers.NewProjectHandler(cfg, projectsSvc, log)
 
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		response.WriteJSON(w, http.StatusOK, map[string]any{"status": "ok"})
@@ -57,6 +59,15 @@ func NewRouter(cfg *config.Config, log *slog.Logger, db *sql.DB, users *user.Sto
 				r.Use(middleware.SessionAuth(authSvc))
 				r.Get("/me", h.Me)
 				r.Post("/password", h.Password)
+			})
+		})
+		r.Route("/projects", func(r chi.Router) {
+			r.Group(func(r chi.Router) {
+				r.Use(middleware.SessionAuth(authSvc))
+				r.Post("/", ph.Create)
+				r.Get("/", ph.List)
+				r.Get("/{id}", ph.Get)
+				r.Post("/{id}/archive", ph.Archive)
 			})
 		})
 	})

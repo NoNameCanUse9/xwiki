@@ -12,6 +12,7 @@ import (
 
 	"agentdocs/internal/auth"
 	"agentdocs/internal/config"
+	"agentdocs/internal/project"
 	"agentdocs/internal/platform/clock"
 	"agentdocs/internal/platform/id"
 	"agentdocs/internal/server"
@@ -25,9 +26,10 @@ type App struct {
 	log     *slog.Logger
 	db      *sql.DB
 	clock   clock.Clock
-	users   *user.Store
-	authSvc *auth.Service
-	handler http.Handler
+	users      *user.Store
+	authSvc    *auth.Service
+	projectsSvc *project.Service
+	handler    http.Handler
 }
 
 func New(cfg *config.Config) (*App, error) {
@@ -39,10 +41,11 @@ func New(cfg *config.Config) (*App, error) {
 	clk := clock.Real{}
 	users := user.NewStore(db)
 	authSvc := auth.NewService(db, clk, cfg.SessionTTL)
-	handler := server.NewRouter(cfg, log, db, users, authSvc)
+	projectsSvc := project.NewService(db, cfg.DataDir, clk)
+	handler := server.NewRouter(cfg, log, db, users, authSvc, projectsSvc)
 	return &App{
 		cfg: cfg, log: log, db: db, clock: clk,
-		users: users, authSvc: authSvc, handler: handler,
+		users: users, authSvc: authSvc, projectsSvc: projectsSvc, handler: handler,
 	}, nil
 }
 

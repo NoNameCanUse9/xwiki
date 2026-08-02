@@ -36,3 +36,12 @@ HTTP 层（internal/httpapi）→ 服务层（internal/auth、internal/app）→
 - Cookie：HttpOnly + SameSite=Lax（生产加 Secure）
 - 请求体大小限制；未知字段拒绝
 - 不记录 Token、密码、会话内容（spec §25）
+
+## 项目与 Git 仓库（阶段二）
+
+- 分层：internal/project（store → repo → service），HTTP 处理器 internal/httpapi/handlers/projects.go
+- 一项目一仓库：data/repos/<projectID>/repo（bare），SQLite projects 表只存元数据与相对路径
+- 初始化：bare init + plumbing（hash-object → mktree → commit-tree → update-ref refs/heads/main）写 README 初始提交，不引入 worktree（阶段四使用）
+- 归档：软归档（archived_at 时间戳，COALESCE 幂等），不删除仓库
+- 表：projects（id/name 唯一/description/repo_dir/archived_at/created_at/updated_at）
+- 仓库命令全部带 --git-dir 绝对路径 + 固定 author/committer 身份，不依赖 cwd

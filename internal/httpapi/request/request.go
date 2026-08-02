@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+
+	"github.com/go-chi/chi/v5"
 )
 
 type ctxKey int
@@ -34,4 +36,9 @@ func DecodeJSON(w http.ResponseWriter, r *http.Request, dst any, maxBytes int64)
 		return fmt.Errorf("invalid JSON body")
 	}
 	return nil
+}
+
+// PathParam returns a chi URL path parameter.
+func PathParam(r *http.Request, key string) string {
+	return chi.URLParam(r, key)
 }

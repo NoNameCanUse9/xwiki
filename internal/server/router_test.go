@@ -12,12 +12,18 @@ import (
 
 	"agentdocs/internal/auth"
 	"agentdocs/internal/config"
+	"agentdocs/internal/project"
 	"agentdocs/internal/platform/clock"
 	"agentdocs/internal/store/sqlite"
 	"agentdocs/internal/user"
 )
 
 func newTestRouter(t *testing.T) http.Handler {
+	h, _ := newTestRouterWithService(t)
+	return h
+}
+
+func newTestRouterWithService(t *testing.T) (http.Handler, *project.Service) {
 	t.Helper()
 	cfg := config.Load()
 	cfg.DataDir = t.TempDir()
@@ -28,8 +34,22 @@ func newTestRouter(t *testing.T) http.Handler {
 	t.Cleanup(func() { db.Close() })
 	users := user.NewStore(db)
 	authSvc := auth.NewService(db, clock.Real{}, 24*time.Hour)
+	projectsSvc := project.NewService(db, cfg.DataDir, clock.Real{})
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	return NewRouter(cfg, log, db, users, authSvc)
+
+	// Seed the admin user used by loginAndGetCookie.
+	now := time.Now().UTC()
+	hash, err := auth.HashPassword("secret123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := users.Create(t.Context(), &user.User{
+		ID: "usr_admin", Username: "admin", DisplayName: "Admin",
+		PasswordHash: hash, IsAdmin: true, CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return NewRouter(cfg, log, db, users, authSvc, projectsSvc), projectsSvc
 }
 
 func TestHealthAndReady(t *testing.T) {

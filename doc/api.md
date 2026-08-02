@@ -41,3 +41,42 @@ curl -c /tmp/cj.txt -X POST http://localhost:8080/api/v1/auth/login \
   -H 'Content-Type: application/json' -d '{"username":"admin","password":"secret123"}'
 curl -b /tmp/cj.txt http://localhost:8080/api/v1/auth/me
 ```
+---
+
+# 项目 API（阶段二）
+
+全部项目端点需登录（未认证 → 401 authentication_required）。统一错误信封不变。
+
+## POST /api/v1/projects
+
+请求：{"name":"docs-site","description":"产品文档"}
+
+- 201 {"project":{id,name,description,repo_dir,archived,created_at,updated_at}}
+- 400 invalid_project_name（1-64 位小写字母/数字/单个连字符）或 validation_failed
+- 409 project_name_conflict（同名项目已存在）
+
+创建时自动初始化独立 bare 仓库（data/repos/<id>/repo）并写入 README 初始提交。
+
+## GET /api/v1/projects
+
+- 200 {"projects":[...]}（含已归档，按 created_at 倒序）
+
+## GET /api/v1/projects/{id}
+
+- 200 {"project":{...}}
+- 404 project_not_found
+
+## POST /api/v1/projects/{id}/archive
+
+- 200 {"project":{...,"archived":true}}（幂等：重复归档保持原时间戳）
+- 404 project_not_found
+
+## 错误码（本阶段新增）
+
+invalid_project_name / project_name_conflict / project_not_found
+
+## curl 示例
+
+curl -c /tmp/cj.txt -X POST http://localhost:8080/api/v1/auth/login -H 'Content-Type: application/json' -d '{"username":"admin","password":"secret123"}'
+curl -b /tmp/cj.txt -X POST http://localhost:8080/api/v1/projects -H 'Content-Type: application/json' -d '{"name":"docs-site"}'
+curl -b /tmp/cj.txt http://localhost:8080/api/v1/projects
