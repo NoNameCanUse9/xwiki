@@ -1,9 +1,20 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
-import { ArrowLeft, BookOpen, FolderGit2 } from "lucide-react";
+import { ArrowLeft, BookOpen, FolderGit2, History, RotateCcw } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { getProject } from "@/lib/api/projects";
 import { getHome } from "@/lib/api/docs";
+import {
+  getCommitDiff,
+  listCommits,
+  revertCommit,
+  type CommitSummary,
+} from "@/lib/api/history";
+
+function shortSha(sha: string): string {
+  return sha.slice(0, 8);
+}
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString("zh-CN", {
@@ -11,6 +22,62 @@ function formatDate(iso: string): string {
     month: "2-digit",
     day: "2-digit",
   });
+}
+
+function CommitRow({ projectId, commit }: { projectId: string; commit: CommitSummary }) {
+  const queryClient = useQueryClient();
+  const { data } = useQuery({
+    queryKey: ["diff", projectId, commit.sha],
+    queryFn: () => getCommitDiff(projectId, commit.sha, "numstat"),
+  });
+
+  const onRevert = async () => {
+    if (!window.confirm(`确认回滚提交 ${shortSha(commit.sha)}？将创建一个新提交。`)) {
+      return;
+    }
+    try {
+      await revertCommit(projectId, commit.sha);
+      toast.success("已回滚");
+      await queryClient.invalidateQueries({ queryKey: ["commits"] });
+      await queryClient.invalidateQueries({ queryKey: ["docs"] });
+      await queryClient.invalidateQueries({ queryKey: ["tree"] });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "回滚失败");
+    }
+  };
+
+  return (
+    <div className="space-y-2 border-b border-[var(--color-rule)] py-3 last:border-b-0">
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <p className="truncate font-mono text-xs text-[var(--color-accent)]">
+            {shortSha(commit.sha)}
+          </p>
+          <p className="truncate text-sm text-[var(--color-ink)]">{commit.message}</p>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <span className="mono-label text-[var(--color-ink-3)]">
+            {formatDate(commit.date)}
+          </span>
+          <Button variant="ghost" size="sm" onClick={() => void onRevert()} className="gap-1.5 text-[var(--color-ink-3)]">
+            <RotateCcw className="size-3.5" />
+            回滚
+          </Button>
+        </div>
+      </div>
+      {data && data.stats.length > 0 && (
+        <div className="space-y-0.5 pl-1">
+          {data.stats.map((s) => (
+            <p key={s.path} className="mono-label !normal-case text-[var(--color-ink-3)]">
+              {s.path}{" "}
+              <span className="text-[oklch(55%_0.13_145)]">+{s.added}</span>{" "}
+              <span className="text-[var(--color-destructive)]">-{s.deleted}</span>
+            </p>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default function ProjectDetailPage() {
@@ -28,6 +95,12 @@ export default function ProjectDetailPage() {
     enabled: id.length > 0,
   });
   const homeHtml = homeQuery.data?.content ?? "";
+
+  const commitsQuery = useQuery({
+    queryKey: ["commits", id],
+    queryFn: () => listCommits(id, 5),
+    enabled: id.length > 0,
+  });
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -124,6 +197,30 @@ export default function ProjectDetailPage() {
                       </p>
                     </div>
                   )
+                )}
+              </section>
+
+              <section className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <p className="mono-label text-[var(--color-ink-3)]">
+                    recent commits
+                  </p>
+                  <History className="size-4 text-[var(--color-ink-3)]" />
+                </div>
+                {commitsQuery.isLoading && (
+                  <p className="mono-label text-[var(--color-ink-3)]">loading…</p>
+                )}
+                {commitsQuery.data && (
+                  <div className="hairline-panel px-5">
+                    {commitsQuery.data.commits.length === 0 && (
+                      <p className="py-6 text-center text-sm text-[var(--color-ink-2)]">
+                        还没有提交
+                      </p>
+                    )}
+                    {commitsQuery.data.commits.map((c) => (
+                      <CommitRow key={c.sha} projectId={project.id} commit={c} />
+                    ))}
+                  </div>
                 )}
               </section>
             </>

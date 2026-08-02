@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, ChevronRight, FileText, Folder, FolderOpen, Pencil, RefreshCw } from "lucide-react";
+import { ArrowLeft, ChevronRight, FileText, Folder, FolderOpen, History, Pencil, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { getRevision, submitChangeset } from "@/lib/api/changesets";
+import { fileHistory } from "@/lib/api/history";
 import { getHome, getPage, getTree, type TreeEntry } from "@/lib/api/docs";
 
 function dirOf(filePath: string): string {
@@ -114,6 +115,7 @@ export default function DocsViewerPage() {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const [saving, setSaving] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
 
   const showHome = !filePath;
 
@@ -146,6 +148,12 @@ export default function DocsViewerPage() {
     queryKey: ["docs", "page", id, filePath],
     queryFn: () => getPage(id, filePath),
     enabled: !showHome,
+  });
+
+  const historyQuery = useQuery({
+    queryKey: ["history", id, filePath],
+    queryFn: () => fileHistory(id, filePath),
+    enabled: showHistory && !showHome,
   });
 
   const toggleDir = (entry: TreeEntry) => {
@@ -270,9 +278,44 @@ export default function DocsViewerPage() {
                   <Pencil className="size-3.5" />
                   编辑
                 </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="gap-2 text-[var(--color-ink-3)]"
+                  onClick={() => setShowHistory((v) => !v)}
+                >
+                  <History className="size-3.5" />
+                  历史
+                </Button>
                 <span className="mono-label text-[var(--color-ink-3)]">
                   {filePath}
                 </span>
+              </div>
+            )}
+            {showHistory && !editing && (
+              <div className="hairline-panel mt-4 px-5">
+                <p className="mono-label py-3 text-[var(--color-ink-3)]">
+                  history · {filePath}
+                </p>
+                {historyQuery.isLoading && (
+                  <p className="mono-label pb-3 text-[var(--color-ink-3)]">loading…</p>
+                )}
+                {historyQuery.data?.commits.map((c) => (
+                  <div
+                    key={c.sha}
+                    className="flex items-center justify-between gap-3 border-t border-[var(--color-rule)] py-2.5"
+                  >
+                    <p className="truncate font-mono text-xs text-[var(--color-accent)]">
+                      {c.sha.slice(0, 8)}
+                    </p>
+                    <p className="min-w-0 flex-1 truncate text-sm text-[var(--color-ink)]">
+                      {c.message}
+                    </p>
+                    <p className="mono-label shrink-0 text-[var(--color-ink-3)]">
+                      {new Date(c.date).toLocaleDateString("zh-CN")}
+                    </p>
+                  </div>
+                ))}
               </div>
             )}
             {editing && (

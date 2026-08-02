@@ -61,3 +61,9 @@ HTTP 层（internal/httpapi）→ 服务层（internal/auth、internal/app）→
 - 并发：进程内 per-project 互斥锁；跨实例由 CAS 兜底
 - 锁粒度：internal/project/changeset.go（projectLocks sync.Map）
 - revision = HEAD commit sha；dry-run 只算树不写 ref
+
+## 历史与 Diff（阶段五）
+
+- 只读：log（%H%x1f 分隔）/ show --name-status / log --follow / show --numstat|--patch
+- Revert：worktree + reverse-apply（git apply -R，先 --check 预检），通过后走阶段四 CAS 提交管线；原提交永不改写
+- patch 输出用原始字节读取（TrimSpace 会破坏 diff 语义）

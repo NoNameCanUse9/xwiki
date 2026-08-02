@@ -140,3 +140,39 @@ invalid_doc_path / invalid_format / doc_not_found / doc_too_large
 ## 错误码（本阶段新增）
 
 invalid_changeset / revision_conflict / project_archived
+
+---
+
+# 历史与 Diff API（阶段五）
+
+需登录。历史包含所有写入（API 与网页同一提交流）。
+
+## GET /api/v1/projects/{id}/commits?limit=20&offset=0
+
+- 200 `{"commits":[{"sha","message","author","date"}]}`（倒序；limit ≤ 100）
+
+## GET /api/v1/projects/{id}/commits/{sha}
+
+- 200 `{"commit":{"sha","message","author","date","files":[{"status":"A|M|D|R","path"}]}}`
+- 404 commit_not_found
+
+## GET /api/v1/projects/{id}/files/history/{path}
+
+- 200 `{"path","commits":[...]}`（该路径的全部提交，含重命名追踪）
+
+## GET /api/v1/projects/{id}/commits/{sha}/diff?format=numstat|patch
+
+- numstat：200 `{"sha","format","stats":[{"path","added","deleted"}]}`
+- patch：200 `{"sha","format","patch":"diff --git ..."}`（≤ 1 MiB）
+- 404 commit_not_found
+
+## POST /api/v1/projects/{id}/commits/{sha}/revert
+
+请求：`{"message":"可选"}` → 200 `{"commit":{"sha","message"}}`
+
+- 创建新提交回滚目标提交（原历史保留）；冲突 → 409 revert_conflict
+- 404 commit_not_found · 410 project_archived
+
+## 错误码（本阶段新增）
+
+commit_not_found / revert_conflict

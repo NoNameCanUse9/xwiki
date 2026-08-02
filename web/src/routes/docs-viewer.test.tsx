@@ -7,6 +7,7 @@ import { Toaster } from "sonner";
 import DocsViewerPage from "./docs-viewer";
 import * as docsApi from "@/lib/api/docs";
 import * as changesetsApi from "@/lib/api/changesets";
+import * as historyApi from "@/lib/api/history";
 
 vi.mock("@/lib/api/docs", () => ({
   getTree: vi.fn(),
@@ -17,6 +18,10 @@ vi.mock("@/lib/api/docs", () => ({
 vi.mock("@/lib/api/changesets", () => ({
   getRevision: vi.fn(),
   submitChangeset: vi.fn(),
+}));
+
+vi.mock("@/lib/api/history", () => ({
+  fileHistory: vi.fn(),
 }));
 
 function renderPage(path = "/projects/prj_1/docs") {
@@ -146,6 +151,29 @@ describe("DocsViewerPage", () => {
         changes: [{ op: "update", path: "guide.md", content: "# Updated\n" }],
       }),
     );
+  });
+
+  it("shows the file history panel", async () => {
+    vi.mocked(docsApi.getPage).mockResolvedValue({
+      path: "guide.md",
+      format: "html",
+      content: "<h1>Guide</h1>",
+    });
+    vi.mocked(docsApi.getTree).mockResolvedValue({
+      path: "",
+      tree: [{ name: "guide.md", type: "blob", path: "guide.md" }],
+    });
+    vi.mocked(historyApi.fileHistory).mockResolvedValue({
+      path: "guide.md",
+      commits: [
+        { sha: "a".repeat(40), message: "first", author: "x", date: "2026-08-02T00:00:00Z" },
+      ],
+    });
+    const user = userEvent.setup();
+    renderPage("/projects/prj_1/docs/guide.md");
+    await user.click(await screen.findByRole("button", { name: /历史/ }));
+    expect(await screen.findByText("first")).toBeInTheDocument();
+    expect(historyApi.fileHistory).toHaveBeenCalledWith("prj_1", "guide.md");
   });
 
   it("shows a conflict toast on 409", async () => {
