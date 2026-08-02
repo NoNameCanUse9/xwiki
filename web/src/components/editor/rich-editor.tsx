@@ -400,6 +400,33 @@ export default function RichEditor({
         if (event.key === "Escape") setSlashOpen(false);
         return false;
       },
+      handlePaste: (view, event) => {
+        const items = event.clipboardData?.items;
+        if (!items) return false;
+        for (const item of items) {
+          if (item.type.startsWith("image/")) {
+            const file = item.getAsFile();
+            if (!file) continue;
+            if (file.size > 2 * 1024 * 1024) {
+              // eslint-disable-next-line no-alert
+              window.alert("图片超过 2 MiB，无法内联粘贴");
+              return true;
+            }
+            const reader = new FileReader();
+            reader.onload = () => {
+              const src = reader.result as string;
+              view.dispatch(
+                view.state.tr.replaceSelectionWith(
+                  view.state.schema.nodes.image.create({ src }),
+                ),
+              );
+            };
+            reader.readAsDataURL(file);
+            return true;
+          }
+        }
+        return false;
+      },
     },
     onUpdate: ({ editor }) => {
       onChange(
