@@ -8,7 +8,7 @@
 
 | # | 计划文件 | 对应 spec 阶段 | 目标 | 依赖 | 状态 |
 |---|---------|--------------|------|------|------|
-| 01 | `2026-08-02-agentdocs-phase-01-skeleton.md` | 阶段一：项目骨架 | Go 服务骨架、SQLite 迁移、管理员 CLI、登录/会话 API、React+shadcn/ui 登录页、静态资源嵌入、Docker | — | ✅ 可执行 |
+| 01 | `2026-08-02-agentdocs-phase-01-skeleton.md` | 阶段一：项目骨架 | Go 服务骨架、SQLite 迁移、管理员 CLI、登录/会话 API、React+shadcn/ui 登录页、静态资源嵌入、Docker | — | ✅ 已完成 |
 | 02 | （待编写） | 阶段二：项目和 Git 仓库 | 创建项目、一项目一 Git 仓库、README 初始化、项目列表/详情/归档 | 01 | 待编写 |
 | 03 | （待编写） | 阶段三：文档读取 | Git Tree、Markdown 读取与渲染、文档树、面包屑、项目首页 | 02 | 待编写 |
 | 04 | （待编写） | 阶段四：ChangeSet 写入 | 项目锁、临时 Worktree、create/update/delete/move、dry-run、原子 update-ref、409 冲突 | 03 | 待编写 |
