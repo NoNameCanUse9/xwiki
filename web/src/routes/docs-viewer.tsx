@@ -505,7 +505,20 @@ export default function DocsViewerPage() {
             workspace
           </Link>
         </div>
-        <div className="border-b border-[var(--color-rule)] p-2">
+                <div className="flex-1 overflow-y-auto p-2">
+          <DirNode
+            projectId={id}
+            dir=""
+            depth={0}
+            expandedDirs={expandedDirs}
+            onToggle={toggleDir}
+            onOpen={openEntry}
+            onFileDeleted={(p) => {
+              if (filePath === p) navigate(`/projects/${id}/docs`);
+            }}
+          />
+        </div>
+        <div className="border-t border-[var(--color-rule)] p-2">
           <NewPageForm projectId={id} />
           {sidebarItems.length > 0 && (
             <nav className="mt-2 space-y-0.5 border-t border-[var(--color-rule)] pt-2">
@@ -523,36 +536,20 @@ export default function DocsViewerPage() {
             </nav>
           )}
         </div>
-        <div className="flex-1 overflow-y-auto p-2">
-          <DirNode
-            projectId={id}
-            dir=""
-            depth={0}
-            expandedDirs={expandedDirs}
-            onToggle={toggleDir}
-            onOpen={openEntry}
-            onFileDeleted={(p) => {
-              if (filePath === p) navigate(`/projects/${id}/docs`);
-            }}
-          />
-        
-          <div className="border-t border-[var(--color-rule)]">
-            {!showHome && !editing && (
-              <>
-                <TocPanel entries={tocEntries} />
-                <VersionPanel
-                  projectId={id}
-                  filePath={filePath}
-                  currentVersion={atSha}
-                  onSelect={selectVersion}
-                />
-              </>
-            )}
+        {!showHome && !editing && (
+          <div className="border-t border-[var(--color-rule)] p-2">
+            <TocPanel entries={tocEntries} />
+            <VersionPanel
+              projectId={id}
+              filePath={filePath}
+              currentVersion={atSha}
+              onSelect={selectVersion}
+            />
           </div>
-</div>
-      </aside>
+        )}
+          </aside>
 
-      <CommandPalette projectId={id} />
+          <CommandPalette projectId={id} />
       <div className="flex w-full flex-col">
         <header className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-rule)] px-6 py-3">
           <Breadcrumbs projectId={id} filePath={filePath} />
