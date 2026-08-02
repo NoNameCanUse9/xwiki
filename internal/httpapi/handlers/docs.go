@@ -153,7 +153,12 @@ func (h *DocsHandler) Page(w http.ResponseWriter, r *http.Request) {
 		response.WriteError(w, r, http.StatusInternalServerError, "internal_error", "could not resolve branch")
 		return
 	}
-	content, err := repo.ReadBlob(r.Context(), branch, filePath)
+	// Historical version: ?at=<commit sha> reads the file as of that commit.
+	rev := branch
+	if at := r.URL.Query().Get("at"); at != "" {
+		rev = at
+	}
+	content, err := repo.ReadBlobAt(r.Context(), rev, filePath)
 	if err != nil {
 		response.WriteError(w, r, http.StatusNotFound, "doc_not_found", "document not found")
 		return

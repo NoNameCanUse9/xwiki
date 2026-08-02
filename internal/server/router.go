@@ -108,6 +108,7 @@ func NewRouter(cfg *config.Config, log *slog.Logger, db *sql.DB, users *user.Sto
 				r.Get("/{id}/revision", ch.Revision)
 				r.Post("/{id}/changesets", ch.Apply)
 				r.Get("/{id}/search", sh.Search)
+			r.Get("/{id}/backlinks", sh.Backlinks)
 				r.Get("/{id}/export.zip", xh.ExportZip)
 				r.Get("/{id}/export.bundle", xh.ExportBundle)
 				r.Post("/{id}/import", xh.Import)

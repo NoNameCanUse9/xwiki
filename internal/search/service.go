@@ -4,11 +4,15 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"agentdocs/internal/platform/clock"
 	"agentdocs/internal/project"
 )
+
+// wikiLinkPattern matches [[path]] and [[path|label]] inside markdown sources.
+var wikiLinkPattern = regexp.MustCompile(`\[\[([^\]|]+)(?:\|[^\]]+)?\]\]`)
 
 // ReindexStats reports what a reindex pass changed.
 type ReindexStats struct {
@@ -97,6 +101,10 @@ func (s *Service) ReindexProject(ctx context.Context, projectID string) (*Reinde
 	if err := walk(""); err != nil {
 		return nil, err
 	}
+	// Rebuild the wiki-link index (backlinks) from every indexed markdown file.
+	if err := s.rebuildLinks(ctx, repo, branch, projectID); err != nil {
+		return nil, err
+	}
 	// Remove indexed paths that no longer exist in the tree.
 	existing, err := s.indexedPaths(ctx, projectID)
 	if err != nil {
@@ -128,6 +136,53 @@ func (s *Service) ReindexAll(ctx context.Context) (map[string]*ReindexStats, err
 		out[p.ID] = stats
 	}
 	return out, nil
+}
+
+// rebuildLinks scans all markdown sources for [[wiki links]] and stores the
+// (source -> targets) mapping used by the backlinks endpoint.
+func (s *Service) rebuildLinks(ctx context.Context, repo *project.Repo, branch, projectID string) error {
+	links := map[string][]string{}
+	var walk func(dir string) error
+	walk = func(dir string) error {
+		entries, err := repo.ListTree(ctx, branch, dir)
+		if err != nil {
+			return err
+		}
+		for _, e := range entries {
+			if e.Type == "tree" {
+				if err := walk(e.Path); err != nil {
+					return err
+				}
+				continue
+			}
+			if !strings.HasSuffix(e.Path, ".md") && !strings.HasSuffix(e.Path, ".markdown") {
+				continue
+			}
+			blob, err := repo.ReadBlob(ctx, branch, e.Path)
+			if err != nil || len(blob) > s.maxBlob {
+				continue
+			}
+			content := string(blob)
+			seen := map[string]bool{}
+			for _, m := range wikiLinkPattern.FindAllStringSubmatch(content, -1) {
+				target := m[1]
+				if !seen[target] {
+					seen[target] = true
+					links[e.Path] = append(links[e.Path], target)
+				}
+			}
+		}
+		return nil
+	}
+	if err := walk(""); err != nil {
+		return err
+	}
+	return s.store.ReplaceLinks(ctx, projectID, links)
+}
+
+// Backlinks returns pages that link to targetPath within the project.
+func (s *Service) Backlinks(ctx context.Context, projectID, targetPath string) ([]Backlink, error) {
+	return s.store.Backlinks(ctx, projectID, targetPath)
 }
 
 func (s *Service) indexedPaths(ctx context.Context, projectID string) ([]string, error) {

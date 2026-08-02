@@ -179,6 +179,15 @@ func (r *Repo) ListTree(ctx context.Context, branch, path string) ([]TreeEntry, 
 	return entries, nil
 }
 
+// ReadBlobAt returns the raw content of a file as of a specific commit.
+func (r *Repo) ReadBlobAt(ctx context.Context, rev, path string) ([]byte, error) {
+	out, err := gitOutput(ctx, r.Dir, "cat-file", "blob", rev+":"+path)
+	if err != nil {
+		return nil, fmt.Errorf("cat-file %s@%s: %w", path, rev, err)
+	}
+	return []byte(out), nil
+}
+
 // ReadBlob returns the raw content of a file at the given repository path.
 func (r *Repo) ReadBlob(ctx context.Context, branch, path string) ([]byte, error) {
 	out, err := gitOutput(ctx, r.Dir, "cat-file", "blob", branch+":"+path)

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, ChevronRight, FileText, Folder, FolderOpen, History, Pencil, RefreshCw } from "lucide-react";
+import { ArrowLeft, ChevronRight, CornerDownRight, FileText, Folder, FolderOpen, History, Pencil, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { getRevision, submitChangeset } from "@/lib/api/changesets";
@@ -13,6 +13,14 @@ import RichEditor from "@/components/editor/rich-editor";
 import { FileRowActions, NewPageForm } from "@/components/editor/file-actions";
 import AttachmentsPanel from "@/components/editor/attachments";
 import { enhanceRenderedMarkdown } from "@/components/editor/markdown-render";
+import {
+  extractToc,
+  TocPanel,
+  VersionPanel,
+  useVersionedPage,
+  type TocEntry,
+} from "@/components/editor/version-toc";
+import { backlinks } from "@/lib/api/search";
 
 function dirOf(filePath: string): string {
   const i = filePath.lastIndexOf("/");
@@ -54,10 +62,23 @@ function Breadcrumbs({ projectId, filePath }: { projectId: string; filePath: str
   );
 }
 
-function MarkdownArticle({ html, onNavigate }: { html: string; onNavigate: (path: string) => void }) {
+function MarkdownArticle({
+  html,
+  onNavigate,
+  onToc,
+}: {
+  html: string;
+  onNavigate: (path: string) => void;
+  onToc: (entries: TocEntry[]) => void;
+}) {
   const ref = useRef<HTMLElement>(null);
   useEffect(() => {
-    if (ref.current) void enhanceRenderedMarkdown(ref.current);
+    if (ref.current) {
+      void enhanceRenderedMarkdown(ref.current).then(() => {
+        onToc(extractToc(ref.current!));
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [html]);
   return (
     <article
@@ -74,6 +95,43 @@ function MarkdownArticle({ html, onNavigate }: { html: string; onNavigate: (path
         }
       }}
     />
+  );
+}
+
+function BacklinksPanel({ projectId, filePath }: { projectId: string; filePath: string }) {
+  const navigate = useNavigate();
+  const { data } = useQuery({
+    queryKey: ["backlinks", projectId, filePath],
+    queryFn: () => backlinks(projectId, filePath),
+    enabled: filePath.length > 0,
+  });
+  const items = data?.backlinks ?? [];
+  return (
+    <section className="space-y-3">
+      <p className="mono-label flex items-center gap-2 text-[var(--color-ink-3)]">
+        <CornerDownRight className="size-3.5" />
+        backlinks · {items.length}
+      </p>
+      {items.length === 0 ? (
+        <p className="hairline-panel px-4 py-5 text-center text-sm text-[var(--color-ink-2)]">
+          暂无其他页面引用本文档
+        </p>
+      ) : (
+        <div className="hairline-panel divide-y divide-[var(--color-rule)] px-4">
+          {items.map((b) => (
+            <button
+              key={b.source}
+              type="button"
+              onClick={() => navigate(`/projects/${projectId}/docs/${b.source}`)}
+              className="block w-full py-2.5 text-left hover:bg-[var(--color-surface-accent)]"
+            >
+              <span className="font-mono text-xs text-[var(--color-accent)]">{b.source}</span>
+              <span className="ml-3 text-sm text-[var(--color-ink-2)]">{b.snippet}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -163,6 +221,8 @@ export default function DocsViewerPage() {
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  const [atSha, setAtSha] = useState<string | null>(null);
+  const [tocEntries, setTocEntries] = useState<TocEntry[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<Array<{ path: string; snippet: string }> | null>(null);
   const [searching, setSearching] = useState(false);
@@ -211,11 +271,7 @@ export default function DocsViewerPage() {
     enabled: showHome,
   });
 
-  const pageQuery = useQuery({
-    queryKey: ["docs", "page", id, filePath],
-    queryFn: () => getPage(id, filePath),
-    enabled: !showHome,
-  });
+  const pageQuery = useVersionedPage(id, filePath, atSha);
 
   const historyQuery = useQuery({
     queryKey: ["history", id, filePath],
@@ -244,6 +300,11 @@ export default function DocsViewerPage() {
     } finally {
       setSearching(false);
     }
+  };
+
+  const selectVersion = (sha: string | null) => {
+    setAtSha(sha);
+    setTocEntries([]);
   };
 
   const openEntry = (entry: TreeEntry) => {
@@ -375,7 +436,21 @@ export default function DocsViewerPage() {
               if (filePath === p) navigate(`/projects/${id}/docs`);
             }}
           />
-        </div>
+        
+          <div className="border-t border-[var(--color-rule)]">
+            {!showHome && !editing && (
+              <>
+                <TocPanel entries={tocEntries} />
+                <VersionPanel
+                  projectId={id}
+                  filePath={filePath}
+                  currentVersion={atSha}
+                  onSelect={selectVersion}
+                />
+              </>
+            )}
+          </div>
+</div>
       </aside>
 
       <CommandPalette projectId={id} />
@@ -450,9 +525,20 @@ export default function DocsViewerPage() {
                 </p>
               </div>
             )}
+            {atSha && (
+              <div className="mb-4 flex items-center justify-between gap-3 rounded-[var(--radius)] border border-[var(--color-accent)] bg-[var(--color-surface-accent)] px-4 py-2.5">
+                <p className="mono-label text-[var(--color-ink-2)]">
+                  viewing historical version {atSha.slice(0, 7)}
+                </p>
+                <Button size="sm" variant="outline" onClick={() => selectVersion(null)}>
+                  返回最新版本
+                </Button>
+              </div>
+            )}
             {content && content.format === "html" && !editing && (
               <MarkdownArticle
                 html={sanitizeHtml(content.content)}
+                onToc={setTocEntries}
                 onNavigate={(href) => {
                   const m = href.match(/^\/projects\/[^/]+\/docs\/(.+)$/);
                   if (m) navigate(`/projects/${id}/docs/${m[1]}`);
@@ -461,6 +547,11 @@ export default function DocsViewerPage() {
             )}
             {content && content.format === "raw" && !editing && (
               <pre className="code-card overflow-x-auto p-4">{content.content}</pre>
+            )}
+            {!showHome && !editing && (
+              <div className="mt-10">
+                <BacklinksPanel projectId={id} filePath={filePath} />
+              </div>
             )}
             {!showHome && !editing && (
               <div className="mt-10">

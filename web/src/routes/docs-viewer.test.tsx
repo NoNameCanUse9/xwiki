@@ -24,6 +24,24 @@ vi.mock("@/lib/api/history", () => ({
   fileHistory: vi.fn(),
 }));
 
+vi.mock("@/lib/api/search", () => ({
+  backlinks: vi.fn(),
+  searchProject: vi.fn(),
+}));
+
+// jsdom 下真实 mermaid 渲染不稳定——mock 成同步空操作。
+vi.mock("mermaid", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("mermaid")>();
+  return {
+    ...actual,
+    default: {
+      ...actual.default,
+      initialize: vi.fn(),
+      render: vi.fn().mockResolvedValue({ svg: "<svg>mmd</svg>" }),
+    },
+  };
+});
+
 function renderPage(path = "/projects/prj_1/docs") {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -41,7 +59,11 @@ function renderPage(path = "/projects/prj_1/docs") {
 }
 
 describe("DocsViewerPage", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // _sidebar.md 查询默认失败（多数测试不关心侧栏菜单）
+    vi.mocked(docsApi.getPage).mockRejectedValue(new Error("no sidebar"));
+  });
 
   it("renders the project home at the docs root", async () => {
     vi.mocked(docsApi.getHome).mockResolvedValue({
@@ -51,7 +73,8 @@ describe("DocsViewerPage", () => {
     });
     vi.mocked(docsApi.getTree).mockResolvedValue({ path: "", tree: [] });
     renderPage();
-    expect(await screen.findByText("docs-site")).toBeInTheDocument();
+    await new Promise((r) => setTimeout(r, 400));
+    expect(screen.queryByText("docs-site")).not.toBeNull();
     expect(docsApi.getHome).toHaveBeenCalledWith("prj_1");
   });
 
@@ -76,7 +99,8 @@ describe("DocsViewerPage", () => {
     const user = userEvent.setup();
     renderPage();
     await user.click(await screen.findByRole("button", { name: "docs" }));
-    expect(await screen.findByRole("button", { name: "guide.md" })).toBeInTheDocument();
+    await new Promise((r) => setTimeout(r, 400));
+    expect(screen.queryByRole("button", { name: "guide.md" })).not.toBeNull();
     expect(docsApi.getTree).toHaveBeenCalledWith("prj_1", "docs");
   });
 
@@ -98,8 +122,9 @@ describe("DocsViewerPage", () => {
     const user = userEvent.setup();
     renderPage();
     await user.click(await screen.findByRole("button", { name: "guide.md" }));
-    expect(await screen.findByText("Guide")).toBeInTheDocument();
-    expect(docsApi.getPage).toHaveBeenCalledWith("prj_1", "guide.md");
+    await new Promise((r) => setTimeout(r, 400));
+    expect(screen.queryAllByText("Guide").length).toBeGreaterThanOrEqual(1);
+    expect(docsApi.getPage).toHaveBeenCalledWith("prj_1", "guide.md", "html", undefined);
     // Breadcrumb shows the file segment.
     expect(screen.getAllByText("guide.md").length).toBeGreaterThan(0);
   });
@@ -108,7 +133,8 @@ describe("DocsViewerPage", () => {
     vi.mocked(docsApi.getPage).mockRejectedValue(new Error("missing"));
     vi.mocked(docsApi.getTree).mockResolvedValue({ path: "", tree: [] });
     renderPage("/projects/prj_1/docs/missing.md");
-    expect(await screen.findByText("文档不存在")).toBeInTheDocument();
+    await new Promise((r) => setTimeout(r, 400));
+    expect(screen.queryByText("文档不存在")).not.toBeNull();
   });
 
   it("edits a file and saves via changeset", async () => {
@@ -176,7 +202,8 @@ describe("DocsViewerPage", () => {
     const user = userEvent.setup();
     renderPage("/projects/prj_1/docs/guide.md");
     await user.click(await screen.findByRole("button", { name: /历史/ }));
-    expect(await screen.findByText("first")).toBeInTheDocument();
+    await new Promise((r) => setTimeout(r, 400));
+    expect(screen.queryByText("first")).not.toBeNull();
     expect(historyApi.fileHistory).toHaveBeenCalledWith("prj_1", "guide.md");
   });
 
@@ -213,7 +240,8 @@ describe("DocsViewerPage", () => {
     await user.click(await screen.findByRole("button", { name: /编辑/ }));
     await screen.findAllByRole("textbox");
     await user.click(screen.getByRole("button", { name: "保存" }));
-    expect(await screen.findByText("文档已被他人修改，请刷新后重试")).toBeInTheDocument();
+    await new Promise((r) => setTimeout(r, 400));
+    expect(screen.queryByText("文档已被他人修改，请刷新后重试")).not.toBeNull();
   });
 });
 
@@ -239,9 +267,11 @@ describe("DocsViewerPage search", () => {
     renderPage();
     await user.type(screen.getByLabelText("搜索文档"), "pineapple");
     await user.click(screen.getByRole("button", { name: "搜索" }));
-    expect(await screen.findByText("docs/keyword.md")).toBeInTheDocument();
+    await new Promise((r) => setTimeout(r, 400));
+    expect(screen.queryByText("docs/keyword.md")).not.toBeNull();
     await user.click(screen.getByRole("button", { name: /docs\/keyword.md/ }));
-    expect(await screen.findByText("K")).toBeInTheDocument();
+    await new Promise((r) => setTimeout(r, 400));
+    expect(screen.queryAllByText("K").length).toBeGreaterThanOrEqual(1);
   });
 });
 
@@ -263,7 +293,8 @@ describe("DocsViewerPage sidebar", () => {
       ],
     });
     renderPage();
-    expect(await screen.findByText("指南")).toBeInTheDocument();
+    await new Promise((r) => setTimeout(r, 400));
+    expect(screen.queryByText("指南")).not.toBeNull();
     expect(screen.getByText("首页")).toBeInTheDocument();
     // _sidebar.md 不显示在树中
     expect(screen.queryByText("_sidebar.md")).not.toBeInTheDocument();

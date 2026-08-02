@@ -22,10 +22,16 @@ export function getTree(projectId: string, dirPath = "") {
   return api<TreeResponse>(`/projects/${encodeURIComponent(projectId)}/docs/tree${q}`);
 }
 
-export function getPage(projectId: string, filePath: string, format: "raw" | "html" = "html") {
-  const q = format === "html" ? "?format=html" : "?format=raw";
+export function getPage(
+  projectId: string,
+  filePath: string,
+  format: "raw" | "html" = "html",
+  at?: string,
+) {
+  const q = new URLSearchParams({ format });
+  if (at) q.set("at", at);
   return api<PageResponse>(
-    `/projects/${encodeURIComponent(projectId)}/docs/pages/${filePath}${q}`,
+    `/projects/${encodeURIComponent(projectId)}/docs/pages/${filePath}?${q.toString()}`,
   );
 }
 
