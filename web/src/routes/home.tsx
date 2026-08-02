@@ -53,10 +53,17 @@ function ProjectCard({ project }: { project: Project }) {
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <Link
-            to={`/projects/${project.id}`}
+            to={`/projects/${project.id}/docs`}
             className="font-display text-base font-semibold text-[var(--color-ink)] hover:text-[var(--color-accent)]"
+            title="阅读文档"
           >
             {project.name}
+          </Link>
+          <Link
+            to={`/projects/${project.id}`}
+            className="mono-label ml-2 text-[var(--color-ink-3)] hover:text-[var(--color-accent)]"
+          >
+            详情
           </Link>
           {project.archived && (
             <span className="mono-label ml-2 inline-block text-[var(--color-ink-3)]">

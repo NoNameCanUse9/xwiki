@@ -135,6 +135,45 @@ function BacklinksPanel({ projectId, filePath }: { projectId: string; filePath: 
   );
 }
 
+function PageIndex({ projectId, onOpen }: { projectId: string; onOpen: (path: string) => void }) {
+  const { data } = useQuery({
+    queryKey: ["page-index", projectId],
+    queryFn: () => getTree(projectId, ""),
+  });
+  const files = (data?.tree ?? []).filter((e) => e.type === "blob" && e.path !== "_sidebar.md");
+  const dirs = (data?.tree ?? []).filter((e) => e.type === "tree");
+  if (files.length === 0 && dirs.length === 0) return null;
+  return (
+    <section className="mb-8 space-y-3">
+      <p className="mono-label text-[var(--color-ink-3)]">pages</p>
+      <div className="grid gap-2 sm:grid-cols-2">
+        {dirs.map((d) => (
+          <button
+            key={d.path}
+            type="button"
+            onClick={() => onOpen(d.path + "/")}
+            className="hairline-panel flex items-center gap-2 px-4 py-2.5 text-left text-sm text-[var(--color-ink-2)] hover:border-[var(--color-rule-2)] hover:text-[var(--color-ink)]"
+          >
+            <Folder className="size-4 text-[var(--color-accent)]" />
+            <span className="truncate">{d.name}/</span>
+          </button>
+        ))}
+        {files.map((f) => (
+          <button
+            key={f.path}
+            type="button"
+            onClick={() => onOpen(f.path)}
+            className="hairline-panel flex items-center gap-2 px-4 py-2.5 text-left text-sm text-[var(--color-ink-2)] hover:border-[var(--color-rule-2)] hover:text-[var(--color-ink)]"
+          >
+            <FileText className="size-4 text-[var(--color-ink-3)]" />
+            <span className="truncate">{f.name}</span>
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 interface DirNodeProps {
   projectId: string;
   dir: string;
@@ -534,6 +573,12 @@ export default function DocsViewerPage() {
                   返回最新版本
                 </Button>
               </div>
+            )}
+            {showHome && !loading && !error && (
+              <PageIndex
+                projectId={id}
+                onOpen={(path) => navigate(`/projects/${id}/docs/${path}`)}
+              />
             )}
             {content && content.format === "html" && !editing && (
               <MarkdownArticle
