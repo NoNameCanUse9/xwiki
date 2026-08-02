@@ -1,0 +1,7 @@
+# Local Pi runtime state
+.atl/
+
+# AgentDocs runtime
+/data/
+/agentdocs
+*.log
