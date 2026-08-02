@@ -6,6 +6,7 @@ export interface ChangeInput {
   op: ChangeOp;
   path: string;
   content?: string;
+  encoding?: "base64";
   new_path?: string;
 }
 

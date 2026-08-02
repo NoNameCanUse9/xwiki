@@ -244,3 +244,28 @@ describe("DocsViewerPage search", () => {
     expect(await screen.findByText("K")).toBeInTheDocument();
   });
 });
+
+describe("DocsViewerPage sidebar", () => {
+  it("renders _sidebar.md menu items and hides the file from the tree", async () => {
+    vi.mocked(docsApi.getHome).mockResolvedValue({
+      path: "README.md", format: "html", content: "<p>x</p>",
+    });
+    vi.mocked(docsApi.getPage).mockResolvedValue({
+      path: "_sidebar.md",
+      format: "raw",
+      content: "- [指南](docs/guide.md)\n- [首页](README.md)\n",
+    });
+    vi.mocked(docsApi.getTree).mockResolvedValue({
+      path: "",
+      tree: [
+        { name: "_sidebar.md", type: "blob", path: "_sidebar.md" },
+        { name: "README.md", type: "blob", path: "README.md" },
+      ],
+    });
+    renderPage();
+    expect(await screen.findByText("指南")).toBeInTheDocument();
+    expect(screen.getByText("首页")).toBeInTheDocument();
+    // _sidebar.md 不显示在树中
+    expect(screen.queryByText("_sidebar.md")).not.toBeInTheDocument();
+  });
+});

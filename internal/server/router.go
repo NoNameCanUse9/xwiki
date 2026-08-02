@@ -43,7 +43,9 @@ func NewRouter(cfg *config.Config, log *slog.Logger, db *sql.DB, users *user.Sto
 	ch := handlers.NewChangesetHandler(cfg, projectsSvc, agentSvc, searchSvc, log)
 	th := handlers.NewTokenHandler(cfg, agentSvc, log)
 	xh := handlers.NewTransferHandler(cfg, projectsSvc, agentSvc, log)
+	ah := handlers.NewAttachmentHandler(cfg, projectsSvc, agentSvc, log)
 	uh := handlers.NewUserHandler(cfg, authSvc, users, log)
+	gh := handlers.NewGitHTTPHandler(projectsSvc, agentSvc, log)
 	hh := handlers.NewHistoryHandler(cfg, projectsSvc, searchSvc, log)
 	sh := handlers.NewSearchHandler(cfg, searchSvc, projectsSvc, agentSvc, log)
 
@@ -106,11 +108,12 @@ func NewRouter(cfg *config.Config, log *slog.Logger, db *sql.DB, users *user.Sto
 				r.Get("/{id}/revision", ch.Revision)
 				r.Post("/{id}/changesets", ch.Apply)
 				r.Get("/{id}/search", sh.Search)
-			r.Get("/{id}/export.zip", xh.ExportZip)
-			r.Get("/{id}/export.bundle", xh.ExportBundle)
-			r.Post("/{id}/import", xh.Import)
-			r.Get("/{id}/audit", th.Audit)
-			r.Get("/{id}/commits", hh.Commits)
+				r.Get("/{id}/export.zip", xh.ExportZip)
+				r.Get("/{id}/export.bundle", xh.ExportBundle)
+				r.Post("/{id}/import", xh.Import)
+				r.Get("/{id}/attachments/*", ah.Download)
+				r.Get("/{id}/audit", th.Audit)
+				r.Get("/{id}/commits", hh.Commits)
 				r.Get("/{id}/commits/{sha}", hh.Commit)
 				r.Get("/{id}/commits/{sha}/diff", hh.Diff)
 				r.Post("/{id}/commits/{sha}/revert", hh.Revert)
@@ -119,6 +122,7 @@ func NewRouter(cfg *config.Config, log *slog.Logger, db *sql.DB, users *user.Sto
 		})
 	})
 
+	r.Handle("/git/{projectID}/*", gh)
 	r.Handle("/*", spaHandler())
 	return r
 }

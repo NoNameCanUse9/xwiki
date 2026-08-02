@@ -11,6 +11,8 @@
 | 01 | `2026-08-02-agentdocs-phase-01-skeleton.md` | 阶段一：项目骨架 | Go 服务骨架、SQLite 迁移、管理员 CLI、登录/会话 API、React+shadcn/ui 登录页、静态资源嵌入、Docker | — | ✅ 已完成 |
 | 02 | `2026-08-02-agentdocs-phase-02-projects.md` | 阶段二：项目和 Git 仓库 | 创建项目、一项目一 Git 仓库、README 初始化、项目列表/详情/归档 | 01 | ✅ 已完成 |
 | 03 | `2026-08-02-agentdocs-phase-03-docs-read.md` | 阶段三：文档读取 | Git Tree、Markdown 读取与渲染、文档树、面包屑、项目首页 | 02 | ✅ 已完成 |
+| E1 | `2026-08-02-agentdocs-editor-enhancement.md` | 编辑器增强 | Tiptap Notion 式编辑器、嵌入组件、wiki 链接、文件操作 | 03 | ✅ 已完成 |
+| E2 | `2026-08-02-agentdocs-otterwiki-align.md` | OtterWiki 对齐 | 附件、Git HTTP、自定义侧栏 | 03 | ✅ 已完成 |
 | 04 | `2026-08-02-agentdocs-phase-04-changesets.md` | 阶段四：ChangeSet 写入 | 项目锁、临时 Worktree、create/update/delete/move、dry-run、原子 update-ref、409 冲突 | 03 | ✅ 已完成 |
 | 05 | `2026-08-02-agentdocs-phase-05-history.md` | 阶段五：历史和 Diff | Commit 列表、文件历史、机器可读 Diff、Revert | 04 | ✅ 已完成 |
 | 06 | `2026-08-02-agentdocs-phase-06-tokens.md` | 阶段六：Agent Token | Token、Scope、项目/路径限制、幂等键、审计日志 | 05 | ✅ 已完成 |

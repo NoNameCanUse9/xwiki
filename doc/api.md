@@ -318,3 +318,26 @@ invalid_import / invalid_upload / bundle_too_large
 
 - `POST /api/v1/projects/{id}/unarchive` → 200 `{"project":{...,"archived":false}}`（幂等；恢复后即可写入）
 - 404 project_not_found
+
+---
+
+# Git HTTP 与附件 API（OtterWiki 对齐）
+
+## Git 智能 HTTP（实验性）
+
+- URL：`http://<host>:8080/git/<projectId>`（标准 smart HTTP 协议）
+- 认证：Basic（任意用户名，password = Agent Token 明文）或 session cookie（push 需 admin）
+- 权限：read scope 可 clone/pull；write scope 可 push；归档项目拒绝 push（410）
+- 用法：任意版本控制客户端 clone/pull/push 直连；push 后的提交立即出现在网页历史与搜索中（同一仓库）
+- 示例：`git clone http://x:<token>@localhost:8080/git/<projectId>`
+
+## 附件
+
+- `GET /api/v1/projects/{id}/attachments/{path}` → 原始字节流（Content-Type 按扩展名映射）
+- 前端：docs-viewer 页面底部附件面板（上传/列表/下载/删除，≤ 5 MiB，存于 `attachments/` 目录）
+- 上传通过 changeset（encoding base64）写入 Git，与其他文档同一历史
+
+## 自定义侧栏
+
+- 仓库根放 `_sidebar.md`：每行 `- [标签](路径)` → 显示为侧栏顶部菜单
+- `_sidebar.md` 自身不出现在文档树中

@@ -11,6 +11,7 @@ import { getHome, getPage, getTree, type TreeEntry } from "@/lib/api/docs";
 import CommandPalette from "@/components/editor/command-palette";
 import RichEditor from "@/components/editor/rich-editor";
 import { FileRowActions, NewPageForm } from "@/components/editor/file-actions";
+import AttachmentsPanel from "@/components/editor/attachments";
 import { enhanceRenderedMarkdown } from "@/components/editor/markdown-render";
 
 function dirOf(filePath: string): string {
@@ -91,6 +92,10 @@ function DirNode({ projectId, dir, depth, expandedDirs, onToggle, onOpen, onFile
     queryKey: ["tree", projectId, dir],
     queryFn: () => getTree(projectId, dir),
     enabled: depth === 0 || expandedDirs.has(dir),
+    select: (res) => ({
+      ...res,
+      tree: res.tree.filter((e) => e.path !== "_sidebar.md"),
+    }),
   });
 
   if (depth > 0 && !expandedDirs.has(dir)) return null;
@@ -182,6 +187,23 @@ export default function DocsViewerPage() {
       return next;
     });
   }, [dirsToLoad]);
+
+  // Custom sidebar menu from _sidebar.md at the repo root (OtterWiki-style).
+  const sidebarQuery = useQuery({
+    queryKey: ["docs", "sidebar", id],
+    queryFn: () => getPage(id, "_sidebar.md"),
+    enabled: true,
+  });
+  const sidebarItems = useMemo(() => {
+    const raw = sidebarQuery.data?.content ?? "";
+    const items: Array<{ label: string; path: string }> = [];
+    const re = /^[-*]\s+\[([^\]]+)\]\(([^)]+)\)/gm;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(raw)) !== null) {
+      items.push({ label: m[1], path: m[2] });
+    }
+    return items;
+  }, [sidebarQuery.data]);
 
   const homeQuery = useQuery({
     queryKey: ["docs", "home", id],
@@ -325,6 +347,21 @@ export default function DocsViewerPage() {
         </div>
         <div className="border-b border-[var(--color-rule)] p-2">
           <NewPageForm projectId={id} />
+          {sidebarItems.length > 0 && (
+            <nav className="mt-2 space-y-0.5 border-t border-[var(--color-rule)] pt-2">
+              <p className="mono-label px-2 pb-1 text-[var(--color-ink-3)]">menu</p>
+              {sidebarItems.map((item) => (
+                <button
+                  key={item.path}
+                  type="button"
+                  onClick={() => navigate(`/projects/${id}/docs/${item.path}`)}
+                  className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm text-[var(--color-ink-2)] hover:bg-[var(--color-surface-accent)] hover:text-[var(--color-ink)]"
+                >
+                  <span className="truncate">{item.label}</span>
+                </button>
+              ))}
+            </nav>
+          )}
         </div>
         <div className="flex-1 overflow-y-auto p-2">
           <DirNode
@@ -424,6 +461,11 @@ export default function DocsViewerPage() {
             )}
             {content && content.format === "raw" && !editing && (
               <pre className="code-card overflow-x-auto p-4">{content.content}</pre>
+            )}
+            {!showHome && !editing && (
+              <div className="mt-10">
+                <AttachmentsPanel projectId={id} />
+              </div>
             )}
             {!showHome && !editing && (
               <div className="mt-6 flex items-center gap-3">

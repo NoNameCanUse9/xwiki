@@ -102,3 +102,10 @@ HTTP 层（internal/httpapi）→ 服务层（internal/auth、internal/app）→
 ## 项目恢复（补充）
 
 - unarchive 清空 archived_at（幂等）；恢复后写操作立即放行
+
+
+## Git HTTP 与附件（OtterWiki 对齐）
+
+- Git HTTP：Go handler 代理 git http-backend（CGI env + PATH_INFO=/repo.git/<sub> + GIT_PROJECT_ROOT=repos/<id>）；Basic/Bearer token 认证；Content-Length 在 WriteHeader 前设置（smart HTTP 需要固定长度）
+- 附件：attachments/ 目录经 changeset base64 写入；下载端点 mime 映射
+- 侧栏：_sidebar.md 解析（- [label](path)）渲染树顶菜单

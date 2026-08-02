@@ -14,6 +14,7 @@
 - 阶段六：Agent Token —— Bearer 认证、scope、项目/路径限制、幂等键、审计日志
 - 阶段七：搜索 —— SQLite FTS5 全文搜索、写入后增量索引、reindex CLI
 - 阶段八：OpenAPI 与导入导出 —— Scalar API 文档、ZIP 快照导入导出、Bundle 全仓导入导出、base64 附件
+- 增强：Notion 式编辑器（Tiptap：工具栏/slash/浮动工具条/块操作/Cmd+K）、嵌入组件（代码高亮/KaTeX/Mermaid/admonition）、wiki 链接、附件面板、Git HTTP（clone/push）、_sidebar.md 菜单
 
 ## 快速开始
 
