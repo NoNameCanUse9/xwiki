@@ -275,6 +275,7 @@ function ExpandableRow({
               style={{ paddingLeft: `${indent}px` }}
               className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm hover:bg-[var(--color-surface-accent)]"
             >
+              <span className="size-4 shrink-0" />
               <FileText className="size-4 shrink-0 text-[var(--color-ink-3)]" />
               <span className="text-[var(--color-ink)]">{f.name}</span>
               <span className="mono-label ml-auto text-[var(--color-ink-3)]">
