@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { getRevision, submitChangeset } from "@/lib/api/changesets";
 import { fileHistory } from "@/lib/api/history";
 import { searchProject } from "@/lib/api/search";
-import { getHome, getPage, getTree, type TreeEntry } from "@/lib/api/docs";
+import { getPage, getTree, type TreeEntry } from "@/lib/api/docs";
 import CommandPalette from "@/components/editor/command-palette";
 import RichEditor from "@/components/editor/rich-editor";
 import { FileRowActions, NewPageForm } from "@/components/editor/file-actions";
@@ -132,6 +132,66 @@ function BacklinksPanel({ projectId, filePath }: { projectId: string; filePath: 
           ))}
         </div>
       )}
+    </section>
+  );
+}
+
+function DirectoryView({
+  projectId,
+  dirPath,
+  onOpen,
+}: {
+  projectId: string;
+  dirPath: string;
+  onOpen: (path: string) => void;
+}) {
+  const { data, isLoading } = useQuery({
+    queryKey: ["dir", projectId, dirPath],
+    queryFn: () => getTree(projectId, dirPath),
+  });
+  const dirs = (data?.tree ?? []).filter((e) => e.type === "tree");
+  const files = (data?.tree ?? []).filter((e) => e.type === "blob" && e.path !== "_sidebar.md");
+  return (
+    <section className="space-y-3">
+      <p className="mono-label text-[var(--color-ink-3)]">
+        {dirPath === "" ? "root" : dirPath} · {dirs.length + files.length} 项
+      </p>
+      {isLoading && <p className="mono-label text-[var(--color-ink-3)]">loading…</p>}
+      {!isLoading && dirs.length === 0 && files.length === 0 && (
+        <p className="hairline-panel px-4 py-8 text-center text-sm text-[var(--color-ink-2)]">
+          空目录
+        </p>
+      )}
+      <div className="hairline-panel divide-y divide-[var(--color-rule)]">
+        {dirs.map((d) => (
+          <button
+            key={d.path}
+            type="button"
+            onClick={() => onOpen(d.path + "/")}
+            className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-[var(--color-ink)] hover:bg-[var(--color-surface-accent)]"
+          >
+            <Folder className="size-4 shrink-0 text-[var(--color-accent)]" />
+            <span>{d.name}</span>
+            <span className="mono-label ml-auto text-[var(--color-ink-3)]">
+              {d.path}/
+            </span>
+          </button>
+        ))}
+        {files.map((f) => (
+          <button
+            key={f.path}
+            type="button"
+            onClick={() => onOpen(f.path)}
+            className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-[var(--color-ink-2)] hover:bg-[var(--color-surface-accent)] hover:text-[var(--color-ink)]"
+          >
+            <FileText className="size-4 shrink-0 text-[var(--color-ink-3)]" />
+            <span>{f.name}</span>
+            <span className="mono-label ml-auto text-[var(--color-ink-3)]">
+              {f.path}
+            </span>
+          </button>
+        ))}
+      </div>
     </section>
   );
 }
@@ -270,6 +330,8 @@ export default function DocsViewerPage() {
   const [searching, setSearching] = useState(false);
 
   const showHome = !filePath;
+  const isDirPath = filePath.length > 0 && filePath.endsWith("/");
+  const dirPath = isDirPath ? filePath.slice(0, -1) : "";
 
   // Auto-expand the chain of directories leading to the current file.
   const dirsToLoad = useMemo(() => {
@@ -306,12 +368,6 @@ export default function DocsViewerPage() {
     }
     return items;
   }, [sidebarQuery.data]);
-
-  const homeQuery = useQuery({
-    queryKey: ["docs", "home", id],
-    queryFn: () => getHome(id),
-    enabled: showHome,
-  });
 
   const pageQuery = useVersionedPage(id, filePath, atSha);
 
@@ -432,9 +488,9 @@ export default function DocsViewerPage() {
     }
   };
 
-  const content = showHome ? homeQuery.data : pageQuery.data;
-  const loading = showHome ? homeQuery.isLoading : pageQuery.isLoading;
-  const error = showHome ? homeQuery.isError : pageQuery.isError;
+  const content = pageQuery.data;
+  const loading = pageQuery.isLoading;
+  const error = pageQuery.isError;
 
   return (
     <div className="flex min-h-screen">
@@ -590,6 +646,13 @@ export default function DocsViewerPage() {
             {content && content.format === "raw" && !editing && (
               <pre className="code-card overflow-x-auto p-4">{content.content}</pre>
             )}
+            {isDirPath && (
+              <DirectoryView
+                projectId={id}
+                dirPath={dirPath}
+                onOpen={(p) => navigate(`/projects/${id}/docs/${p}`)}
+              />
+            )}
             {showHome && !loading && !error && (
               <div className="mt-10">
                 <PageIndex
@@ -608,7 +671,7 @@ export default function DocsViewerPage() {
                 <AttachmentsPanel projectId={id} />
               </div>
             )}
-            {!showHome && !editing && (
+            {!showHome && !editing && !isDirPath && (
               <div className="mt-6 flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3">
                   <Button variant="outline" size="sm" className="gap-2" onClick={startEdit}>

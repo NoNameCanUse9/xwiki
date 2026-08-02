@@ -65,42 +65,52 @@ describe("DocsViewerPage", () => {
     vi.mocked(docsApi.getPage).mockRejectedValue(new Error("no sidebar"));
   });
 
-  it("renders the project home at the docs root", async () => {
-    vi.mocked(docsApi.getHome).mockResolvedValue({
-      path: "README.md",
-      format: "html",
-      content: "<h1>docs-site</h1>",
+  it("renders a github-style file listing at the docs root (no README)", async () => {
+    vi.mocked(docsApi.getTree).mockResolvedValue({
+      path: "",
+      tree: [
+        { name: "docs", type: "tree", path: "docs" },
+        { name: "README.md", type: "blob", path: "README.md" },
+      ],
     });
-    vi.mocked(docsApi.getTree).mockResolvedValue({ path: "", tree: [] });
     renderPage();
     await new Promise((r) => setTimeout(r, 400));
-    expect(screen.queryByText("docs-site")).not.toBeNull();
-    expect(docsApi.getHome).toHaveBeenCalledWith("prj_1");
+    expect(screen.queryAllByText("docs").length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryAllByText("README.md").length).toBeGreaterThanOrEqual(1);
+    expect(docsApi.getHome).not.toHaveBeenCalled();
   });
 
-  it("renders the tree and expands a directory lazily", async () => {
+  it("opens a directory as a github-style file listing", async () => {
     vi.mocked(docsApi.getHome).mockResolvedValue({
       path: "README.md",
       format: "html",
       content: "<p>x</p>",
     });
-    vi.mocked(docsApi.getTree)
-      .mockResolvedValueOnce({
+    vi.mocked(docsApi.getTree).mockImplementation(async (_id: string, path?: string) => {
+      if (path === "docs") {
+        return {
+          path: "docs",
+          tree: [
+            { name: "guide.md", type: "blob", path: "docs/guide.md" },
+            { name: "sub", type: "tree", path: "docs/sub" },
+          ],
+        };
+      }
+      return {
         path: "",
         tree: [
           { name: "docs", type: "tree", path: "docs" },
           { name: "README.md", type: "blob", path: "README.md" },
         ],
-      })
-      .mockResolvedValueOnce({
-        path: "docs",
-        tree: [{ name: "guide.md", type: "blob", path: "docs/guide.md" }],
-      });
+      };
+    });
     const user = userEvent.setup();
     renderPage();
     await user.click(await screen.findByRole("button", { name: "docs" }));
     await new Promise((r) => setTimeout(r, 400));
-    expect(screen.queryByRole("button", { name: "guide.md" })).not.toBeNull();
+    // 目录列表页显示文件与子目录（GitHub 风格）
+    expect(screen.queryByText("guide.md")).not.toBeNull();
+    expect(screen.queryByText("sub")).not.toBeNull();
     expect(docsApi.getTree).toHaveBeenCalledWith("prj_1", "docs");
   });
 
