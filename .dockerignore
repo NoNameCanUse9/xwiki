@@ -1,0 +1,6 @@
+.git
+.atl
+data
+agentdocs
+web/node_modules
+web/dist
