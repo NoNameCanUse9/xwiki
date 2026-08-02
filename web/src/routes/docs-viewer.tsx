@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, ChevronRight, FileText, Folder, FolderOpen } from "lucide-react";
+import { ArrowLeft, ChevronRight, FileText, Folder, FolderOpen, Pencil, RefreshCw } from "lucide-react";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { getRevision, submitChangeset } from "@/lib/api/changesets";
 import { getHome, getPage, getTree, type TreeEntry } from "@/lib/api/docs";
 
 function dirOf(filePath: string): string {
@@ -106,7 +109,11 @@ function DirNode({ projectId, dir, depth, expandedDirs, onToggle, onOpen }: DirN
 export default function DocsViewerPage() {
   const { id = "", "*": filePath = "" } = useParams();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [saving, setSaving] = useState(false);
 
   const showHome = !filePath;
 
@@ -158,6 +165,50 @@ export default function DocsViewerPage() {
     }
   };
 
+  // Edit flow: load raw content, submit an update changeset on save.
+  const rawQuery = useQuery({
+    queryKey: ["docs", "raw", id, filePath],
+    queryFn: () => getPage(id, filePath, "raw"),
+    enabled: editing && !showHome,
+  });
+
+  useEffect(() => {
+    if (rawQuery.data && draft === "") {
+      setDraft(rawQuery.data.content);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rawQuery.data]);
+
+  const startEdit = () => {
+    setDraft("");
+    setEditing(true);
+  };
+
+  const saveEdit = async () => {
+    setSaving(true);
+    try {
+      const rev = await getRevision(id);
+      await submitChangeset(id, {
+        base_revision: rev.revision,
+        message: `Update ${filePath}`,
+        changes: [{ op: "update", path: filePath, content: draft }],
+      });
+      toast.success("已保存");
+      setEditing(false);
+      await queryClient.invalidateQueries({ queryKey: ["docs"] });
+      await queryClient.invalidateQueries({ queryKey: ["tree"] });
+    } catch (err) {
+      if ((err as { status?: number })?.status === 409) {
+        toast.error("文档已被他人修改，请刷新后重试");
+        setEditing(false);
+      } else {
+        toast.error(err instanceof Error ? err.message : "保存失败");
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const content = showHome ? homeQuery.data : pageQuery.data;
   const loading = showHome ? homeQuery.isLoading : pageQuery.isLoading;
   const error = showHome ? homeQuery.isError : pageQuery.isError;
@@ -204,14 +255,58 @@ export default function DocsViewerPage() {
                 </p>
               </div>
             )}
-            {content && content.format === "html" && (
+            {content && content.format === "html" && !editing && (
               <article
                 className="prose-agentdocs"
                 dangerouslySetInnerHTML={{ __html: sanitizeHtml(content.content) }}
               />
             )}
-            {content && content.format === "raw" && (
+            {content && content.format === "raw" && !editing && (
               <pre className="code-card overflow-x-auto p-4">{content.content}</pre>
+            )}
+            {!showHome && !editing && (
+              <div className="mt-6 flex items-center gap-3">
+                <Button variant="outline" size="sm" className="gap-2" onClick={startEdit}>
+                  <Pencil className="size-3.5" />
+                  编辑
+                </Button>
+                <span className="mono-label text-[var(--color-ink-3)]">
+                  {filePath}
+                </span>
+              </div>
+            )}
+            {editing && (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <p className="mono-label text-[var(--color-ink-3)]">
+                    editing · {filePath}
+                  </p>
+                  <Button variant="ghost" size="sm" onClick={() => setEditing(false)}>
+                    <RefreshCw className="mr-1.5 size-3.5" />
+                    取消
+                  </Button>
+                </div>
+                {rawQuery.isLoading ? (
+                  <p className="mono-label text-[var(--color-ink-3)]">loading…</p>
+                ) : (
+                  <textarea
+                    aria-label="文档内容"
+                    value={draft}
+                    onChange={(e) => setDraft(e.target.value)}
+                    rows={22}
+                    spellCheck={false}
+                    className="code-card w-full resize-y p-4 font-mono text-sm leading-relaxed outline-none focus:border-[var(--color-accent)]"
+                  />
+                )}
+                <div className="flex justify-end gap-2">
+                  <Button variant="outline" size="sm" onClick={() => setEditing(false)}>
+                    放弃
+                  </Button>
+                  <Button size="sm" onClick={() => void saveEdit()} disabled={saving}>
+                    {saving ? "保存中…" : "保存"}
+                  </Button>
+                </div>
+              </div>
             )}
           </div>
         </main>

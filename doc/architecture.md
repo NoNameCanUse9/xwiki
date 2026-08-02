@@ -53,3 +53,11 @@ HTTP 层（internal/httpapi）→ 服务层（internal/auth、internal/app）→
 - 渲染：goldmark（GFM），默认转义 raw HTML；format=raw 返回原文
 - 路径安全：服务端 path.Clean 校验（拒绝穿越/绝对路径），Git 侧 --git-dir 绝对路径
 - blob 上限 2 MiB（413）
+
+## ChangeSet 写入（阶段四）
+
+- 写路径：临时 worktree（--detach）→ 应用变更 → add -A → write-tree → commit-tree → update-ref（CAS）
+- 原子性：update-ref 带 old 值 = compare-and-swap；冲突返回 409 revision_conflict
+- 并发：进程内 per-project 互斥锁；跨实例由 CAS 兜底
+- 锁粒度：internal/project/changeset.go（projectLocks sync.Map）
+- revision = HEAD commit sha；dry-run 只算树不写 ref

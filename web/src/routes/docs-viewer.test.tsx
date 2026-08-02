@@ -3,13 +3,20 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { Toaster } from "sonner";
 import DocsViewerPage from "./docs-viewer";
 import * as docsApi from "@/lib/api/docs";
+import * as changesetsApi from "@/lib/api/changesets";
 
 vi.mock("@/lib/api/docs", () => ({
   getTree: vi.fn(),
   getPage: vi.fn(),
   getHome: vi.fn(),
+}));
+
+vi.mock("@/lib/api/changesets", () => ({
+  getRevision: vi.fn(),
+  submitChangeset: vi.fn(),
 }));
 
 function renderPage(path = "/projects/prj_1/docs") {
@@ -23,6 +30,7 @@ function renderPage(path = "/projects/prj_1/docs") {
           <Route path="/projects/:id/docs/*" element={<DocsViewerPage />} />
         </Routes>
       </MemoryRouter>
+      <Toaster />
     </QueryClientProvider>
   );
 }
@@ -96,5 +104,83 @@ describe("DocsViewerPage", () => {
     vi.mocked(docsApi.getTree).mockResolvedValue({ path: "", tree: [] });
     renderPage("/projects/prj_1/docs/missing.md");
     expect(await screen.findByText("文档不存在")).toBeInTheDocument();
+  });
+
+  it("edits a file and saves via changeset", async () => {
+    vi.mocked(docsApi.getPage).mockResolvedValue({
+      path: "guide.md",
+      format: "html",
+      content: "<h1>Guide</h1>",
+    });
+    vi.mocked(docsApi.getTree).mockResolvedValue({
+      path: "",
+      tree: [{ name: "guide.md", type: "blob", path: "guide.md" }],
+    });
+    vi.mocked(changesetsApi.getRevision).mockResolvedValue({ revision: "rev1" });
+    vi.mocked(changesetsApi.submitChangeset).mockResolvedValue({
+      commit: "c1",
+      revision: "c1",
+    });
+    // Raw content fetch for the editor.
+    vi.mocked(docsApi.getPage).mockResolvedValueOnce({
+      path: "guide.md",
+      format: "html",
+      content: "<h1>Guide</h1>",
+    });
+    vi.mocked(docsApi.getPage).mockResolvedValueOnce({
+      path: "guide.md",
+      format: "raw",
+      content: "# Guide\n",
+    });
+    const user = userEvent.setup();
+    renderPage("/projects/prj_1/docs/guide.md");
+    await user.click(await screen.findByRole("button", { name: /编辑/ }));
+    const textarea = await screen.findByLabelText("文档内容");
+    await user.clear(textarea);
+    await user.type(textarea, "# Updated\n");
+    await user.click(screen.getByRole("button", { name: "保存" }));
+    await vi.waitFor(() =>
+      expect(changesetsApi.submitChangeset).toHaveBeenCalledWith("prj_1", {
+        base_revision: "rev1",
+        message: "Update guide.md",
+        changes: [{ op: "update", path: "guide.md", content: "# Updated\n" }],
+      }),
+    );
+  });
+
+  it("shows a conflict toast on 409", async () => {
+    vi.mocked(docsApi.getPage).mockResolvedValue({
+      path: "guide.md",
+      format: "html",
+      content: "<h1>Guide</h1>",
+    });
+    vi.mocked(docsApi.getTree).mockResolvedValue({
+      path: "",
+      tree: [{ name: "guide.md", type: "blob", path: "guide.md" }],
+    });
+    vi.mocked(changesetsApi.getRevision).mockResolvedValue({ revision: "rev1" });
+    vi.mocked(changesetsApi.submitChangeset).mockRejectedValue(
+      new Error("stale"),
+    );
+    // Simulate ApiError 409 via object with status.
+    vi.mocked(changesetsApi.submitChangeset).mockRejectedValueOnce(
+      Object.assign(new Error("stale"), { status: 409, code: "revision_conflict" }),
+    );
+    vi.mocked(docsApi.getPage).mockResolvedValueOnce({
+      path: "guide.md",
+      format: "html",
+      content: "<h1>Guide</h1>",
+    });
+    vi.mocked(docsApi.getPage).mockResolvedValueOnce({
+      path: "guide.md",
+      format: "raw",
+      content: "# Guide\n",
+    });
+    const user = userEvent.setup();
+    renderPage("/projects/prj_1/docs/guide.md");
+    await user.click(await screen.findByRole("button", { name: /编辑/ }));
+    await screen.findByLabelText("文档内容");
+    await user.click(screen.getByRole("button", { name: "保存" }));
+    expect(await screen.findByText("文档已被他人修改，请刷新后重试")).toBeInTheDocument();
   });
 });

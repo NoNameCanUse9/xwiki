@@ -105,6 +105,15 @@ type TreeEntry struct {
 	Path string `json:"path"`
 }
 
+// Revision returns the current HEAD commit id (the write base revision).
+func (r *Repo) Revision(ctx context.Context) (string, error) {
+	out, err := gitOutput(ctx, r.Dir, "rev-parse", "HEAD")
+	if err != nil {
+		return "", fmt.Errorf("rev-parse HEAD: %w", err)
+	}
+	return out, nil
+}
+
 // DefaultBranch resolves the repository's current branch name.
 func (r *Repo) DefaultBranch(ctx context.Context) (string, error) {
 	out, err := gitOutput(ctx, r.Dir, "rev-parse", "--abbrev-ref", "HEAD")
@@ -192,6 +201,26 @@ func gitWithStdin(ctx context.Context, repoDir string, stdin string, args ...str
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	var errBuf bytes.Buffer
+	cmd.Stderr = &errBuf
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(errBuf.String()))
+	}
+	return strings.TrimSpace(out.String()), nil
+}
+
+// gitOutputIn runs git with -C dir (worktree-aware command execution).
+func gitOutputIn(ctx context.Context, dir string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", "-C", dir)
+	cmd.Args = append(cmd.Args, args...)
+	cmd.Env = append(os.Environ(),
+		"GIT_AUTHOR_NAME=AgentDocs",
+		"GIT_AUTHOR_EMAIL=agentdocs@local",
+		"GIT_COMMITTER_NAME=AgentDocs",
+		"GIT_COMMITTER_EMAIL=agentdocs@local",
+		"GIT_CONFIG_NOSYSTEM=1",
+	)
+	var out, errBuf bytes.Buffer
+	cmd.Stdout = &out
 	cmd.Stderr = &errBuf
 	if err := cmd.Run(); err != nil {
 		return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(errBuf.String()))

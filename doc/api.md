@@ -108,3 +108,35 @@ curl -b /tmp/cj.txt http://localhost:8080/api/v1/projects
 ## 错误码（本阶段新增）
 
 invalid_doc_path / invalid_format / doc_not_found / doc_too_large
+
+---
+
+# ChangeSet 写入 API（阶段四）
+
+一次请求 = 一个原子 commit（多文件同批）。需登录。
+
+## GET /api/v1/projects/{id}/revision
+
+- 200 `{"revision":"<40-hex>"}`（当前 HEAD，作为写入 base）
+
+## POST /api/v1/projects/{id}/changesets
+
+请求：`{"base_revision":"<40-hex>","message":"update docs","changes":[
+  {"op":"create|update","path":"docs/a.md","content":"# A\n"},
+  {"op":"delete","path":"old.md"},
+  {"op":"move","path":"a.md","new_path":"b.md"}]}`
+
+- 200 `{"commit":"<40-hex>","revision":"<40-hex>","preview":null}`
+- `?dry_run=true` → 200 `{"commit":"","revision":"<当前>","preview":{"tree":"<40-hex>","changes":[...]}}`（不写任何 ref）
+- 400 invalid_changeset / invalid_doc_path · 404 project_not_found · 409 revision_conflict（base 过期，需重读）· 410 project_archived
+
+语义：
+
+- 项目级锁串行化写入；临时 worktree 应用变更；write-tree → commit-tree → `update-ref refs/heads/main <new> <old>`（CAS，old 不匹配即 409）
+- 任意失败不产生 commit、不留 worktree
+- 单文件 ≤ 2 MiB；单请求 ≤ 100 个变更
+- 写入后立即可读（无索引）
+
+## 错误码（本阶段新增）
+
+invalid_changeset / revision_conflict / project_archived
