@@ -45,3 +45,11 @@ HTTP 层（internal/httpapi）→ 服务层（internal/auth、internal/app）→
 - 归档：软归档（archived_at 时间戳，COALESCE 幂等），不删除仓库
 - 表：projects（id/name 唯一/description/repo_dir/archived_at/created_at/updated_at）
 - 仓库命令全部带 --git-dir 绝对路径 + 固定 author/committer 身份，不依赖 cwd
+
+## 文档读取（阶段三）
+
+- 无页面表：文档树与内容全部实时从项目 bare 仓库读取（ls-tree / cat-file）
+- internal/project/repo.go 只读扩展：DefaultBranch、ListTree（单层）、ReadBlob、ResolveTree
+- 渲染：goldmark（GFM），默认转义 raw HTML；format=raw 返回原文
+- 路径安全：服务端 path.Clean 校验（拒绝穿越/绝对路径），Git 侧 --git-dir 绝对路径
+- blob 上限 2 MiB（413）

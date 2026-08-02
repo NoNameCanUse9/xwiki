@@ -188,3 +188,56 @@ body {
   border: 1px solid var(--color-rule);
   border-radius: var(--radius);
 }
+
+/* ---------- Markdown prose (rendered docs) ---------- */
+.prose-agentdocs {
+  color: var(--color-ink-2);
+  font-size: 0.9375rem;
+  line-height: 1.75;
+}
+.prose-agentdocs > *:first-child { margin-top: 0; }
+.prose-agentdocs h1, .prose-agentdocs h2, .prose-agentdocs h3, .prose-agentdocs h4 {
+  font-family: var(--font-display);
+  letter-spacing: -0.02em;
+  color: var(--color-ink);
+  font-weight: 600;
+  line-height: 1.25;
+  margin: 1.75em 0 0.6em;
+}
+.prose-agentdocs h1 { font-size: 1.75rem; padding-bottom: 0.35em; border-bottom: 1px solid var(--color-rule); }
+.prose-agentdocs h2 { font-size: 1.375rem; padding-bottom: 0.3em; border-bottom: 1px solid var(--color-rule); }
+.prose-agentdocs h3 { font-size: 1.125rem; }
+.prose-agentdocs p { margin: 0.9em 0; }
+.prose-agentdocs a { color: var(--color-accent); text-decoration: underline; text-underline-offset: 2px; }
+.prose-agentdocs ul, .prose-agentdocs ol { margin: 0.9em 0; padding-left: 1.5em; }
+.prose-agentdocs ul { list-style: disc; }
+.prose-agentdocs ol { list-style: decimal; }
+.prose-agentdocs li { margin: 0.3em 0; }
+.prose-agentdocs code {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  background: var(--color-paper-2);
+  border: 1px solid var(--color-rule);
+  border-radius: 4px;
+  padding: 0.1em 0.35em;
+}
+.prose-agentdocs pre {
+  background: var(--color-graphite);
+  color: oklch(88% 0.01 250);
+  border-radius: 10px;
+  padding: 1em 1.25em;
+  overflow-x: auto;
+  margin: 1.1em 0;
+}
+.prose-agentdocs pre code { background: none; border: none; padding: 0; color: inherit; }
+.prose-agentdocs blockquote {
+  border-left: 3px solid var(--color-accent);
+  padding-left: 1em;
+  margin: 1em 0;
+  color: var(--color-ink-3);
+}
+.prose-agentdocs table { width: 100%; border-collapse: collapse; margin: 1em 0; font-size: 0.875rem; }
+.prose-agentdocs th, .prose-agentdocs td { border: 1px solid var(--color-rule); padding: 0.45em 0.7em; text-align: left; }
+.prose-agentdocs th { background: var(--color-paper-2); color: var(--color-ink); font-weight: 500; }
+.prose-agentdocs img { max-width: 100%; border-radius: 8px; }
+.prose-agentdocs hr { border: none; border-top: 1px solid var(--color-rule); margin: 1.5em 0; }

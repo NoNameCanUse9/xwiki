@@ -77,6 +77,15 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (*Project, erro
 // ReposRoot exposes the absolute repositories root (used by tests).
 func (s *Service) ReposRoot() string { return s.reposRoot }
 
+// OpenRepo resolves a project's bare repository by id.
+func (s *Service) OpenRepo(ctx context.Context, projectID string) (*Repo, error) {
+	p, err := s.store.GetByID(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	return &Repo{Dir: filepath.Join(s.reposRoot, p.ID, "repo.git")}, nil
+}
+
 // List returns every project, newest first (archived included).
 func (s *Service) List(ctx context.Context) ([]*Project, error) {
 	return s.store.List(ctx)

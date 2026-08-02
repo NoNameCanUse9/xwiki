@@ -36,6 +36,7 @@ func NewRouter(cfg *config.Config, log *slog.Logger, db *sql.DB, users *user.Sto
 
 	h := handlers.NewAuthHandler(cfg, authSvc, users, log)
 	ph := handlers.NewProjectHandler(cfg, projectsSvc, log)
+	dh := handlers.NewDocsHandler(cfg, projectsSvc, log)
 
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		response.WriteJSON(w, http.StatusOK, map[string]any{"status": "ok"})
@@ -68,6 +69,9 @@ func NewRouter(cfg *config.Config, log *slog.Logger, db *sql.DB, users *user.Sto
 				r.Get("/", ph.List)
 				r.Get("/{id}", ph.Get)
 				r.Post("/{id}/archive", ph.Archive)
+				r.Get("/{id}/docs/tree", dh.Tree)
+				r.Get("/{id}/docs/home", dh.Home)
+				r.Get("/{id}/docs/pages/*", dh.Page)
 			})
 		})
 	})

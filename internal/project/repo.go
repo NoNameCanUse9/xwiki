@@ -97,3 +97,104 @@ func gitOutput(ctx context.Context, repoDir string, args ...string) (string, err
 	}
 	return strings.TrimSpace(out.String()), nil
 }
+
+// TreeEntry is one entry of a directory listing.
+type TreeEntry struct {
+	Name string `json:"name"`
+	Type string `json:"type"` // "blob" | "tree"
+	Path string `json:"path"`
+}
+
+// DefaultBranch resolves the repository's current branch name.
+func (r *Repo) DefaultBranch(ctx context.Context) (string, error) {
+	out, err := gitOutput(ctx, r.Dir, "rev-parse", "--abbrev-ref", "HEAD")
+	if err != nil {
+		return "", err
+	}
+	if out == "HEAD" {
+		return "", fmt.Errorf("repository has no branch yet")
+	}
+	return out, nil
+}
+
+// ListTree lists one directory level of the branch. path is repository
+// relative ("" for the root, "docs" or "docs/sub" for subdirectories).
+func (r *Repo) ListTree(ctx context.Context, branch, path string) ([]TreeEntry, error) {
+	treeISH := branch
+	if path != "" {
+		treeISH = branch + ":" + strings.TrimSuffix(path, "/")
+	}
+	out, err := gitOutput(ctx, r.Dir, "ls-tree", treeISH)
+	if err != nil {
+		return nil, fmt.Errorf("ls-tree %s: %w", path, err)
+	}
+	var entries []TreeEntry
+	for _, line := range strings.Split(out, "\n") {
+		if line == "" {
+			continue
+		}
+		meta, name, ok := strings.Cut(line, "\t")
+		if !ok {
+			continue
+		}
+		fields := strings.Fields(meta)
+		if len(fields) < 3 {
+			continue
+		}
+		entryPath := name
+		if path != "" {
+			entryPath = strings.TrimSuffix(path, "/") + "/" + name
+		}
+		entries = append(entries, TreeEntry{Name: name, Type: fields[1], Path: entryPath})
+	}
+	return entries, nil
+}
+
+// ReadBlob returns the raw content of a file at the given repository path.
+func (r *Repo) ReadBlob(ctx context.Context, branch, path string) ([]byte, error) {
+	out, err := gitOutput(ctx, r.Dir, "cat-file", "blob", branch+":"+path)
+	if err != nil {
+		return nil, fmt.Errorf("cat-file %s: %w", path, err)
+	}
+	return []byte(out), nil
+}
+
+// ResolveTree resolves a directory path to its tree object id, failing when
+// the path is not a tree.
+func (r *Repo) ResolveTree(ctx context.Context, branch, path string) (string, error) {
+	path = strings.TrimSuffix(path, "/")
+	treeISH := branch
+	if path == "" {
+		treeISH = branch + "^{tree}"
+	} else {
+		treeISH = branch + ":" + path
+	}
+	out, err := gitOutput(ctx, r.Dir, "rev-parse", treeISH)
+	if err != nil {
+		return "", fmt.Errorf("resolve tree %s: %w", path, err)
+	}
+	typ, err := gitOutput(ctx, r.Dir, "cat-file", "-t", out)
+	if err != nil {
+		return "", fmt.Errorf("resolve tree %s: %w", path, err)
+	}
+	if typ != "tree" {
+		return "", fmt.Errorf("%s is not a directory", path)
+	}
+	return out, nil
+}
+
+// gitWithStdin runs a git command feeding content on stdin, returning stdout.
+func gitWithStdin(ctx context.Context, repoDir string, stdin string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", "--git-dir", repoDir)
+	cmd.Args = append(cmd.Args, args...)
+	cmd.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1")
+	cmd.Stdin = strings.NewReader(stdin)
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	var errBuf bytes.Buffer
+	cmd.Stderr = &errBuf
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(errBuf.String()))
+	}
+	return strings.TrimSpace(out.String()), nil
+}

@@ -80,3 +80,31 @@ invalid_project_name / project_name_conflict / project_not_found
 curl -c /tmp/cj.txt -X POST http://localhost:8080/api/v1/auth/login -H 'Content-Type: application/json' -d '{"username":"admin","password":"secret123"}'
 curl -b /tmp/cj.txt -X POST http://localhost:8080/api/v1/projects -H 'Content-Type: application/json' -d '{"name":"docs-site"}'
 curl -b /tmp/cj.txt http://localhost:8080/api/v1/projects
+
+---
+
+# 文档读取 API（阶段三）
+
+内容直接从项目的 Git 仓库读取，不使用任何页面/文件夹数据库表。需登录。
+
+## GET /api/v1/projects/{id}/docs/tree?path=dir/
+
+- path 省略或空 = 仓库根目录；`path=docs` = docs 目录
+- 200 `{"path":"docs","tree":[{"name":"guide.md","type":"blob","path":"docs/guide.md"},...]}`（type: blob|tree）
+- 400 invalid_doc_path（路径穿越/绝对路径）· 404 doc_not_found / project_not_found
+
+## GET /api/v1/projects/{id}/docs/pages/{path}
+
+- 读取任意文件内容（从 Git blob）
+- `?format=html` → goldmark 渲染（GFM，默认转义原始 HTML）
+- 200 `{"path":"docs/guide.md","format":"raw","content":"..."}` 或 format=html
+- 400 invalid_doc_path / invalid_format · 404 doc_not_found · 413 doc_too_large（>2 MiB）
+
+## GET /api/v1/projects/{id}/docs/home
+
+- 项目首页：README.md 优先，docs/README.md 兜底
+- 200 `{"path":"README.md","format":"html","content":"<article>..."}` · 404 doc_not_found
+
+## 错误码（本阶段新增）
+
+invalid_doc_path / invalid_format / doc_not_found / doc_too_large

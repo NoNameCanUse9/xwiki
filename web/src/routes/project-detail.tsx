@@ -1,7 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
-import { ArrowLeft, FolderGit2 } from "lucide-react";
+import { ArrowLeft, BookOpen, FolderGit2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { getProject } from "@/lib/api/projects";
+import { getHome } from "@/lib/api/docs";
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString("zh-CN", {
@@ -19,6 +21,13 @@ export default function ProjectDetailPage() {
     enabled: id.length > 0,
   });
   const project = data?.project;
+
+  const homeQuery = useQuery({
+    queryKey: ["docs", "home", id],
+    queryFn: () => getHome(id),
+    enabled: id.length > 0,
+  });
+  const homeHtml = homeQuery.data?.content ?? "";
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -87,12 +96,36 @@ export default function ProjectDetailPage() {
                 </div>
               </div>
 
-              <div className="hairline-panel space-y-2 p-5">
-                <p className="mono-label text-[var(--color-ink-3)]">next</p>
-                <p className="text-sm leading-relaxed text-[var(--color-ink-2)]">
-                  阶段三将在此项目内提供文档树与 Markdown 读取。
-                </p>
-              </div>
+              <section className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <p className="mono-label text-[var(--color-ink-3)]">
+                    readme
+                  </p>
+                  <Link to={`/projects/${project.id}/docs`}>
+                    <Button size="sm" className="gap-2">
+                      <BookOpen className="size-4" />
+                      阅读文档
+                    </Button>
+                  </Link>
+                </div>
+                {homeQuery.isLoading && (
+                  <p className="mono-label text-[var(--color-ink-3)]">loading…</p>
+                )}
+                {homeHtml ? (
+                  <div
+                    className="prose-agentdocs hairline-panel max-h-72 overflow-y-auto p-5"
+                    dangerouslySetInnerHTML={{ __html: homeHtml }}
+                  />
+                ) : (
+                  !homeQuery.isLoading && (
+                    <div className="hairline-panel px-6 py-8 text-center">
+                      <p className="text-sm text-[var(--color-ink-2)]">
+                        项目还没有 README，从文档树开始阅读。
+                      </p>
+                    </div>
+                  )
+                )}
+              </section>
             </>
           )}
         </div>
