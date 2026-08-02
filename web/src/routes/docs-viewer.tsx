@@ -574,12 +574,6 @@ export default function DocsViewerPage() {
                 </Button>
               </div>
             )}
-            {showHome && !loading && !error && (
-              <PageIndex
-                projectId={id}
-                onOpen={(path) => navigate(`/projects/${id}/docs/${path}`)}
-              />
-            )}
             {content && content.format === "html" && !editing && (
               <MarkdownArticle
                 html={sanitizeHtml(content.content)}
@@ -592,6 +586,14 @@ export default function DocsViewerPage() {
             )}
             {content && content.format === "raw" && !editing && (
               <pre className="code-card overflow-x-auto p-4">{content.content}</pre>
+            )}
+            {showHome && !loading && !error && (
+              <div className="mt-10">
+                <PageIndex
+                  projectId={id}
+                  onOpen={(path) => navigate(`/projects/${id}/docs/${path}`)}
+                />
+              </div>
             )}
             {!showHome && !editing && (
               <div className="mt-10">

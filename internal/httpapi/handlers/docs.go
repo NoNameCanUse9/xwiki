@@ -223,7 +223,7 @@ func (h *DocsHandler) Home(w http.ResponseWriter, r *http.Request) {
 		response.WriteError(w, r, http.StatusInternalServerError, "internal_error", "could not resolve branch")
 		return
 	}
-	for _, candidate := range []string{"README.md", "docs/README.md"} {
+	for _, candidate := range []string{"docs/index.md", "docs/README.md", "README.md"} {
 		content, err := repo.ReadBlob(r.Context(), branch, candidate)
 		if err != nil {
 			continue
