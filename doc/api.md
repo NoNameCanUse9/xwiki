@@ -226,3 +226,62 @@ invalid_token / invalid_token_input / agent_forbidden / idempotency_conflict / t
 agentdocs reindex                 # 全量重建全部项目
 agentdocs reindex --project <id>  # 单项目
 ```
+
+
+---
+
+# OpenAPI 与导入导出 API（阶段八）
+
+## OpenAPI
+
+- `GET /api/openapi.json` → OpenAPI 3.0.3 文档（无需认证）
+- 前端 `/api-docs` 页面：Scalar API Reference（构建时打包，懒加载）
+
+## 导入导出
+
+```http
+GET  /api/v1/projects/{id}/export.zip     → application/zip（项目工作树快照，含二进制）
+GET  /api/v1/projects/{id}/export.bundle  → bundle 文件（全仓历史）
+POST /api/v1/projects/{id}/import
+  req: {"base_revision":"<40>","message":"...","files":[{"path":"docs/a.md","content":"<base64>"}]}
+  → 200 {"commit","revision","imported":N}（单次提交原子导入；单文件 ≤ 5 MiB）
+POST /api/v1/import/bundle?name=<name>    （multipart file）
+  → 201 {"project":{...},"commits":N}（完整历史保留）
+```
+
+## 附件（图片/二进制）
+
+- 写入：changeset 的 change 增加 `"encoding":"base64"`，content 为 base64（≤ 5 MiB）
+- 读取：`GET .../docs/pages/{path}?format=base64` → `{"path","format":"base64","encoding":"base64","content":"..."}`
+- 文本读取（raw/html）上限仍为 2 MiB
+
+## 错误码（本阶段新增）
+
+invalid_import / invalid_upload / bundle_too_large
+
+---
+
+# 全局验收核对（spec §29，全部阶段完成后）
+
+| # | 验收项 | 状态 | 依据 |
+|---|--------|------|------|
+| 1 | 两个项目两个独立仓库 | ✅ | 阶段二隔离测试 + E2E |
+| 2 | 网页修改创建真实提交 | ✅ | 阶段四 changesets（前端编辑器走同一 API） |
+| 3 | Agent API 修改创建真实提交 | ✅ | 阶段六 Bearer 写 + E2E |
+| 4 | 网页与 API 同一 ChangeSet 服务 | ✅ | 单一 internal/project.ApplyChangeset |
+| 5 | 多文件单次提交 | ✅ | 阶段四多文件单提交测试 |
+| 6 | 失败不产生部分提交 | ✅ | worktree + CAS；失败清理测试 |
+| 7 | stale revision → 409 | ✅ | 阶段四集成测试 |
+| 8 | 不静默覆盖最新版 | ✅ | base revision 校验 + 409 |
+| 9 | 幂等键不重复提交 | ✅ | 阶段六 idempotency E2E |
+| 10 | 文件列表来自 Diff | ✅ | 阶段五 show --name-status |
+| 11 | 文件历史支持重命名追踪 | ✅ | 阶段五 log --follow |
+| 12 | Revert 新提交不删历史 | ✅ | 阶段五验收 |
+| 13 | 归档后拒绝写入 | ✅ | 410 project_archived |
+| 14 | Token 限制项目与目录 | ✅ | 阶段六 403 矩阵 |
+| 15 | 数据库不存 Markdown 正文 | ✅ | 正文只在仓库；DB 只有索引/审计/元数据 |
+| 16 | 搜索索引可完整重建 | ✅ | agentdocs reindex + 幂等测试 |
+| 17 | Markdown 无明显 XSS | ✅ | goldmark 转义 + 前端 sanitize |
+| 18 | 路径无法逃逸仓库 | ✅ | validateDocPath + 穿越测试 |
+| 19 | 完整 Bundle 导出 | ✅ | 阶段八 export.bundle + 历史保留测试 |
+| 20 | Docker Compose 直接启动 | ✅ | 阶段一验证（含运行时） |

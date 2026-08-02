@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { Archive, FileText, LogOut, FolderGit2 } from "lucide-react";
+import { Archive, BookOpenText, FileText, KeyRound, LogOut, FolderGit2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import ThemeToggle from "@/components/theme-toggle";
@@ -127,6 +127,20 @@ export default function HomePage() {
             </div>
             <ThemeToggle />
           </div>
+          <Link
+            to="/api-docs"
+            className="flex items-center gap-2 rounded-sm px-3 py-2 text-sm text-[var(--color-ink-2)] hover:bg-[var(--color-surface-accent)] hover:text-[var(--color-ink)]"
+          >
+            <BookOpenText className="size-4" />
+            API 文档
+          </Link>
+          <Link
+            to="/settings/tokens"
+            className="flex items-center gap-2 rounded-sm px-3 py-2 text-sm text-[var(--color-ink-2)] hover:bg-[var(--color-surface-accent)] hover:text-[var(--color-ink)]"
+          >
+            <KeyRound className="size-4" />
+            Agent Token
+          </Link>
           <Button
             variant="outline"
             className="w-full justify-start gap-2"

@@ -15,7 +15,7 @@
 | 05 | `2026-08-02-agentdocs-phase-05-history.md` | 阶段五：历史和 Diff | Commit 列表、文件历史、机器可读 Diff、Revert | 04 | ✅ 已完成 |
 | 06 | `2026-08-02-agentdocs-phase-06-tokens.md` | 阶段六：Agent Token | Token、Scope、项目/路径限制、幂等键、审计日志 | 05 | ✅ 已完成 |
 | 07 | `2026-08-02-agentdocs-phase-07-search.md` | 阶段七：搜索 | SQLite FTS5、增量索引、reindex CLI | 05 | ✅ 已完成 |
-| 08 | （待编写） | 阶段八：OpenAPI 与导入导出 | Scalar 预览、ZIP/Bundle 导入导出、图片与附件 | 05 | 待编写 |
+| 08 | `2026-08-02-agentdocs-phase-08-openapi-transfer.md` | 阶段八：OpenAPI 与导入导出 | Scalar 预览、ZIP/Bundle 导入导出、图片与附件 | 05 | ✅ 已完成 |
 
 ## 全局验收（spec §29，全部阶段完成后统一核对）
 

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"bytes"
+	"encoding/base64"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -114,8 +115,8 @@ func (h *DocsHandler) Page(w http.ResponseWriter, r *http.Request) {
 	if format == "" {
 		format = "raw"
 	}
-	if format != "raw" && format != "html" {
-		response.WriteError(w, r, http.StatusBadRequest, "invalid_format", "format must be raw or html")
+	if format != "raw" && format != "html" && format != "base64" {
+		response.WriteError(w, r, http.StatusBadRequest, "invalid_format", "format must be raw, html or base64")
 		return
 	}
 	if !validateDocPath(filePath) {
@@ -146,7 +147,10 @@ func (h *DocsHandler) Page(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp := map[string]any{"path": filePath, "format": format}
-	if format == "html" {
+	if format == "base64" {
+		resp["encoding"] = "base64"
+		resp["content"] = base64.StdEncoding.EncodeToString(content)
+	} else if format == "html" {
 		var buf bytes.Buffer
 		if err := h.markdown.Convert(content, &buf); err != nil {
 			h.log.Error("markdown render failed", "error", err, "request_id", request.RequestID(r))

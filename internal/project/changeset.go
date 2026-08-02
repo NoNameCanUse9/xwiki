@@ -2,6 +2,7 @@ package project
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"os"
@@ -13,10 +14,11 @@ import (
 
 // Change is one file operation inside a changeset.
 type Change struct {
-	Op      string `json:"op"` // create | update | delete | move
-	Path    string `json:"path"`
-	Content string `json:"content,omitempty"`
-	NewPath string `json:"new_path,omitempty"`
+	Op       string `json:"op"` // create | update | delete | move
+	Path     string `json:"path"`
+	Content  string `json:"content,omitempty"`
+	Encoding string `json:"encoding,omitempty"` // "" | "base64"
+	NewPath  string `json:"new_path,omitempty"`
 }
 
 // ChangesetInput is the full write request.
@@ -105,6 +107,20 @@ func (s *Service) ApplyChangeset(ctx context.Context, projectID string, input Ch
 		return nil, fmt.Errorf("add worktree: %w", err)
 	}
 
+	// Decode base64 payloads in place before applying.
+	for i := range input.Changes {
+		c := &input.Changes[i]
+		if c.Encoding == "base64" {
+			decoded, err := base64.StdEncoding.DecodeString(c.Content)
+			if err != nil {
+				cleanup()
+				return nil, fmt.Errorf("invalid base64 content for %q", c.Path)
+			}
+			c.Content = string(decoded)
+			c.Encoding = ""
+		}
+	}
+
 	// Apply changes inside the worktree.
 	outcomes := make([]ChangeOutcome, 0, len(input.Changes))
 	applyErr := func() error {
@@ -170,7 +186,17 @@ func validateChangeset(input ChangesetInput) error {
 		}
 		switch c.Op {
 		case "create", "update":
-			if len(c.Content) > MaxDocBlobBytes {
+			if c.Encoding != "" && c.Encoding != "base64" {
+				return fmt.Errorf("unsupported encoding %q", c.Encoding)
+			}
+			size := len(c.Content)
+			if c.Encoding == "base64" {
+				if _, err := base64.StdEncoding.DecodeString(c.Content); err != nil {
+					return fmt.Errorf("invalid base64 content for %q", c.Path)
+				}
+				size = base64.StdEncoding.DecodedLen(len(c.Content))
+			}
+			if size > MaxImportFileBytes {
 				return fmt.Errorf("content of %q exceeds size limit", c.Path)
 			}
 		case "delete":

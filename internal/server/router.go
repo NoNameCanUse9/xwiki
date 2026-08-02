@@ -13,6 +13,7 @@ import (
 	"agentdocs/internal/agent"
 	"agentdocs/internal/auth"
 	"agentdocs/internal/config"
+	"agentdocs/internal/httpapi"
 	"agentdocs/internal/httpapi/handlers"
 	"agentdocs/internal/httpapi/middleware"
 	"agentdocs/internal/httpapi/response"
@@ -41,9 +42,11 @@ func NewRouter(cfg *config.Config, log *slog.Logger, db *sql.DB, users *user.Sto
 	dh := handlers.NewDocsHandler(cfg, projectsSvc, agentSvc, log)
 	ch := handlers.NewChangesetHandler(cfg, projectsSvc, agentSvc, searchSvc, log)
 	th := handlers.NewTokenHandler(cfg, agentSvc, log)
+	xh := handlers.NewTransferHandler(cfg, projectsSvc, agentSvc, log)
 	hh := handlers.NewHistoryHandler(cfg, projectsSvc, searchSvc, log)
 	sh := handlers.NewSearchHandler(cfg, searchSvc, projectsSvc, agentSvc, log)
 
+	r.Get("/api/openapi.json", httpapi.OpenAPIHandler)
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		response.WriteJSON(w, http.StatusOK, map[string]any{"status": "ok"})
 	})
@@ -68,6 +71,7 @@ func NewRouter(cfg *config.Config, log *slog.Logger, db *sql.DB, users *user.Sto
 				r.Post("/password", h.Password)
 			})
 		})
+		r.Post("/import/bundle", xh.ImportBundle)
 		r.Route("/tokens", func(r chi.Router) {
 			r.Group(func(r chi.Router) {
 				r.Use(middleware.SessionAuth(authSvc))
@@ -90,6 +94,9 @@ func NewRouter(cfg *config.Config, log *slog.Logger, db *sql.DB, users *user.Sto
 				r.Get("/{id}/revision", ch.Revision)
 				r.Post("/{id}/changesets", ch.Apply)
 				r.Get("/{id}/search", sh.Search)
+			r.Get("/{id}/export.zip", xh.ExportZip)
+			r.Get("/{id}/export.bundle", xh.ExportBundle)
+			r.Post("/{id}/import", xh.Import)
 			r.Get("/{id}/audit", th.Audit)
 			r.Get("/{id}/commits", hh.Commits)
 				r.Get("/{id}/commits/{sha}", hh.Commit)

@@ -82,3 +82,12 @@ HTTP 层（internal/httpapi）→ 服务层（internal/auth、internal/app）→
 - 增量索引：写入/回滚后遍历 Git 树，按 blob sha 对比 upsert/delete；二进制与超大文件跳过
 - 查询：unicode61 分词 + 前缀 AND；snippet() 输出转义高亮标记
 - CLI：agentdocs reindex（全量重建）
+
+
+## OpenAPI 与导入导出（阶段八）
+
+- openapi.json：静态生成（internal/httpapi/openapi.go），覆盖全部端点 + bearerAuth/sessionCookie
+- 前端 /api-docs：@scalar/api-reference（npm 自托管，路由懒加载）
+- ZIP：archive/zip 流式打包树快照；导入解码 base64 走统一 changeset（单次提交）
+- Bundle：bundle create/fetch（fetch 建立 refs，unbundle 只写对象）；导入创建新项目保留完整历史
+- 附件：changeset encoding=base64（≤ 5 MiB）；读取 format=base64

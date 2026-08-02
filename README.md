@@ -2,7 +2,7 @@
 
 面向人类与 AI Agent 的轻量 Git 文档管理系统。
 
-> 当前进度：阶段七（搜索）已完成。完整需求见 `doc/spec.md`，分阶段实施计划见 `doc/plans/`。
+> 当前进度：**阶段八（OpenAPI 与导入导出）已完成 —— MVP 全部八个阶段完成**。完整需求见 `doc/spec.md`，分阶段实施计划见 `doc/plans/`，全局验收见 `doc/api.md` 末尾核对表。
 
 ## 已实现功能
 
@@ -13,6 +13,7 @@
 - 阶段五：历史与 Diff —— Commit 列表/详情、文件历史、机器可读 diff（numstat/patch）、Revert（新提交不删历史）
 - 阶段六：Agent Token —— Bearer 认证、scope、项目/路径限制、幂等键、审计日志
 - 阶段七：搜索 —— SQLite FTS5 全文搜索、写入后增量索引、reindex CLI
+- 阶段八：OpenAPI 与导入导出 —— Scalar API 文档、ZIP 快照导入导出、Bundle 全仓导入导出、base64 附件
 
 ## 快速开始
 

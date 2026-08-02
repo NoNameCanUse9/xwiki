@@ -183,7 +183,7 @@ func TestApplyChangesetRejectsInvalidOpsAndPaths(t *testing.T) {
 		{BaseRevision: base, Message: "m", Changes: []Change{{Op: "explode", Path: "a.md"}}},
 		{BaseRevision: base, Message: "m", Changes: []Change{{Op: "create", Path: "/abs.md", Content: "x"}}},
 		{BaseRevision: base, Message: "m", Changes: []Change{{Op: "move", Path: "a.md"}}},                                          // no new_path
-		{BaseRevision: base, Message: "m", Changes: []Change{{Op: "create", Path: "a.md", Content: strings.Repeat("x", 2<<20+1)}}}, // too large
+		{BaseRevision: base, Message: "m", Changes: []Change{{Op: "create", Path: "a.md", Content: strings.Repeat("x", 5<<20+1)}}}, // too large
 		{BaseRevision: "deadbeef", Message: "m", Changes: []Change{{Op: "create", Path: "a.md", Content: "x"}}},                    // unknown base
 	}
 	for i, cs := range cases {
