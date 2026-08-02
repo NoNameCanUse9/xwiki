@@ -249,3 +249,51 @@ body {
   float: left;
   height: 0;
 }
+
+/* ---------- Admonition blocks (:::info/warning/danger/details) ---------- */
+.prose-agentdocs .admonition {
+  border: 1px solid var(--color-rule);
+  border-left: 3px solid var(--color-accent);
+  border-radius: var(--radius);
+  padding: 0.75rem 1rem;
+  margin: 1em 0;
+  background: var(--color-paper-2);
+}
+.prose-agentdocs .admonition.warning {
+  border-left-color: oklch(75% 0.15 80);
+}
+.prose-agentdocs .admonition.danger {
+  border-left-color: var(--color-destructive);
+}
+.prose-agentdocs .admonition-title {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-ink-3);
+  margin: 0 0 0.4em;
+}
+.prose-agentdocs details {
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius);
+  margin: 1em 0;
+  padding: 0.5rem 1rem;
+  background: var(--color-paper-2);
+}
+.prose-agentdocs details summary {
+  cursor: pointer;
+  font-family: var(--font-display);
+  font-weight: 600;
+  color: var(--color-ink);
+}
+
+/* ---------- Task lists (- [x]) ---------- */
+.prose-agentdocs ul:has(> li > input[type="checkbox"]) {
+  list-style: none;
+  padding-left: 0.25rem;
+}
+.prose-agentdocs li:has(> input[type="checkbox"]) input[type="checkbox"] {
+  margin-right: 0.5rem;
+  accent-color: var(--color-accent);
+}

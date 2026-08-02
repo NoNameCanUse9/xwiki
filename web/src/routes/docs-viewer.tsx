@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft, ChevronRight, FileText, Folder, FolderOpen, History, Pencil, RefreshCw } from "lucide-react";
@@ -11,6 +11,7 @@ import { getHome, getPage, getTree, type TreeEntry } from "@/lib/api/docs";
 import CommandPalette from "@/components/editor/command-palette";
 import RichEditor from "@/components/editor/rich-editor";
 import { FileRowActions, NewPageForm } from "@/components/editor/file-actions";
+import { enhanceRenderedMarkdown } from "@/components/editor/markdown-render";
 
 function dirOf(filePath: string): string {
   const i = filePath.lastIndexOf("/");
@@ -49,6 +50,29 @@ function Breadcrumbs({ projectId, filePath }: { projectId: string; filePath: str
         );
       })}
     </nav>
+  );
+}
+
+function MarkdownArticle({ html, onNavigate }: { html: string; onNavigate: (path: string) => void }) {
+  const ref = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (ref.current) void enhanceRenderedMarkdown(ref.current);
+  }, [html]);
+  return (
+    <article
+      ref={ref}
+      className="prose-agentdocs"
+      dangerouslySetInnerHTML={{ __html: html }}
+      onClick={(e) => {
+        const anchor = (e.target as HTMLElement).closest("a");
+        if (!anchor) return;
+        const href = anchor.getAttribute("href") ?? "";
+        if (href.startsWith("/projects/")) {
+          e.preventDefault();
+          onNavigate(href);
+        }
+      }}
+    />
   );
 }
 
@@ -390,9 +414,12 @@ export default function DocsViewerPage() {
               </div>
             )}
             {content && content.format === "html" && !editing && (
-              <article
-                className="prose-agentdocs"
-                dangerouslySetInnerHTML={{ __html: sanitizeHtml(content.content) }}
+              <MarkdownArticle
+                html={sanitizeHtml(content.content)}
+                onNavigate={(href) => {
+                  const m = href.match(/^\/projects\/[^/]+\/docs\/(.+)$/);
+                  if (m) navigate(`/projects/${id}/docs/${m[1]}`);
+                }}
               />
             )}
             {content && content.format === "raw" && !editing && (

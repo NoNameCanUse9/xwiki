@@ -4,13 +4,20 @@ import (
 	"bytes"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"path"
+	"regexp"
 	"strings"
 
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/extension"
+	"github.com/yuin/goldmark/parser"
+	"github.com/yuin/goldmark/renderer"
+	"github.com/yuin/goldmark/util"
+
+	"agentdocs/internal/markdownx"
 
 	"agentdocs/internal/agent"
 	"agentdocs/internal/config"
@@ -37,7 +44,16 @@ func NewDocsHandler(cfg *config.Config, svc *project.Service, agentSvc *agent.Se
 		svc:      svc,
 		agentSvc: agentSvc,
 		log:      log,
-		markdown: goldmark.New(goldmark.WithExtensions(extension.GFM)),
+		markdown: goldmark.New(
+			goldmark.WithExtensions(extension.GFM),
+			goldmark.WithExtensions(extension.Footnote),
+			goldmark.WithParserOptions(
+				parser.WithBlockParsers(util.Prioritized(markdownx.NewAdmonitionParser(), 50)),
+			),
+			goldmark.WithRendererOptions(
+				renderer.WithNodeRenderers(util.Prioritized(markdownx.NewAdmonitionRenderer(), 50)),
+			),
+		),
 	}
 }
 
@@ -152,7 +168,7 @@ func (h *DocsHandler) Page(w http.ResponseWriter, r *http.Request) {
 		resp["content"] = base64.StdEncoding.EncodeToString(content)
 	} else if format == "html" {
 		var buf bytes.Buffer
-		if err := h.markdown.Convert(content, &buf); err != nil {
+		if err := h.markdown.Convert(rewriteWikiLinks(content, projectID), &buf); err != nil {
 			h.log.Error("markdown render failed", "error", err, "request_id", request.RequestID(r))
 			response.WriteError(w, r, http.StatusInternalServerError, "internal_error", "could not render document")
 			return
@@ -162,6 +178,23 @@ func (h *DocsHandler) Page(w http.ResponseWriter, r *http.Request) {
 		resp["content"] = string(content)
 	}
 	response.WriteJSON(w, http.StatusOK, resp)
+}
+
+// wikiLinkRe matches [[path]] and [[path|label]] wiki links.
+var wikiLinkRe = regexp.MustCompile(`\[\[([^\]|]+)(?:\|([^\]]+))?\]\]`)
+
+// rewriteWikiLinks converts [[path|label]] into markdown links pointing at the
+// project's docs viewer route, so internal pages are clickable.
+func rewriteWikiLinks(content []byte, projectID string) []byte {
+	return wikiLinkRe.ReplaceAllFunc(content, func(m []byte) []byte {
+		parts := wikiLinkRe.FindSubmatch(m)
+		path := string(parts[1])
+		label := path
+		if len(parts) > 2 && len(parts[2]) > 0 {
+			label = string(parts[2])
+		}
+		return []byte(fmt.Sprintf("[%s](/projects/%s/docs/%s)", label, projectID, path))
+	})
 }
 
 // Home handles GET /api/v1/projects/{id}/docs/home — renders README.md,
@@ -194,7 +227,7 @@ func (h *DocsHandler) Home(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		var buf bytes.Buffer
-		if err := h.markdown.Convert(content, &buf); err != nil {
+		if err := h.markdown.Convert(rewriteWikiLinks(content, projectID), &buf); err != nil {
 			h.log.Error("markdown render failed", "error", err, "request_id", request.RequestID(r))
 			response.WriteError(w, r, http.StatusInternalServerError, "internal_error", "could not render document")
 			return

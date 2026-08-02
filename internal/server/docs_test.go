@@ -214,3 +214,37 @@ func TestDocsTreePagesHome(t *testing.T) {
 		t.Fatalf("missing project: status = %d", rec.Code)
 	}
 }
+
+func TestWikiLinksRenderAsProjectLinks(t *testing.T) {
+	h, _ := newTestRouterWithService(t)
+	cookie := loginAndGetCookie(t, h)
+	projectID, _ := createProjectViaAPI(t, h, cookie, "wiki-site")
+	base := getRevision(t, h, cookie, projectID)
+	rec := submitChangeset(t, h, cookie, projectID,
+		fmt.Sprintf(`{"base_revision":"%s","message":"wikilinks",
+		  "changes":[{"op":"create","path":"docs/links.md",
+		    "content":"见 [[docs/guide.md|指南]] 与 [[docs/plain.md]]\n"}]}`, base))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("write: %d", rec.Code)
+	}
+	rec = apiRequest(h, http.MethodGet,
+		"/api/v1/projects/"+projectID+"/docs/pages/docs/links.md?format=html", cookie, "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("page: %d", rec.Code)
+	}
+	var page struct {
+		Content string `json:"content"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(page.Content, `href="/projects/`+projectID+`/docs/docs/guide.md"`) {
+		t.Fatalf("guide link missing: %s", page.Content)
+	}
+	if !strings.Contains(page.Content, ">指南</a>") {
+		t.Fatalf("label missing: %s", page.Content)
+	}
+	if !strings.Contains(page.Content, `href="/projects/`+projectID+`/docs/docs/plain.md"`) {
+		t.Fatalf("plain link missing: %s", page.Content)
+	}
+}
