@@ -13,8 +13,9 @@ import (
 	"agentdocs/internal/agent"
 	"agentdocs/internal/auth"
 	"agentdocs/internal/config"
-	"agentdocs/internal/project"
 	"agentdocs/internal/platform/clock"
+	"agentdocs/internal/project"
+	"agentdocs/internal/search"
 	"agentdocs/internal/platform/id"
 	"agentdocs/internal/server"
 	"agentdocs/internal/store/sqlite"
@@ -30,7 +31,8 @@ type App struct {
 	users      *user.Store
 	authSvc    *auth.Service
 	projectsSvc *project.Service
-	handler    http.Handler
+	searchSvc   *search.Service
+	handler     http.Handler
 }
 
 func New(cfg *config.Config) (*App, error) {
@@ -44,14 +46,18 @@ func New(cfg *config.Config) (*App, error) {
 	authSvc := auth.NewService(db, clk, cfg.SessionTTL)
 	projectsSvc := project.NewService(db, cfg.DataDir, clk)
 	agentSvc := agent.NewService(db, clk)
-	handler := server.NewRouter(cfg, log, db, users, authSvc, projectsSvc, agentSvc)
+	searchSvc := search.NewService(db, projectsSvc)
+	handler := server.NewRouter(cfg, log, db, users, authSvc, projectsSvc, agentSvc, searchSvc)
 	return &App{
 		cfg: cfg, log: log, db: db, clock: clk,
-		users: users, authSvc: authSvc, projectsSvc: projectsSvc, handler: handler,
+		users: users, authSvc: authSvc, projectsSvc: projectsSvc, searchSvc: searchSvc, handler: handler,
 	}, nil
 }
 
 func (a *App) Handler() http.Handler { return a.handler }
+
+// SearchSvc exposes the search service for CLI commands.
+func (a *App) SearchSvc() *search.Service { return a.searchSvc }
 
 func (a *App) Close() error { return a.db.Close() }
 

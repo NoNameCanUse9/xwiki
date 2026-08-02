@@ -227,3 +227,31 @@ func gitOutputIn(ctx context.Context, dir string, args ...string) (string, error
 	}
 	return strings.TrimSpace(out.String()), nil
 }
+
+// gitOutputRaw runs a git command and returns stdout without trimming.
+func gitOutputRaw(ctx context.Context, repoDir string, args ...string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, "git", "--git-dir", repoDir)
+	cmd.Args = append(cmd.Args, args...)
+	cmd.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1")
+	var out, errBuf bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &errBuf
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(errBuf.String()))
+	}
+	return out.Bytes(), nil
+}
+
+// HashBlob writes a blob into the repository object store and returns its id.
+func (r *Repo) HashBlob(ctx context.Context, content []byte) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", "--git-dir", r.Dir, "hash-object", "-w", "--stdin")
+	cmd.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1")
+	cmd.Stdin = bytes.NewReader(content)
+	var out, errBuf bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &errBuf
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("hash-object: %w: %s", err, strings.TrimSpace(errBuf.String()))
+	}
+	return strings.TrimSpace(out.String()), nil
+}

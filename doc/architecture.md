@@ -75,3 +75,10 @@ HTTP 层（internal/httpapi）→ 服务层（internal/auth、internal/app）→
 - 双认证 OR：AgentAuth 处理 Bearer，SessionAuth 兜底 cookie；SessionAuth 跳过已认证请求
 - 幂等：(key, project_id) 唯一 + request hash 比对；命中返回首次结果
 - 审计：audit_logs 表记录 actor（user|token）、动作、路径、request_id
+
+## 搜索（阶段七）
+
+- FTS5 虚拟表 + 外挂内容表 doc_index_state（project_id, path, blob_sha, content）+ 触发器同步
+- 增量索引：写入/回滚后遍历 Git 树，按 blob sha 对比 upsert/delete；二进制与超大文件跳过
+- 查询：unicode61 分词 + 前缀 AND；snippet() 输出转义高亮标记
+- CLI：agentdocs reindex（全量重建）

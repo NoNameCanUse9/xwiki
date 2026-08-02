@@ -31,12 +31,53 @@ func run(args []string) error {
 		return serve(args[1:])
 	case "admin":
 		return admin(args[1:])
+	case "reindex":
+		return reindex(args[1:])
 	case "help", "-h", "--help":
 		fmt.Fprint(os.Stdout, usageText)
 		return nil
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
 	}
+}
+
+// reindex rebuilds the full-text index for all projects (or one with --project).
+func reindex(args []string) error {
+	fs := flag.NewFlagSet("reindex", flag.ExitOnError)
+	dataDir := fs.String("data-dir", "", "data directory (default: $AGENTDOCS_DATA_DIR or data)")
+	projectID := fs.String("project", "", "reindex only this project id")
+	_ = fs.Parse(args)
+
+	cfg := config.Load()
+	if *dataDir != "" {
+		cfg.DataDir = *dataDir
+	}
+	a, err := app.New(cfg)
+	if err != nil {
+		return err
+	}
+	defer a.Close()
+
+	ctx := context.Background()
+	if *projectID != "" {
+		stats, err := a.SearchSvc().ReindexProject(ctx, *projectID)
+		if err != nil {
+			return fmt.Errorf("reindex %s: %w", *projectID, err)
+		}
+		fmt.Printf("reindexed %s: %d indexed, %d removed\n", *projectID, stats.Indexed, stats.Removed)
+		return nil
+	}
+	all, err := a.SearchSvc().ReindexAll(ctx)
+	if err != nil {
+		return err
+	}
+	total := 0
+	for id, stats := range all {
+		fmt.Printf("%s: %d indexed, %d removed\n", id, stats.Indexed, stats.Removed)
+		total += stats.Indexed
+	}
+	fmt.Printf("done: %d projects, %d documents indexed\n", len(all), total)
+	return nil
 }
 
 func serve(args []string) error {

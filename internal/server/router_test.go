@@ -15,6 +15,7 @@ import (
 	"agentdocs/internal/config"
 	"agentdocs/internal/platform/clock"
 	"agentdocs/internal/project"
+	"agentdocs/internal/search"
 	"agentdocs/internal/store/sqlite"
 	"agentdocs/internal/user"
 )
@@ -50,7 +51,7 @@ func newTestRouterWithService(t *testing.T) (http.Handler, *project.Service) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	return NewRouter(cfg, log, db, users, authSvc, projectsSvc, agent.NewService(db, clock.Real{})), projectsSvc
+	return NewRouter(cfg, log, db, users, authSvc, projectsSvc, agent.NewService(db, clock.Real{}), search.NewService(db, projectsSvc)), projectsSvc
 }
 
 func TestHealthAndReady(t *testing.T) {

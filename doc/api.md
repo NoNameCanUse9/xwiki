@@ -207,3 +207,22 @@ Token 让 AI Agent 以 Bearer 认证访问。库中只存 SHA-256 哈希，明�
 ## 错误码（本阶段新增）
 
 invalid_token / invalid_token_input / agent_forbidden / idempotency_conflict / token_not_found
+
+---
+
+# 搜索 API（阶段七）
+
+项目内全文搜索（SQLite FTS5）。写入（changeset/revert）后自动增量索引。
+
+## GET /api/v1/projects/{id}/search?q=pineapple&limit=10
+
+- 200 `{"query":"pineapple","results":[{"path":"docs/a.md","snippet":"... pineapple ..."}]}`
+- 400 invalid_query（空/超长）· 403 agent_forbidden（token 未绑定该项目）· 404 project_not_found
+- 查询：词级 AND + 前缀匹配；空结果返回 `results: []`
+
+## Reindex CLI
+
+```bash
+agentdocs reindex                 # 全量重建全部项目
+agentdocs reindex --project <id>  # 单项目
+```

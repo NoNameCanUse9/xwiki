@@ -14,24 +14,26 @@ import (
 	"agentdocs/internal/httpapi/request"
 	"agentdocs/internal/httpapi/response"
 	"agentdocs/internal/project"
+	"agentdocs/internal/search"
 )
 
 // ChangesetHandler serves write endpoints for project documents.
 type ChangesetHandler struct {
-	cfg      *config.Config
-	svc      *project.Service
-	agentSvc *agent.Service
-	log      *slog.Logger
+	cfg       *config.Config
+	svc       *project.Service
+	agentSvc  *agent.Service
+	searchSvc *search.Service
+	log       *slog.Logger
 }
 
-func NewChangesetHandler(cfg *config.Config, svc *project.Service, agentSvc *agent.Service, log *slog.Logger) *ChangesetHandler {
-	return &ChangesetHandler{cfg: cfg, svc: svc, agentSvc: agentSvc, log: log}
+func NewChangesetHandler(cfg *config.Config, svc *project.Service, agentSvc *agent.Service, searchSvc *search.Service, log *slog.Logger) *ChangesetHandler {
+	return &ChangesetHandler{cfg: cfg, svc: svc, agentSvc: agentSvc, searchSvc: searchSvc, log: log}
 }
 
 // Revision handles GET /api/v1/projects/{id}/revision.
 func (h *ChangesetHandler) Revision(w http.ResponseWriter, r *http.Request) {
 	projectID := request.PathParam(r, "id")
-	if !h.authorizeAgentRead(w, r, projectID) {
+	if !authorizeAgentRead(h.agentSvc, w, r, projectID) {
 		return
 	}
 	repo, err := h.svc.OpenRepo(r.Context(), projectID)
@@ -94,7 +96,7 @@ func (h *ChangesetHandler) Apply(w http.ResponseWriter, r *http.Request) {
 		h.writeApplyError(w, r, err)
 		return
 	}
-	if !replayed {
+	if !replayed && !input.DryRun {
 		// Audit the write (first execution only).
 		first := ""
 		if len(input.Changes) > 0 {
@@ -102,6 +104,12 @@ func (h *ChangesetHandler) Apply(w http.ResponseWriter, r *http.Request) {
 		}
 		_ = h.agentSvc.Audit(r.Context(), middleware.ActorType(r), middleware.ActorID(r),
 			projectID, "change", first, input.Message, request.RequestID(r))
+		// Incremental reindex; failures only degrade search freshness.
+		if h.searchSvc != nil {
+			if _, err := h.searchSvc.ReindexProject(r.Context(), projectID); err != nil {
+				h.log.Warn("reindex failed", "error", err, "project_id", projectID)
+			}
+		}
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -109,12 +117,12 @@ func (h *ChangesetHandler) Apply(w http.ResponseWriter, r *http.Request) {
 }
 
 // authorizeAgentRead enforces project binding for agent-token reads.
-func (h *ChangesetHandler) authorizeAgentRead(w http.ResponseWriter, r *http.Request, projectID string) bool {
+func authorizeAgentRead(svc *agent.Service, w http.ResponseWriter, r *http.Request, projectID string) bool {
 	secret := middleware.AgentSecret(r)
 	if secret == "" {
 		return true // session user
 	}
-	if _, err := h.agentSvc.Authorize(r.Context(), secret, projectID, "", false); err != nil {
+	if _, err := svc.Authorize(r.Context(), secret, projectID, "", false); err != nil {
 		response.WriteError(w, r, http.StatusForbidden, "agent_forbidden", "token cannot access this project")
 		return false
 	}

@@ -13,7 +13,6 @@ import (
 
 	"agentdocs/internal/agent"
 	"agentdocs/internal/config"
-	"agentdocs/internal/httpapi/middleware"
 	"agentdocs/internal/httpapi/request"
 	"agentdocs/internal/httpapi/response"
 	"agentdocs/internal/project"
@@ -41,18 +40,7 @@ func NewDocsHandler(cfg *config.Config, svc *project.Service, agentSvc *agent.Se
 	}
 }
 
-// authorizeRead enforces agent-token project binding for read endpoints.
-func (h *DocsHandler) authorizeRead(w http.ResponseWriter, r *http.Request, projectID string) bool {
-	secret := middleware.AgentSecret(r)
-	if secret == "" {
-		return true
-	}
-	if _, err := h.agentSvc.Authorize(r.Context(), secret, projectID, "", false); err != nil {
-		response.WriteError(w, r, http.StatusForbidden, "agent_forbidden", "token cannot access this project")
-		return false
-	}
-	return true
-}
+
 
 // validateDocPath rejects traversal, absolute and empty paths.
 func validateDocPath(p string) bool {
@@ -78,7 +66,7 @@ func (h *DocsHandler) repoFor(r *http.Request, projectID string) (*project.Repo,
 // Tree handles GET /api/v1/projects/{id}/docs/tree?path=...
 func (h *DocsHandler) Tree(w http.ResponseWriter, r *http.Request) {
 	projectID := request.PathParam(r, "id")
-	if !h.authorizeRead(w, r, projectID) {
+	if !authorizeAgentRead(h.agentSvc, w, r, projectID) {
 		return
 	}
 	dirPath := r.URL.Query().Get("path")
@@ -118,7 +106,7 @@ func (h *DocsHandler) Tree(w http.ResponseWriter, r *http.Request) {
 // Page handles GET /api/v1/projects/{id}/docs/pages/{path:*}.
 func (h *DocsHandler) Page(w http.ResponseWriter, r *http.Request) {
 	projectID := request.PathParam(r, "id")
-	if !h.authorizeRead(w, r, projectID) {
+	if !authorizeAgentRead(h.agentSvc, w, r, projectID) {
 		return
 	}
 	filePath := request.PathParam(r, "*")
@@ -176,7 +164,7 @@ func (h *DocsHandler) Page(w http.ResponseWriter, r *http.Request) {
 // falling back to docs/README.md.
 func (h *DocsHandler) Home(w http.ResponseWriter, r *http.Request) {
 	projectID := request.PathParam(r, "id")
-	if !h.authorizeRead(w, r, projectID) {
+	if !authorizeAgentRead(h.agentSvc, w, r, projectID) {
 		return
 	}
 	repo, err := h.repoFor(r, projectID)

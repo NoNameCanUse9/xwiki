@@ -10,17 +10,19 @@ import (
 	"agentdocs/internal/httpapi/request"
 	"agentdocs/internal/httpapi/response"
 	"agentdocs/internal/project"
+	"agentdocs/internal/search"
 )
 
 // HistoryHandler serves read-only history and revert endpoints.
 type HistoryHandler struct {
-	cfg *config.Config
-	svc *project.Service
-	log *slog.Logger
+	cfg       *config.Config
+	svc       *project.Service
+	searchSvc *search.Service
+	log       *slog.Logger
 }
 
-func NewHistoryHandler(cfg *config.Config, svc *project.Service, log *slog.Logger) *HistoryHandler {
-	return &HistoryHandler{cfg: cfg, svc: svc, log: log}
+func NewHistoryHandler(cfg *config.Config, svc *project.Service, searchSvc *search.Service, log *slog.Logger) *HistoryHandler {
+	return &HistoryHandler{cfg: cfg, svc: svc, searchSvc: searchSvc, log: log}
 }
 
 // Commits handles GET /api/v1/projects/{id}/commits.
@@ -90,6 +92,11 @@ func (h *HistoryHandler) Revert(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		h.writeRepoError(w, r, err)
 		return
+	}
+	if h.searchSvc != nil {
+		if _, err := h.searchSvc.ReindexProject(r.Context(), projectID); err != nil {
+			h.log.Warn("reindex failed after revert", "error", err, "project_id", projectID)
+		}
 	}
 	response.WriteJSON(w, http.StatusOK, map[string]any{"commit": commit})
 }

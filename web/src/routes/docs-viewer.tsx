@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { getRevision, submitChangeset } from "@/lib/api/changesets";
 import { fileHistory } from "@/lib/api/history";
+import { searchProject } from "@/lib/api/search";
 import { getHome, getPage, getTree, type TreeEntry } from "@/lib/api/docs";
 
 function dirOf(filePath: string): string {
@@ -116,6 +117,9 @@ export default function DocsViewerPage() {
   const [draft, setDraft] = useState("");
   const [saving, setSaving] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<Array<{ path: string; snippet: string }> | null>(null);
+  const [searching, setSearching] = useState(false);
 
   const showHome = !filePath;
 
@@ -163,6 +167,20 @@ export default function DocsViewerPage() {
       else next.add(entry.path);
       return next;
     });
+  };
+
+  const runSearch = async () => {
+    const q = searchQuery.trim();
+    if (!q) return;
+    setSearching(true);
+    try {
+      const res = await searchProject(id, q);
+      setSearchResults(res.results);
+    } catch {
+      setSearchResults([]);
+    } finally {
+      setSearching(false);
+    }
   };
 
   const openEntry = (entry: TreeEntry) => {
@@ -246,9 +264,62 @@ export default function DocsViewerPage() {
       </aside>
 
       <div className="flex w-full flex-col">
-        <header className="flex items-center justify-between border-b border-[var(--color-rule)] px-6 py-3">
+        <header className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-rule)] px-6 py-3">
           <Breadcrumbs projectId={id} filePath={filePath} />
+          <form
+            className="flex items-center gap-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void runSearch();
+            }}
+          >
+            <input
+              aria-label="搜索文档"
+              value={searchQuery}
+              onChange={(e) => {
+                setSearchQuery(e.target.value);
+                setSearchResults(null);
+              }}
+              placeholder="搜索…"
+              className="h-8 w-48 rounded-[var(--radius)] border border-[var(--color-rule)] bg-[var(--color-paper)] px-3 font-mono text-xs text-[var(--color-ink)] placeholder:text-[var(--color-ink-3)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)]"
+            />
+            <Button type="submit" variant="outline" size="sm" disabled={searching}>
+              {searching ? "…" : "搜索"}
+            </Button>
+          </form>
         </header>
+        {searchResults && (
+          <div className="border-b border-[var(--color-rule)] bg-[var(--color-paper-2)] px-6 py-3">
+            {searchResults.length === 0 ? (
+              <p className="mono-label text-[var(--color-ink-3)]">no results</p>
+            ) : (
+              <div className="space-y-1">
+                <p className="mono-label text-[var(--color-ink-3)]">
+                  {searchResults.length} results
+                </p>
+                {searchResults.map((r) => (
+                  <button
+                    key={r.path}
+                    type="button"
+                    onClick={() => {
+                      navigate(`/projects/${id}/docs/${r.path}`);
+                      setSearchResults(null);
+                      setSearchQuery("");
+                    }}
+                    className="block w-full rounded-sm px-2 py-1.5 text-left hover:bg-[var(--color-surface-accent)]"
+                  >
+                    <span className="font-mono text-xs text-[var(--color-accent)]">
+                      {r.path}
+                    </span>
+                    <span className="ml-3 text-sm text-[var(--color-ink-2)]">
+                      {r.snippet}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         <main className="flex-1 px-6 py-8 sm:px-10">
           <div className="mx-auto w-full max-w-3xl">

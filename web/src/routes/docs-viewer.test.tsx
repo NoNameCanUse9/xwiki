@@ -212,3 +212,31 @@ describe("DocsViewerPage", () => {
     expect(await screen.findByText("文档已被他人修改，请刷新后重试")).toBeInTheDocument();
   });
 });
+
+describe("DocsViewerPage search", () => {
+  it("searches and navigates to a result", async () => {
+    const mod = await import("@/lib/api/search");
+    vi.spyOn(mod, "searchProject").mockResolvedValue({
+      query: "pineapple",
+      results: [{ path: "docs/keyword.md", snippet: "walrus pineapple" }],
+    });
+    vi.mocked(docsApi.getHome).mockResolvedValue({
+      path: "README.md",
+      format: "html",
+      content: "<p>x</p>",
+    });
+    vi.mocked(docsApi.getTree).mockResolvedValue({ path: "", tree: [] });
+    vi.mocked(docsApi.getPage).mockResolvedValue({
+      path: "docs/keyword.md",
+      format: "html",
+      content: "<h1>K</h1>",
+    });
+    const user = userEvent.setup();
+    renderPage();
+    await user.type(screen.getByLabelText("搜索文档"), "pineapple");
+    await user.click(screen.getByRole("button", { name: "搜索" }));
+    expect(await screen.findByText("docs/keyword.md")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /docs\/keyword.md/ }));
+    expect(await screen.findByText("K")).toBeInTheDocument();
+  });
+});
