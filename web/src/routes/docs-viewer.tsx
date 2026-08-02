@@ -8,6 +8,7 @@ import { getRevision, submitChangeset } from "@/lib/api/changesets";
 import { fileHistory } from "@/lib/api/history";
 import { searchProject } from "@/lib/api/search";
 import { getHome, getPage, getTree, type TreeEntry } from "@/lib/api/docs";
+import CommandPalette from "@/components/editor/command-palette";
 
 function dirOf(filePath: string): string {
   const i = filePath.lastIndexOf("/");
@@ -263,6 +264,7 @@ export default function DocsViewerPage() {
         </div>
       </aside>
 
+      <CommandPalette projectId={id} />
       <div className="flex w-full flex-col">
         <header className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-rule)] px-6 py-3">
           <Breadcrumbs projectId={id} filePath={filePath} />

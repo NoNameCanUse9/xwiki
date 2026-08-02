@@ -241,3 +241,11 @@ body {
 .prose-agentdocs th { background: var(--color-paper-2); color: var(--color-ink); font-weight: 500; }
 .prose-agentdocs img { max-width: 100%; border-radius: 8px; }
 .prose-agentdocs hr { border: none; border-top: 1px solid var(--color-rule); margin: 1.5em 0; }
+
+.prose-agentdocs p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  color: var(--color-ink-3);
+  pointer-events: none;
+  float: left;
+  height: 0;
+}
