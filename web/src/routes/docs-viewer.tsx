@@ -11,6 +11,7 @@ import { getHome, getPage, getTree, type TreeEntry } from "@/lib/api/docs";
 import CommandPalette from "@/components/editor/command-palette";
 import RichEditor from "@/components/editor/rich-editor";
 import { FileRowActions, NewPageForm } from "@/components/editor/file-actions";
+import FileMenu from "@/components/editor/file-menu";
 import AttachmentsPanel from "@/components/editor/attachments";
 import { enhanceRenderedMarkdown } from "@/components/editor/markdown-render";
 import {
@@ -260,6 +261,8 @@ export default function DocsViewerPage() {
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  const [showAttachments, setShowAttachments] = useState(false);
+  const [showBacklinks, setShowBacklinks] = useState(false);
   const [atSha, setAtSha] = useState<string | null>(null);
   const [tocEntries, setTocEntries] = useState<TocEntry[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
@@ -595,34 +598,46 @@ export default function DocsViewerPage() {
                 />
               </div>
             )}
-            {!showHome && !editing && (
+            {!showHome && !editing && showBacklinks && (
               <div className="mt-10">
                 <BacklinksPanel projectId={id} filePath={filePath} />
               </div>
             )}
-            {!showHome && !editing && (
+            {!showHome && !editing && showAttachments && (
               <div className="mt-10">
                 <AttachmentsPanel projectId={id} />
               </div>
             )}
             {!showHome && !editing && (
-              <div className="mt-6 flex items-center gap-3">
-                <Button variant="outline" size="sm" className="gap-2" onClick={startEdit}>
-                  <Pencil className="size-3.5" />
-                  编辑
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="gap-2 text-[var(--color-ink-3)]"
-                  onClick={() => setShowHistory((v) => !v)}
-                >
-                  <History className="size-3.5" />
-                  历史
-                </Button>
-                <span className="mono-label text-[var(--color-ink-3)]">
-                  {filePath}
-                </span>
+              <div className="mt-6 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <Button variant="outline" size="sm" className="gap-2" onClick={startEdit}>
+                    <Pencil className="size-3.5" />
+                    编辑
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="gap-2 text-[var(--color-ink-3)]"
+                    onClick={() => setShowHistory((v) => !v)}
+                  >
+                    <History className="size-3.5" />
+                    历史
+                  </Button>
+                  <span className="mono-label text-[var(--color-ink-3)]">
+                    {filePath}
+                  </span>
+                </div>
+                <FileMenu
+                  projectId={id}
+                  filePath={filePath}
+                  items={{
+                    onEdit: startEdit,
+                    onToggleHistory: () => setShowHistory((v) => !v),
+                    onToggleAttachments: () => setShowAttachments((v) => !v),
+                    onToggleBacklinks: () => setShowBacklinks((v) => !v),
+                  }}
+                />
               </div>
             )}
             {showHistory && !editing && (
