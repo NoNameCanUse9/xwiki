@@ -137,102 +137,154 @@ function BacklinksPanel({ projectId, filePath }: { projectId: string; filePath: 
   );
 }
 
-function DirectoryView({
+function FileExplorer({
   projectId,
   dirPath,
+  depth,
+  defaultExpanded,
   onOpen,
 }: {
   projectId: string;
   dirPath: string;
+  depth: number;
+  defaultExpanded?: boolean;
   onOpen: (path: string) => void;
 }) {
+  const [expanded] = useState(defaultExpanded ?? false);
   const { data, isLoading } = useQuery({
     queryKey: ["dir", projectId, dirPath],
     queryFn: () => getTree(projectId, dirPath),
+    enabled: expanded || depth === 0,
   });
   const dirs = (data?.tree ?? []).filter((e) => e.type === "tree");
   const files = (data?.tree ?? []).filter((e) => e.type === "blob" && e.path !== "_sidebar.md");
-  return (
-    <section className="space-y-3">
-      <p className="mono-label text-[var(--color-ink-3)]">
-        {dirPath === "" ? "root" : dirPath} · {dirs.length + files.length} 项
-      </p>
-      {isLoading && <p className="mono-label text-[var(--color-ink-3)]">loading…</p>}
-      {!isLoading && dirs.length === 0 && files.length === 0 && (
-        <p className="hairline-panel px-4 py-8 text-center text-sm text-[var(--color-ink-2)]">
-          空目录
-        </p>
-      )}
-      <div className="hairline-panel divide-y divide-[var(--color-rule)]">
-        {dirs.map((d) => (
-          <button
-            key={d.path}
-            type="button"
-            onClick={() => onOpen(d.path + "/")}
-            className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-[var(--color-ink)] hover:bg-[var(--color-surface-accent)]"
-          >
-            <Folder className="size-4 shrink-0 text-[var(--color-accent)]" />
-            <span>{d.name}</span>
-            <span className="mono-label ml-auto text-[var(--color-ink-3)]">
-              {d.path}/
-            </span>
-          </button>
-        ))}
-        {files.map((f) => (
-          <button
-            key={f.path}
-            type="button"
-            onClick={() => onOpen(f.path)}
-            className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-[var(--color-ink-2)] hover:bg-[var(--color-surface-accent)] hover:text-[var(--color-ink)]"
-          >
-            <FileText className="size-4 shrink-0 text-[var(--color-ink-3)]" />
-            <span>{f.name}</span>
-            <span className="mono-label ml-auto text-[var(--color-ink-3)]">
-              {f.path}
-            </span>
-          </button>
-        ))}
-      </div>
-    </section>
-  );
+  const isRoot = depth === 0;
+  const itemCount = dirs.length + files.length;
+
+  if (isRoot) {
+    return (
+      <section>
+        <div className="mb-1 flex items-center gap-2 px-4 py-2.5">
+          <span className="mono-label text-[var(--color-ink-3)]">
+            root · {itemCount} {itemCount === 1 ? "item" : "items"}
+          </span>
+        </div>
+        {isLoading && (
+          <p className="px-4 py-3 text-xs text-[var(--color-ink-3)]">loading…</p>
+        )}
+        {!isLoading && itemCount === 0 && (
+          <p className="hairline-panel mx-4 my-6 px-4 py-8 text-center text-sm text-[var(--color-ink-2)]">
+            空目录
+          </p>
+        )}
+        {!isLoading && itemCount > 0 && (
+          <div className="divide-y divide-[var(--color-rule)] border-t border-[var(--color-rule)]">
+            {dirs.map((d) => (
+              <ExpandableRow
+                key={d.path}
+                projectId={projectId}
+                entry={d}
+                depth={0}
+                onOpen={onOpen}
+              />
+            ))}
+            {files.map((f) => (
+              <button
+                key={f.path}
+                type="button"
+                onClick={() => onOpen(f.path)}
+                className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm hover:bg-[var(--color-surface-accent)]"
+              >
+                <FileText className="size-4 shrink-0 text-[var(--color-ink-3)]" />
+                <span className="text-[var(--color-ink)]">{f.name}</span>
+                <span className="mono-label ml-auto text-[var(--color-ink-3)]">
+                  {f.path}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+      </section>
+    );
+  }
+  return null;
 }
 
-function PageIndex({ projectId, onOpen }: { projectId: string; onOpen: (path: string) => void }) {
+function ExpandableRow({
+  projectId,
+  entry,
+  depth,
+  onOpen,
+}: {
+  projectId: string;
+  entry: TreeEntry;
+  depth: number;
+  onOpen: (path: string) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
   const { data } = useQuery({
-    queryKey: ["page-index", projectId],
-    queryFn: () => getTree(projectId, ""),
+    queryKey: ["dir", projectId, entry.path],
+    queryFn: () => getTree(projectId, entry.path),
+    enabled: expanded,
   });
-  const files = (data?.tree ?? []).filter((e) => e.type === "blob" && e.path !== "_sidebar.md");
-  const dirs = (data?.tree ?? []).filter((e) => e.type === "tree");
-  if (files.length === 0 && dirs.length === 0) return null;
+  const children = data?.tree ?? [];
+  const childDirs = children.filter((e) => e.type === "tree");
+  const childFiles = children.filter((e) => e.type === "blob" && e.path !== "_sidebar.md");
+  const childCount = childDirs.length + childFiles.length;
+  const indent = depth * 20 + 28;
   return (
-    <section className="mb-8 space-y-3">
-      <p className="mono-label text-[var(--color-ink-3)]">pages</p>
-      <div className="grid gap-2 sm:grid-cols-2">
-        {dirs.map((d) => (
-          <button
-            key={d.path}
-            type="button"
-            onClick={() => onOpen(d.path + "/")}
-            className="hairline-panel flex items-center gap-2 px-4 py-2.5 text-left text-sm text-[var(--color-ink-2)] hover:border-[var(--color-rule-2)] hover:text-[var(--color-ink)]"
-          >
-            <Folder className="size-4 text-[var(--color-accent)]" />
-            <span className="truncate">{d.name}/</span>
-          </button>
-        ))}
-        {files.map((f) => (
-          <button
-            key={f.path}
-            type="button"
-            onClick={() => onOpen(f.path)}
-            className="hairline-panel flex items-center gap-2 px-4 py-2.5 text-left text-sm text-[var(--color-ink-2)] hover:border-[var(--color-rule-2)] hover:text-[var(--color-ink)]"
-          >
-            <FileText className="size-4 text-[var(--color-ink-3)]" />
-            <span className="truncate">{f.name}</span>
-          </button>
-        ))}
-      </div>
-    </section>
+    <div>
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm hover:bg-[var(--color-surface-accent)]"
+      >
+        <ChevronRight
+          className={`size-4 shrink-0 text-[var(--color-ink-3)] transition-transform ${
+            expanded ? "rotate-90" : ""
+          }`}
+        />
+        <Folder className="size-4 shrink-0 text-[var(--color-accent)]" />
+        <span className="text-[var(--color-ink)]">{entry.name}</span>
+        {!expanded && childCount > 0 && (
+          <span className="mono-label ml-auto text-[var(--color-ink-3)]">
+            {childCount}
+          </span>
+        )}
+        <span className="mono-label ml-auto text-[var(--color-ink-3)]">
+          {entry.path}/
+        </span>
+      </button>
+      {expanded && (
+        <div>
+          {childDirs.map((d) => (
+            <div key={d.path} style={{ paddingLeft: `${indent}px` }}>
+              <ExpandableRow
+                projectId={projectId}
+                entry={d}
+                depth={depth + 1}
+                onOpen={onOpen}
+              />
+            </div>
+          ))}
+          {childFiles.map((f) => (
+            <button
+              key={f.path}
+              type="button"
+              onClick={() => onOpen(f.path)}
+              style={{ paddingLeft: `${indent}px` }}
+              className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm hover:bg-[var(--color-surface-accent)]"
+            >
+              <FileText className="size-4 shrink-0 text-[var(--color-ink-3)]" />
+              <span className="text-[var(--color-ink)]">{f.name}</span>
+              <span className="mono-label ml-auto text-[var(--color-ink-3)]">
+                {f.path}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -280,7 +332,156 @@ function DirNode({ projectId, dir, depth, expandedDirs, onToggle, onOpen, onFile
                 expandedDirs.has(entry.path) ? (
                   <FolderOpen className="size-3.5 shrink-0 text-[var(--color-accent)]" />
                 ) : (
-                  <Folder className="size-3.5 shrink-0 text-[var(--color-accent)]" />
+                  <Folder className="size-3.5function FileExplorer({
+  projectId,
+  dirPath,
+  depth,
+  defaultExpanded,
+  onOpen,
+}: {
+  projectId: string;
+  dirPath: string;
+  depth: number;
+  defaultExpanded?: boolean;
+  onOpen: (path: string) => void;
+}) {
+  const [expanded, setExpanded] = useState(defaultExpanded ?? false);
+  const { data, isLoading } = useQuery({
+    queryKey: ['dir', projectId, dirPath],
+    queryFn: () => getTree(projectId, dirPath),
+    enabled: expanded || depth === 0,
+  });
+  const dirs = (data?.tree ?? []).filter((e) => e.type === 'tree');
+  const files = (data?.tree ?? []).filter((e) => e.type === 'blob' && e.path !== '_sidebar.md');
+  const isRoot = depth === 0;
+  const itemCount = dirs.length + files.length;
+
+  if (isRoot) {
+    return (
+      <section>
+        <div className='mb-1 flex items-center gap-2 px-4 py-2.5'>
+          <span className='mono-label text-[var(--color-ink-3)]'>
+            root · {itemCount} {itemCount === 1 ? 'item' : 'items'}
+          </span>
+        </div>
+        {isLoading && (
+          <p className='px-4 py-3 text-xs text-[var(--color-ink-3)]'>loading…</p>
+        )}
+        {!isLoading && itemCount === 0 && (
+          <p className='hairline-panel mx-4 my-6 px-4 py-8 text-center text-sm text-[var(--color-ink-2)]'>
+            空目录
+          </p>
+        )}
+        {!isLoading && itemCount > 0 && (
+          <div className='divide-y divide-[var(--color-rule)] border-t border-[var(--color-rule)]'>
+            {dirs.map((d) => (
+              <ExpandableRow
+                key={d.path}
+                projectId={projectId}
+                entry={d}
+                depth={0}
+                onOpen={onOpen}
+              />
+            ))}
+            {files.map((f) => (
+              <button
+                key={f.path}
+                type='button'
+                onClick={() => onOpen(f.path)}
+                className='flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm hover:bg-[var(--color-surface-accent)]'
+              >
+                <FileText className='size-4 shrink-0 text-[var(--color-ink-3)]' />
+                <span className='text-[var(--color-ink)]'>{f.name}</span>
+                <span className='mono-label ml-auto text-[var(--color-ink-3)]'>
+                  {f.path}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+      </section>
+    );
+  }
+  // Non-root: render inline expandable (used in sidebar tree via DirNode).
+  return null;
+}
+
+function ExpandableRow({
+  projectId,
+  entry,
+  depth,
+  onOpen,
+}: {
+  projectId: string;
+  entry: TreeEntry;
+  depth: number;
+  onOpen: (path: string) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const { data } = useQuery({
+    queryKey: ['dir', projectId, entry.path],
+    queryFn: () => getTree(projectId, entry.path),
+    enabled: expanded,
+  });
+  const children = data?.tree ?? [];
+  const childDirs = children.filter((e) => e.type === 'tree');
+  const childFiles = children.filter((e) => e.type === 'blob' && e.path !== '_sidebar.md');
+  const childCount = childDirs.length + childFiles.length;
+  return (
+    <div>
+      <button
+        type='button'
+        onClick={() => setExpanded((v) => !v)}
+        className='flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm hover:bg-[var(--color-surface-accent)]'
+      >
+        <ChevronRight
+          className={}
+        />
+        <Folder className='size-4 shrink-0 text-[var(--color-accent)]' />
+        <span className='text-[var(--color-ink)]'>{entry.name}</span>
+        {!expanded && childCount > 0 && (
+          <span className='mono-label ml-auto text-[var(--color-ink-3)]'>
+            {childCount}
+          </span>
+        )}
+        <span className='mono-label ml-auto text-[var(--color-ink-3)]'>
+          {entry.path}/
+        </span>
+      </button>
+      {expanded && (
+        <div>
+          {childDirs.map((d) => (
+            <div key={d.path} style={{ paddingLeft:  }}>
+              <ExpandableRow
+                projectId={projectId}
+                entry={d}
+                depth={depth + 1}
+                onOpen={onOpen}
+              />
+            </div>
+          ))}
+          {childFiles.map((f) => (
+            <button
+              key={f.path}
+              type='button'
+              onClick={() => onOpen(f.path)}
+              style={{ paddingLeft:  }}
+              className='flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm hover:bg-[var(--color-surface-accent)]'
+            >
+              <FileText className='size-4 shrink-0 text-[var(--color-ink-3)]' />
+              <span className='text-[var(--color-ink)]'>{f.name}</span>
+              <span className='mono-label ml-auto text-[var(--color-ink-3)]'>
+                {f.path}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+ shrink-0 text-[var(--color-accent)]" />
                 )
               ) : (
                 <FileText className="size-3.5 shrink-0 text-[var(--color-ink-3)]" />
@@ -645,19 +846,22 @@ export default function DocsViewerPage() {
               <pre className="code-card overflow-x-auto p-4">{content.content}</pre>
             )}
             {isDirPath && (
-              <DirectoryView
+              <FileExplorer
                 projectId={id}
                 dirPath={dirPath}
+                depth={0}
+                defaultExpanded
                 onOpen={(p) => navigate(`/projects/${id}/docs/${p}`)}
               />
             )}
             {showHome && !loading && !error && (
-              <div className="mt-10">
-                <PageIndex
-                  projectId={id}
-                  onOpen={(path) => navigate(`/projects/${id}/docs/${path}`)}
-                />
-              </div>
+              <FileExplorer
+                projectId={id}
+                dirPath=""
+                depth={0}
+                defaultExpanded
+                onOpen={(path) => navigate(`/projects/${id}/docs/${path}`)}
+              />
             )}
             {!showHome && !editing && showBacklinks && (
               <div className="mt-10">
