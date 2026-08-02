@@ -194,7 +194,13 @@ func (s *Service) CommitDiff(ctx context.Context, projectID, sha, format string)
 // RevertCommit creates a new commit that reverts the given one. The original
 // history is preserved; the revert is appended. Conflicts fail with
 // ErrConflict and nothing is written.
-func (s *Service) RevertCommit(ctx context.Context, projectID, sha string, message string) (*CommitSummary, error) {
+func (s *Service) RevertCommit(ctx context.Context, projectID, sha, message string, author CommitAuthor) (*CommitSummary, error) {
+	if author.Name == "" {
+		author.Name = "anonymous"
+	}
+	if author.Email == "" {
+		author.Email = "anonymous@agentdocs.local"
+	}
 	p, err := s.store.GetByID(ctx, projectID)
 	if err != nil {
 		return nil, err
@@ -272,7 +278,7 @@ func (s *Service) RevertCommit(ctx context.Context, projectID, sha string, messa
 	if message == "" {
 		message = fmt.Sprintf("Revert %q", shortSHA(sha))
 	}
-	commit, err := gitOutput(ctx, repo.Dir, "commit-tree", tree, "-p", current, "-m", message)
+	commit, err := gitOutputAs(ctx, repo.Dir, author, "commit-tree", tree, "-p", current, "-m", message)
 	if err != nil {
 		cleanup()
 		return nil, fmt.Errorf("commit-tree: %w", err)
@@ -282,7 +288,7 @@ func (s *Service) RevertCommit(ctx context.Context, projectID, sha string, messa
 		return nil, ErrConflict
 	}
 	cleanup()
-	return &CommitSummary{SHA: commit, Message: message, Author: "AgentDocs"}, nil
+	return &CommitSummary{SHA: commit, Message: message, Author: author.Name}, nil
 }
 
 func (s *Service) openRepoChecked(ctx context.Context, projectID string) (*Repo, error) {

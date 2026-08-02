@@ -147,7 +147,7 @@ describe("DocsViewerPage", () => {
     await vi.waitFor(() =>
       expect(changesetsApi.submitChangeset).toHaveBeenCalledWith("prj_1", {
         base_revision: "rev1",
-        message: "Update guide.md",
+        message: "",
         changes: [{ op: "update", path: "guide.md", content: "# Updated\n" }],
       }),
     );

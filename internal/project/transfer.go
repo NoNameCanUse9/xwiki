@@ -114,7 +114,7 @@ func (s *Service) ImportZip(ctx context.Context, projectID string, input ImportZ
 		BaseRevision: input.BaseRevision,
 		Message:      message,
 		Changes:      changes,
-	})
+	}, CommitAuthor{Name: "import", Email: "import@agentdocs.local"})
 	if err != nil {
 		return nil, err
 	}

@@ -3,6 +3,7 @@ package project
 import (
 	"context"
 	"errors"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -43,7 +44,7 @@ func TestApplyChangesetMultipleFilesOneCommit(t *testing.T) {
 			{Op: "update", Path: "README.md", Content: "# docs-site\n\nupdated\n"},
 			{Op: "move", Path: "docs/guide.md", NewPath: "docs/handbook.md"},
 		},
-	})
+	}, CommitAuthor{Name: "Test Author", Email: "test@agentdocs.local"})
 	if err != nil {
 		t.Fatalf("ApplyChangeset: %v", err)
 	}
@@ -85,7 +86,7 @@ func TestApplyChangesetStaleRevisionConflict(t *testing.T) {
 		BaseRevision: base,
 		Message:      "first",
 		Changes:      []Change{{Op: "create", Path: "a.md", Content: "a"}},
-	}); err != nil {
+	}, CommitAuthor{Name: "Test Author", Email: "test@agentdocs.local"}); err != nil {
 		t.Fatal(err)
 	}
 	// Second commit with the stale base revision must conflict.
@@ -93,7 +94,7 @@ func TestApplyChangesetStaleRevisionConflict(t *testing.T) {
 		BaseRevision: base,
 		Message:      "second",
 		Changes:      []Change{{Op: "create", Path: "b.md", Content: "b"}},
-	})
+	}, CommitAuthor{Name: "Test Author", Email: "test@agentdocs.local"})
 	if !errors.Is(err, ErrConflict) {
 		t.Fatalf("want ErrConflict, got %v", err)
 	}
@@ -112,7 +113,7 @@ func TestApplyChangesetFailureLeavesNoCommitOrWorktree(t *testing.T) {
 		BaseRevision: base,
 		Message:      "bad",
 		Changes:      []Change{{Op: "create", Path: "../evil.md", Content: "x"}},
-	})
+	}, CommitAuthor{Name: "Test Author", Email: "test@agentdocs.local"})
 	if err == nil {
 		t.Fatal("traversal path accepted")
 	}
@@ -138,7 +139,7 @@ func TestApplyChangesetDryRun(t *testing.T) {
 		Message:      "preview",
 		DryRun:       true,
 		Changes:      []Change{{Op: "create", Path: "preview.md", Content: "p"}},
-	})
+	}, CommitAuthor{Name: "Test Author", Email: "test@agentdocs.local"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +171,7 @@ func TestApplyChangesetArchivedProjectRejected(t *testing.T) {
 		BaseRevision: "x",
 		Message:      "nope",
 		Changes:      []Change{{Op: "create", Path: "a.md", Content: "a"}},
-	})
+	}, CommitAuthor{Name: "Test Author", Email: "test@agentdocs.local"})
 	if !errors.Is(err, ErrArchived) {
 		t.Fatalf("want ErrArchived, got %v", err)
 	}
@@ -187,7 +188,7 @@ func TestApplyChangesetRejectsInvalidOpsAndPaths(t *testing.T) {
 		{BaseRevision: "deadbeef", Message: "m", Changes: []Change{{Op: "create", Path: "a.md", Content: "x"}}},                    // unknown base
 	}
 	for i, cs := range cases {
-		if _, err := svc.ApplyChangeset(context.Background(), pid, cs); err == nil {
+		if _, err := svc.ApplyChangeset(context.Background(), pid, cs, CommitAuthor{Name: "Test Author", Email: "test@agentdocs.local"}); err == nil {
 			t.Fatalf("case %d: expected error", i)
 		}
 	}
@@ -195,4 +196,35 @@ func TestApplyChangesetRejectsInvalidOpsAndPaths(t *testing.T) {
 		t.Fatal("HEAD moved after invalid changesets")
 	}
 	_ = time.Now
+}
+
+func TestDefaultMessageAndAuthorIdentity(t *testing.T) {
+	svc, pid, repo := newServiceWithRepo(t)
+	base := headOf(t, repo)
+
+	// Empty message -> default "<time> <author> 修改 <path>".
+	if _, err := svc.ApplyChangeset(context.Background(), pid, ChangesetInput{
+		BaseRevision: base,
+		Changes:     []Change{{Op: "create", Path: "docs/auto.md", Content: "# Auto\n"}},
+	}, CommitAuthor{Name: "Carol Chen", Email: "carol@agentdocs.local"}); err != nil {
+		t.Fatal(err)
+	}
+	out, err := gitOutput(context.Background(), repo.Dir, "log", "-1", "--format=%s%x1f%an%x1f%ae")
+	if err != nil {
+		t.Fatal(err)
+	}
+	parts := strings.Split(out, "\x1f")
+	if len(parts) != 3 {
+		t.Fatalf("log parts: %v", parts)
+	}
+	// message: "<time> Carol Chen 修改 docs/auto.md"
+	if !strings.Contains(parts[0], "Carol Chen 修改") || !strings.Contains(parts[0], "docs/auto.md") {
+		t.Fatalf("default message wrong: %q", parts[0])
+	}
+	if !regexp.MustCompile(`^\d{4}-\d{2}-\d{2} \d{2}:\d{2} `).MatchString(parts[0]) {
+		t.Fatalf("message missing time prefix: %q", parts[0])
+	}
+	if parts[1] != "Carol Chen" || parts[2] != "carol@agentdocs.local" {
+		t.Fatalf("author identity wrong: %v", parts[1:])
+	}
 }

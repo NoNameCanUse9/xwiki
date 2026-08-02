@@ -13,6 +13,7 @@ type agentCtxKey int
 
 const (
 	agentTokenKey agentCtxKey = iota
+	agentNameKey
 	agentSecretKey
 )
 
@@ -33,15 +34,41 @@ func AgentAuth(svc *agent.Service) func(http.Handler) http.Handler {
 				response.WriteError(w, r, http.StatusUnauthorized, "invalid_token", "invalid or revoked agent token")
 				return
 			}
-			ctx := contextWithAgent(r.Context(), t.ID, secret)
+			ctx := contextWithAgent(r.Context(), t.ID, t.Name, secret)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
 }
 
-func contextWithAgent(ctx context.Context, tokenID, secret string) context.Context {
+func contextWithAgent(ctx context.Context, tokenID, tokenName, secret string) context.Context {
 	ctx = context.WithValue(ctx, agentTokenKey, tokenID)
+	ctx = context.WithValue(ctx, agentNameKey, tokenName)
 	return context.WithValue(ctx, agentSecretKey, secret)
+}
+
+// AgentTokenName returns the authenticated token's display name.
+func AgentTokenName(r *http.Request) string {
+	n, _ := r.Context().Value(agentNameKey).(string)
+	return n
+}
+
+// CommitAuthorIdentity returns the git identity of the authenticated actor.
+func CommitAuthorIdentity(r *http.Request) (name, email string) {
+	if tokenID := AgentTokenID(r); tokenID != "" {
+		n := AgentTokenName(r)
+		if n == "" {
+			n = tokenID
+		}
+		return n, "token-" + tokenID + "@agentdocs.local"
+	}
+	if u := UserFrom(r); u != nil {
+		n := u.DisplayName
+		if n == "" {
+			n = u.Username
+		}
+		return n, u.Username + "@agentdocs.local"
+	}
+	return "anonymous", "anonymous@agentdocs.local"
 }
 
 // AgentTokenID returns the authenticated agent token id, or "" for session users.

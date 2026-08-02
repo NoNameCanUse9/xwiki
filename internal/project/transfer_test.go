@@ -55,7 +55,7 @@ func TestZipExportImportRoundTrip(t *testing.T) {
 			{Op: "create", Path: "docs/guide.md", Content: "# Guide\n"},
 			{Op: "create", Path: "docs/data.bin", Content: string([]byte{0x00, 0x01, 0x02, 'x'})},
 		},
-	}); err != nil {
+	}, CommitAuthor{Name: "Test Author", Email: "test@agentdocs.local"}); err != nil {
 		t.Fatal(err)
 	}
 	zipData, err := svc.ExportZip(context.Background(), pid)
@@ -103,14 +103,14 @@ func TestBundleExportImportPreservesHistory(t *testing.T) {
 	if _, err := svc.ApplyChangeset(context.Background(), pid, ChangesetInput{
 		BaseRevision: base, Message: "commit one",
 		Changes: []Change{{Op: "create", Path: "a.md", Content: "a"}},
-	}); err != nil {
+	}, CommitAuthor{Name: "Test Author", Email: "test@agentdocs.local"}); err != nil {
 		t.Fatal(err)
 	}
 	base = headOf(t, repo)
 	if _, err := svc.ApplyChangeset(context.Background(), pid, ChangesetInput{
 		BaseRevision: base, Message: "commit two",
 		Changes: []Change{{Op: "create", Path: "b.md", Content: "b"}},
-	}); err != nil {
+	}, CommitAuthor{Name: "Test Author", Email: "test@agentdocs.local"}); err != nil {
 		t.Fatal(err)
 	}
 	bundle, err := svc.ExportBundle(context.Background(), pid)

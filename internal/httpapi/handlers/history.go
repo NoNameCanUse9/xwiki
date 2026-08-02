@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"agentdocs/internal/config"
+	"agentdocs/internal/httpapi/middleware"
 	"agentdocs/internal/httpapi/request"
 	"agentdocs/internal/httpapi/response"
 	"agentdocs/internal/project"
@@ -88,7 +89,8 @@ func (h *HistoryHandler) Revert(w http.ResponseWriter, r *http.Request) {
 		Message string `json:"message"`
 	}
 	_ = request.DecodeJSON(w, r, &body, h.cfg.MaxBodyBytes) // message optional
-	commit, err := h.svc.RevertCommit(r.Context(), projectID, sha, body.Message)
+	name, email := middleware.CommitAuthorIdentity(r)
+	commit, err := h.svc.RevertCommit(r.Context(), projectID, sha, body.Message, project.CommitAuthor{Name: name, Email: email})
 	if err != nil {
 		h.writeRepoError(w, r, err)
 		return

@@ -76,6 +76,26 @@ func (r *Repo) mkTree(ctx context.Context, readme string) (string, error) {
 	return strings.TrimSpace(out.String()), nil
 }
 
+// gitOutputAs runs a git command against a repo with the given commit author identity.
+func gitOutputAs(ctx context.Context, repoDir string, author CommitAuthor, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", "--git-dir", repoDir)
+	cmd.Args = append(cmd.Args, args...)
+	cmd.Env = append(os.Environ(),
+		"GIT_AUTHOR_NAME="+author.Name,
+		"GIT_AUTHOR_EMAIL="+author.Email,
+		"GIT_COMMITTER_NAME="+author.Name,
+		"GIT_COMMITTER_EMAIL="+author.Email,
+		"GIT_CONFIG_NOSYSTEM=1",
+	)
+	var out, errBuf bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &errBuf
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(errBuf.String()))
+	}
+	return strings.TrimSpace(out.String()), nil
+}
+
 // gitOutput runs a git command against a repo with deterministic identity
 // environment and returns trimmed stdout. With --git-dir set, commands that
 // need a working tree (rare here) are run against the bare repo itself.

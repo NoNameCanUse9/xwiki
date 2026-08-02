@@ -76,8 +76,9 @@ func (h *ChangesetHandler) Apply(w http.ResponseWriter, r *http.Request) {
 	}
 
 	key := r.Header.Get("Idempotency-Key")
+	name, email := middleware.CommitAuthorIdentity(r)
 	run := func() (string, error) {
-		res, err := h.svc.ApplyChangeset(r.Context(), projectID, input)
+		res, err := h.svc.ApplyChangeset(r.Context(), projectID, input, project.CommitAuthor{Name: name, Email: email})
 		if err != nil {
 			return "", err
 		}

@@ -118,3 +118,36 @@ func TestChangesetLifecycle(t *testing.T) {
 		t.Fatalf("anon: status = %d, want 401", anon.Code)
 	}
 }
+func TestCommitAuthorFromSession(t *testing.T) {
+	h, _ := newTestRouterWithService(t)
+	cookie := loginAndGetCookie(t, h)
+	projectID, _ := createProjectViaAPI(t, h, cookie, "author-site")
+	base := getRevision(t, h, cookie, projectID)
+	// 空 message -> 后端生成默认（时间 + admin 修改）
+	rec := submitChangeset(t, h, cookie, projectID,
+		fmt.Sprintf(`{"base_revision":"%s","changes":[{"op":"create","path":"docs/a.md","content":"# A\n"}]}`, base))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("write: %d %s", rec.Code, rec.Body.String())
+	}
+	var list struct {
+		Commits []struct {
+			SHA     string `json:"sha"`
+			Message string `json:"message"`
+			Author  string `json:"author"`
+		} `json:"commits"`
+	}
+	rec = apiRequest(h, http.MethodGet, "/api/v1/projects/"+projectID+"/commits", cookie, "")
+	if err := json.Unmarshal(rec.Body.Bytes(), &list); err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Commits) < 2 {
+		t.Fatalf("commits: %d", len(list.Commits))
+	}
+	top := list.Commits[0]
+	if !strings.Contains(top.Message, "Admin 修改") || !strings.Contains(top.Message, "docs/a.md") {
+		t.Fatalf("default message wrong: %q", top.Message)
+	}
+	if top.Author != "Admin" { // display_name of admin
+		t.Fatalf("author wrong: %q", top.Author)
+	}
+}

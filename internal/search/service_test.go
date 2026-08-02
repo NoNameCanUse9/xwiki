@@ -93,7 +93,7 @@ func TestReindexProjectIncremental(t *testing.T) {
 			{Op: "create", Path: "docs/findme.md", Content: "# Findme\n\nunique keyword zanzibar\n"},
 			{Op: "create", Path: "docs/other.md", Content: "# Other\n\nplain\n"},
 		},
-	}); err != nil {
+	}, project.CommitAuthor{Name: "Test Author", Email: "test@agentdocs.local"}); err != nil {
 		t.Fatal(err)
 	}
 	stats, err = svc.ReindexProject(context.Background(), p.ID)
@@ -113,7 +113,7 @@ func TestReindexProjectIncremental(t *testing.T) {
 		BaseRevision: base,
 		Message:      "remove findme",
 		Changes:      []project.Change{{Op: "delete", Path: "docs/findme.md"}},
-	}); err != nil {
+	}, project.CommitAuthor{Name: "Test Author", Email: "test@agentdocs.local"}); err != nil {
 		t.Fatal(err)
 	}
 	stats, err = svc.ReindexProject(context.Background(), p.ID)

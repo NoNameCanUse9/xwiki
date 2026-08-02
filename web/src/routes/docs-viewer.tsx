@@ -216,7 +216,7 @@ export default function DocsViewerPage() {
       const rev = await getRevision(id);
       await submitChangeset(id, {
         base_revision: rev.revision,
-        message: `Update ${filePath}`,
+        message: "", // 后端生成默认：时间 + 操作者 修改 <path>
         changes: [{ op: "update", path: filePath, content: draft }],
       });
       toast.success("已保存");

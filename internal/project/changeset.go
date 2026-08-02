@@ -10,7 +10,15 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 )
+
+// CommitAuthor is the identity recorded on commits (set by the handler from
+// the authenticated actor, never from client input).
+type CommitAuthor struct {
+	Name  string
+	Email string
+}
 
 // Change is one file operation inside a changeset.
 type Change struct {
@@ -64,9 +72,18 @@ var ErrArchived = errors.New("project is archived")
 // ApplyChangeset applies a set of file changes in one atomic commit. A dry
 // run returns a preview without touching any ref. Concurrent stale writes are
 // rejected with ErrConflict by Git's compare-and-swap update-ref.
-func (s *Service) ApplyChangeset(ctx context.Context, projectID string, input ChangesetInput) (*ChangesetResult, error) {
+func (s *Service) ApplyChangeset(ctx context.Context, projectID string, input ChangesetInput, author CommitAuthor) (*ChangesetResult, error) {
 	if err := validateChangeset(input); err != nil {
 		return nil, err
+	}
+	if author.Name == "" {
+		author.Name = "anonymous"
+	}
+	if author.Email == "" {
+		author.Email = "anonymous@agentdocs.local"
+	}
+	if strings.TrimSpace(input.Message) == "" {
+		input.Message = defaultMessage(s.clock.Now(), author, input.Changes)
 	}
 	p, err := s.store.GetByID(ctx, projectID)
 	if err != nil {
@@ -158,7 +175,7 @@ func (s *Service) ApplyChangeset(ctx context.Context, projectID string, input Ch
 		}, nil
 	}
 
-	commit, err := gitOutput(ctx, repo.Dir, "commit-tree", tree, "-p", current, "-m", input.Message)
+	commit, err := gitOutputAs(ctx, repo.Dir, author, "commit-tree", tree, "-p", current, "-m", input.Message)
 	if err != nil {
 		cleanup()
 		return nil, fmt.Errorf("commit-tree: %w", err)
@@ -172,11 +189,19 @@ func (s *Service) ApplyChangeset(ctx context.Context, projectID string, input Ch
 	return &ChangesetResult{Commit: commit, Revision: commit}, nil
 }
 
-// validateChangeset checks structure, sizes and path safety up front.
-func validateChangeset(input ChangesetInput) error {
-	if strings.TrimSpace(input.Message) == "" {
-		return errors.New("changeset message is required")
+// defaultMessage builds the fallback commit message when none is supplied:
+// "<time> <author> 修改 [<firstPath>]" (e.g. 2026-08-02 18:30 admin 修改 docs/a.md).
+func defaultMessage(now time.Time, author CommitAuthor, changes []Change) string {
+	msg := fmt.Sprintf("%s %s 修改", now.UTC().Format("2006-01-02 15:04"), author.Name)
+	if len(changes) > 0 && changes[0].Path != "" {
+		msg += " " + changes[0].Path
 	}
+	return msg
+}
+
+// validateChangeset checks structure, sizes and path safety up front.
+// Message may be empty: the service fills a default (time + author).
+func validateChangeset(input ChangesetInput) error {
 	if len(input.Changes) == 0 || len(input.Changes) > maxChangesetFiles {
 		return fmt.Errorf("changeset must contain 1-%d changes", maxChangesetFiles)
 	}
