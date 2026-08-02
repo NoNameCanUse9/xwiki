@@ -11,30 +11,47 @@ import (
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/extension"
 
+	"agentdocs/internal/agent"
 	"agentdocs/internal/config"
+	"agentdocs/internal/httpapi/middleware"
 	"agentdocs/internal/httpapi/request"
 	"agentdocs/internal/httpapi/response"
 	"agentdocs/internal/project"
 )
 
-// maxDocBlobBytes caps the size of a single readable document.
-const maxDocBlobBytes = 2 << 20 // 2 MiB
+// maxDocBlobBytes is the readable document size cap (see project.MaxDocBlobBytes).
+const maxDocBlobBytes = project.MaxDocBlobBytes
 
 // DocsHandler serves read-only document endpoints backed directly by Git.
 type DocsHandler struct {
-	cfg     *config.Config
-	svc     *project.Service
-	log     *slog.Logger
+	cfg      *config.Config
+	svc      *project.Service
+	agentSvc *agent.Service
+	log      *slog.Logger
 	markdown goldmark.Markdown
 }
 
-func NewDocsHandler(cfg *config.Config, svc *project.Service, log *slog.Logger) *DocsHandler {
+func NewDocsHandler(cfg *config.Config, svc *project.Service, agentSvc *agent.Service, log *slog.Logger) *DocsHandler {
 	return &DocsHandler{
 		cfg:      cfg,
 		svc:      svc,
+		agentSvc: agentSvc,
 		log:      log,
 		markdown: goldmark.New(goldmark.WithExtensions(extension.GFM)),
 	}
+}
+
+// authorizeRead enforces agent-token project binding for read endpoints.
+func (h *DocsHandler) authorizeRead(w http.ResponseWriter, r *http.Request, projectID string) bool {
+	secret := middleware.AgentSecret(r)
+	if secret == "" {
+		return true
+	}
+	if _, err := h.agentSvc.Authorize(r.Context(), secret, projectID, "", false); err != nil {
+		response.WriteError(w, r, http.StatusForbidden, "agent_forbidden", "token cannot access this project")
+		return false
+	}
+	return true
 }
 
 // validateDocPath rejects traversal, absolute and empty paths.
@@ -61,6 +78,9 @@ func (h *DocsHandler) repoFor(r *http.Request, projectID string) (*project.Repo,
 // Tree handles GET /api/v1/projects/{id}/docs/tree?path=...
 func (h *DocsHandler) Tree(w http.ResponseWriter, r *http.Request) {
 	projectID := request.PathParam(r, "id")
+	if !h.authorizeRead(w, r, projectID) {
+		return
+	}
 	dirPath := r.URL.Query().Get("path")
 	if dirPath != "" && !validateDocPath(dirPath) {
 		response.WriteError(w, r, http.StatusBadRequest, "invalid_doc_path", "invalid directory path")
@@ -98,6 +118,9 @@ func (h *DocsHandler) Tree(w http.ResponseWriter, r *http.Request) {
 // Page handles GET /api/v1/projects/{id}/docs/pages/{path:*}.
 func (h *DocsHandler) Page(w http.ResponseWriter, r *http.Request) {
 	projectID := request.PathParam(r, "id")
+	if !h.authorizeRead(w, r, projectID) {
+		return
+	}
 	filePath := request.PathParam(r, "*")
 	format := r.URL.Query().Get("format")
 	if format == "" {
@@ -153,6 +176,9 @@ func (h *DocsHandler) Page(w http.ResponseWriter, r *http.Request) {
 // falling back to docs/README.md.
 func (h *DocsHandler) Home(w http.ResponseWriter, r *http.Request) {
 	projectID := request.PathParam(r, "id")
+	if !h.authorizeRead(w, r, projectID) {
+		return
+	}
 	repo, err := h.repoFor(r, projectID)
 	if err != nil {
 		if errors.Is(err, project.ErrNotFound) {

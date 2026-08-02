@@ -17,6 +17,11 @@ const userKey ctxKey = 0
 func SessionAuth(svc *auth.Service) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Requests already authenticated by AgentAuth (Bearer) pass through.
+			if AgentTokenID(r) != "" {
+				next.ServeHTTP(w, r)
+				return
+			}
 			cookie, err := r.Cookie("agentdocs_session")
 			if err != nil {
 				response.WriteError(w, r, http.StatusUnauthorized, "authentication_required", "login required")

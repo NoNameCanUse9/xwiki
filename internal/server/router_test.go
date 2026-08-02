@@ -10,10 +10,11 @@ import (
 	"testing"
 	"time"
 
+	"agentdocs/internal/agent"
 	"agentdocs/internal/auth"
 	"agentdocs/internal/config"
-	"agentdocs/internal/project"
 	"agentdocs/internal/platform/clock"
+	"agentdocs/internal/project"
 	"agentdocs/internal/store/sqlite"
 	"agentdocs/internal/user"
 )
@@ -49,7 +50,7 @@ func newTestRouterWithService(t *testing.T) (http.Handler, *project.Service) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	return NewRouter(cfg, log, db, users, authSvc, projectsSvc), projectsSvc
+	return NewRouter(cfg, log, db, users, authSvc, projectsSvc, agent.NewService(db, clock.Real{})), projectsSvc
 }
 
 func TestHealthAndReady(t *testing.T) {

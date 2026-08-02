@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"agentdocs/internal/agent"
 	"agentdocs/internal/auth"
 	"agentdocs/internal/config"
 	"agentdocs/internal/project"
@@ -42,7 +43,8 @@ func New(cfg *config.Config) (*App, error) {
 	users := user.NewStore(db)
 	authSvc := auth.NewService(db, clk, cfg.SessionTTL)
 	projectsSvc := project.NewService(db, cfg.DataDir, clk)
-	handler := server.NewRouter(cfg, log, db, users, authSvc, projectsSvc)
+	agentSvc := agent.NewService(db, clk)
+	handler := server.NewRouter(cfg, log, db, users, authSvc, projectsSvc, agentSvc)
 	return &App{
 		cfg: cfg, log: log, db: db, clock: clk,
 		users: users, authSvc: authSvc, projectsSvc: projectsSvc, handler: handler,

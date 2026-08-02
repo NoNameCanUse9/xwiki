@@ -67,3 +67,11 @@ HTTP 层（internal/httpapi）→ 服务层（internal/auth、internal/app）→
 - 只读：log（%H%x1f 分隔）/ show --name-status / log --follow / show --numstat|--patch
 - Revert：worktree + reverse-apply（git apply -R，先 --check 预检），通过后走阶段四 CAS 提交管线；原提交永不改写
 - patch 输出用原始字节读取（TrimSpace 会破坏 diff 语义）
+
+## Agent Token 与审计（阶段六）
+
+- token 明文 ad_<32hex>，库中只存 SHA-256（同会话模式）；scope read|write
+- 授权链：AgentAuth 中间件（Bearer）→ 项目绑定 → 写入路径前缀逐条校验
+- 双认证 OR：AgentAuth 处理 Bearer，SessionAuth 兜底 cookie；SessionAuth 跳过已认证请求
+- 幂等：(key, project_id) 唯一 + request hash 比对；命中返回首次结果
+- 审计：audit_logs 表记录 actor（user|token）、动作、路径、request_id

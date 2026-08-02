@@ -13,7 +13,7 @@
 | 03 | `2026-08-02-agentdocs-phase-03-docs-read.md` | 阶段三：文档读取 | Git Tree、Markdown 读取与渲染、文档树、面包屑、项目首页 | 02 | ✅ 已完成 |
 | 04 | `2026-08-02-agentdocs-phase-04-changesets.md` | 阶段四：ChangeSet 写入 | 项目锁、临时 Worktree、create/update/delete/move、dry-run、原子 update-ref、409 冲突 | 03 | ✅ 已完成 |
 | 05 | `2026-08-02-agentdocs-phase-05-history.md` | 阶段五：历史和 Diff | Commit 列表、文件历史、机器可读 Diff、Revert | 04 | ✅ 已完成 |
-| 06 | （待编写） | 阶段六：Agent Token | Token、Scope、项目/路径限制、幂等键、审计日志 | 05 | 待编写 |
+| 06 | `2026-08-02-agentdocs-phase-06-tokens.md` | 阶段六：Agent Token | Token、Scope、项目/路径限制、幂等键、审计日志 | 05 | ✅ 已完成 |
 | 07 | （待编写） | 阶段七：搜索 | SQLite FTS5、增量索引、reindex CLI | 05 | 待编写 |
 | 08 | （待编写） | 阶段八：OpenAPI 与导入导出 | Scalar 预览、ZIP/Bundle 导入导出、图片与附件 | 05 | 待编写 |
 

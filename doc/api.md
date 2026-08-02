@@ -176,3 +176,34 @@ invalid_changeset / revision_conflict / project_archived
 ## 错误码（本阶段新增）
 
 commit_not_found / revert_conflict
+
+---
+
+# Agent Token API（阶段六）
+
+Token 让 AI Agent 以 Bearer 认证访问。库中只存 SHA-256 哈希，明文仅创建时返回一次。
+
+## Token 管理（session 登录）
+
+### POST /api/v1/tokens
+
+请求：`{"name":"ci-bot","scope":"write","project_ids":["prj_..."],"path_prefixes":["docs"]}`
+
+- 201 `{"token":{...},"secret":"ad_<32hex>"}`（secret 仅此一次）
+- 400 invalid_token_input（scope 非 read|write / 无项目绑定 / 前缀带斜杠）
+
+### GET /api/v1/tokens → 200 `{"tokens":[...]}`
+
+### DELETE /api/v1/tokens/{id} → 200 `{"ok":true}`（幂等撤销）
+
+## Agent 访问（Authorization: Bearer ad_...）
+
+- 读端点（tree/pages/home/commits/diff/history/revision）：token 需绑定该项目（否则 403 agent_forbidden）
+- `POST /api/v1/projects/{id}/changesets`：
+  - scope 必须 write；每个写入路径（含 new_path）必须以某 path_prefix 开头（否则 403）
+  - 可选 `Idempotency-Key` 头：同 key 同 body 重放 → 返回首次结果（不新建 commit）；同 key 不同 body → 409 idempotency_conflict
+- 全部 token 操作写入 audit_logs（`GET /api/v1/projects/{id}/audit` 可查，session 登录）
+
+## 错误码（本阶段新增）
+
+invalid_token / invalid_token_input / agent_forbidden / idempotency_conflict / token_not_found

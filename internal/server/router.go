@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/cors"
 
+	"agentdocs/internal/agent"
 	"agentdocs/internal/auth"
 	"agentdocs/internal/config"
 	"agentdocs/internal/httpapi/handlers"
@@ -20,7 +21,7 @@ import (
 	"agentdocs/web"
 )
 
-func NewRouter(cfg *config.Config, log *slog.Logger, db *sql.DB, users *user.Store, authSvc *auth.Service, projectsSvc *project.Service) http.Handler {
+func NewRouter(cfg *config.Config, log *slog.Logger, db *sql.DB, users *user.Store, authSvc *auth.Service, projectsSvc *project.Service, agentSvc *agent.Service) http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(middleware.RequestID)
@@ -36,8 +37,9 @@ func NewRouter(cfg *config.Config, log *slog.Logger, db *sql.DB, users *user.Sto
 
 	h := handlers.NewAuthHandler(cfg, authSvc, users, log)
 	ph := handlers.NewProjectHandler(cfg, projectsSvc, log)
-	dh := handlers.NewDocsHandler(cfg, projectsSvc, log)
-	ch := handlers.NewChangesetHandler(cfg, projectsSvc, log)
+	dh := handlers.NewDocsHandler(cfg, projectsSvc, agentSvc, log)
+	ch := handlers.NewChangesetHandler(cfg, projectsSvc, agentSvc, log)
+	th := handlers.NewTokenHandler(cfg, agentSvc, log)
 	hh := handlers.NewHistoryHandler(cfg, projectsSvc, log)
 
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -64,8 +66,17 @@ func NewRouter(cfg *config.Config, log *slog.Logger, db *sql.DB, users *user.Sto
 				r.Post("/password", h.Password)
 			})
 		})
+		r.Route("/tokens", func(r chi.Router) {
+			r.Group(func(r chi.Router) {
+				r.Use(middleware.SessionAuth(authSvc))
+				r.Post("/", th.Create)
+				r.Get("/", th.List)
+				r.Delete("/{id}", th.Revoke)
+			})
+		})
 		r.Route("/projects", func(r chi.Router) {
 			r.Group(func(r chi.Router) {
+				r.Use(middleware.AgentAuth(agentSvc))
 				r.Use(middleware.SessionAuth(authSvc))
 				r.Post("/", ph.Create)
 				r.Get("/", ph.List)
@@ -76,7 +87,8 @@ func NewRouter(cfg *config.Config, log *slog.Logger, db *sql.DB, users *user.Sto
 				r.Get("/{id}/docs/pages/*", dh.Page)
 				r.Get("/{id}/revision", ch.Revision)
 				r.Post("/{id}/changesets", ch.Apply)
-				r.Get("/{id}/commits", hh.Commits)
+				r.Get("/{id}/audit", th.Audit)
+			r.Get("/{id}/commits", hh.Commits)
 				r.Get("/{id}/commits/{sha}", hh.Commit)
 				r.Get("/{id}/commits/{sha}/diff", hh.Diff)
 				r.Post("/{id}/commits/{sha}/revert", hh.Revert)
