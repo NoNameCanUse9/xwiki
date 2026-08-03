@@ -194,6 +194,155 @@ func (s *Service) ImportRepo(ctx context.Context, name, url string) (*BundleImpo
 	return &BundleImportResult{Project: p, Commits: commits}, nil
 }
 
+// UploadedFile is one file entry in a folder import payload.
+type UploadedFile struct {
+	Path    string `json:"path"`
+	Content []byte `json:"-"` // raw bytes, not JSON-serializable
+}
+
+// ImportFolderInput carries the user-supplied fields for ImportFolder.
+type ImportFolderInput struct {
+	Name        string
+	Description string
+	Files       []UploadedFile
+}
+
+// ImportFolderResult reports a folder import outcome.
+type ImportFolderResult struct {
+	Project *Project `json:"project"`
+	Commits int      `json:"commits"`
+}
+
+// ImportFolder creates a new project from an uploaded folder. If any uploaded
+// file has a path under .git/, the original git history is preserved; otherwise
+// all files are committed as a fresh initial snapshot.
+func (s *Service) ImportFolder(ctx context.Context, input ImportFolderInput) (*ImportFolderResult, error) {
+	if err := ValidateName(input.Name); err != nil {
+		return nil, err
+	}
+	if len(input.Files) == 0 {
+		return nil, ErrInvalid
+	}
+
+	projectID := id.New("prj")
+	now := s.clock.Now().UTC()
+	repoDir := filepath.Join(s.reposRoot, projectID, "repo.git")
+	if err := os.MkdirAll(filepath.Dir(repoDir), 0o755); err != nil {
+		return nil, err
+	}
+	cleanup := func() { _ = os.RemoveAll(filepath.Dir(repoDir)) }
+
+	// Detect whether uploaded files include .git internals.
+	hasGit := false
+	for _, f := range input.Files {
+		if hasGitSegment(f.Path) {
+			hasGit = true
+			break
+		}
+	}
+
+	// Build a temporary non-bare repository, write all files, then convert
+	// to bare and move into the target location.
+	tmpDir, err := os.MkdirTemp("", "agentdocs-folder-import-*")
+	if err != nil {
+		return nil, fmt.Errorf("create temp dir: %w", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	if hasGit {
+		// Write all files (including .git/) into the temp directory.
+		for _, f := range input.Files {
+			if !validateDocPathInternal(f.Path) {
+				cleanup()
+				return nil, fmt.Errorf("invalid path in uploaded folder: %q", f.Path)
+			}
+			fp := filepath.Join(tmpDir, filepath.FromSlash(f.Path))
+			if err := os.MkdirAll(filepath.Dir(fp), 0o755); err != nil {
+				cleanup()
+				return nil, err
+			}
+			if err := os.WriteFile(fp, f.Content, 0o644); err != nil {
+				cleanup()
+				return nil, err
+			}
+		}
+		// Verify the repo is usable.
+		if _, err := gitOutputIn(ctx, tmpDir, "status"); err != nil {
+			cleanup()
+			return nil, fmt.Errorf("invalid git repository in uploaded folder: %w", err)
+		}
+	} else {
+		// No .git — init, write, commit.
+		if _, err := gitOutputPlain(ctx, "init", "--initial-branch=main", tmpDir); err != nil {
+			cleanup()
+			return nil, fmt.Errorf("git init: %w", err)
+		}
+		for _, f := range input.Files {
+			if !validateDocPathInternal(f.Path) {
+				cleanup()
+				return nil, fmt.Errorf("invalid path in uploaded folder: %q", f.Path)
+			}
+			fp := filepath.Join(tmpDir, filepath.FromSlash(f.Path))
+			if err := os.MkdirAll(filepath.Dir(fp), 0o755); err != nil {
+				cleanup()
+				return nil, err
+			}
+			if err := os.WriteFile(fp, f.Content, 0o644); err != nil {
+				cleanup()
+				return nil, err
+			}
+		}
+		if _, err := gitOutputIn(ctx, tmpDir, "add", "-A"); err != nil {
+			cleanup()
+			return nil, fmt.Errorf("git add: %w", err)
+		}
+		if _, err := gitOutputIn(ctx, tmpDir, "commit", "-m", "Initial import from folder"); err != nil {
+			cleanup()
+			return nil, fmt.Errorf("git commit: %w", err)
+		}
+	}
+
+	// Convert the temp repo to a bare repo at the target location.
+	if _, err := gitOutput(ctx, repoDir, "init", "--bare", "--initial-branch=main", repoDir); err != nil {
+		cleanup()
+		return nil, fmt.Errorf("init bare: %w", err)
+	}
+	if _, err := gitOutput(ctx, repoDir, "fetch", tmpDir, "refs/heads/*:refs/heads/*"); err != nil {
+		cleanup()
+		return nil, fmt.Errorf("fetch into bare: %w", err)
+	}
+
+	p := &Project{
+		ID:          projectID,
+		Name:        input.Name,
+		Description: input.Description,
+		RepoDir:     filepath.ToSlash(filepath.Join("repos", projectID, "repo.git")),
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	if err := s.store.Create(ctx, p); err != nil {
+		cleanup()
+		return nil, err
+	}
+
+	commits := 0
+	if out, err := gitOutput(ctx, repoDir, "rev-list", "--count", "HEAD"); err == nil {
+		fmt.Sscanf(out, "%d", &commits)
+	}
+	return &ImportFolderResult{Project: p, Commits: commits}, nil
+}
+
+// hasGitSegment reports whether a slash-separated path contains a .git
+// directory segment (either at the root or nested).
+func hasGitSegment(path string) bool {
+	for _, seg := range strings.Split(path, "/") {
+		if seg == ".git" {
+			return true
+		}
+	}
+	return false
+}
+
 // validRepoURL restricts import sources to git-capable protocols.
 func validRepoURL(u string) bool {
 	for _, prefix := range []string{"http://", "https://", "git://", "ssh://", "file://"} {

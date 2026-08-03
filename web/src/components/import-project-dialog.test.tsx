@@ -7,7 +7,7 @@ import ImportProjectDialog from "./import-project-dialog";
 import * as transferApi from "@/lib/api/transfer";
 
 vi.mock("@/lib/api/transfer", () => ({
-  importRepo: vi.fn(),
+  importFolder: vi.fn(),
   importZip: vi.fn(),
 }));
 
@@ -19,33 +19,37 @@ function wrap() {
         <Route path="/projects/:id/docs" element={<div>docs-view</div>} />
       </Routes>
       <Toaster />
-    </MemoryRouter>
+    </MemoryRouter>,
   );
+}
+
+function makeFile(path: string): File {
+  const file = new File(["content"], path.split("/").pop()!, {
+    type: "text/plain",
+  });
+  Object.defineProperty(file, "webkitRelativePath", {
+    value: path,
+    writable: true,
+  });
+  return file;
 }
 
 describe("ImportProjectDialog", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("imports a repo from URL and navigates to its docs", async () => {
-    vi.mocked(transferApi.importRepo).mockResolvedValue({
+  it("imports a folder and navigates to its docs", async () => {
+    vi.mocked(transferApi.importFolder).mockResolvedValue({
       project: { id: "prj_9", name: "imported" },
       commits: 3,
     });
     const user = userEvent.setup();
     wrap();
     await user.click(screen.getByRole("button", { name: "导入项目" }));
-    await user.type(screen.getByLabelText("项目名"), "imported");
-    await user.type(
-      screen.getByLabelText("Git 仓库 URL"),
-      "https://github.com/x/y.git",
-    );
+    const input = screen.getByLabelText<HTMLInputElement>("选择文件夹");
+    const file = makeFile("my-folder/README.md");
+    await user.upload(input, [file]);
     await user.click(screen.getByRole("button", { name: "导入" }));
-    await vi.waitFor(() =>
-      expect(transferApi.importRepo).toHaveBeenCalledWith(
-        "imported",
-        "https://github.com/x/y.git",
-      ),
-    );
+    await vi.waitFor(() => expect(transferApi.importFolder).toHaveBeenCalled());
     expect(await screen.findByText("docs-view")).toBeInTheDocument();
   });
 
@@ -54,7 +58,7 @@ describe("ImportProjectDialog", () => {
     wrap();
     await user.click(screen.getByRole("button", { name: "导入项目" }));
     await user.click(screen.getByRole("button", { name: "导入" }));
-    expect(transferApi.importRepo).not.toHaveBeenCalled();
-    expect(await screen.findByText("项目名与 Git URL 必填")).toBeInTheDocument();
+    expect(transferApi.importFolder).not.toHaveBeenCalled();
+    expect(await screen.findByText("项目名必填")).toBeInTheDocument();
   });
 });

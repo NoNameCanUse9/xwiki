@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 
@@ -80,6 +81,74 @@ func (h *ProjectHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	response.WriteJSON(w, http.StatusOK, map[string]any{"project": p})
+}
+
+// ImportFolder handles POST /api/v1/projects/import-folder (multipart: files + name).
+func (h *ProjectHandler) ImportFolder(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseMultipartForm(256 << 20); err != nil {
+		response.WriteError(w, r, http.StatusBadRequest, "invalid_upload", "multipart body required")
+		return
+	}
+	name := r.FormValue("name")
+	description := r.FormValue("description")
+
+	parsedFiles, ok := r.MultipartForm.File["files"]
+	if !ok || len(parsedFiles) == 0 {
+		response.WriteError(w, r, http.StatusBadRequest, "invalid_upload", "at least one file required")
+		return
+	}
+	// Go's multipart parser strips directory parts from filename=, so the
+	// frontend sends the real relative path in a parallel "paths" field,
+	// index-aligned with files.
+	paths := r.MultipartForm.Value["paths"]
+
+	var files []project.UploadedFile
+	for i, fh := range parsedFiles {
+		f, err := fh.Open()
+		if err != nil {
+			response.WriteError(w, r, http.StatusBadRequest, "invalid_upload", "cannot read uploaded file")
+			return
+		}
+		defer f.Close()
+		buf, err := io.ReadAll(f)
+		if err != nil {
+			response.WriteError(w, r, http.StatusBadRequest, "invalid_upload", "cannot read uploaded file")
+			return
+		}
+		if len(buf) > project.MaxImportFileBytes {
+			response.WriteError(w, r, http.StatusRequestEntityTooLarge, "file_too_large", "file exceeds size limit")
+			return
+		}
+		path := fh.Filename
+		if i < len(paths) && paths[i] != "" {
+			path = paths[i]
+		}
+		files = append(files, project.UploadedFile{
+			Path:    path,
+			Content: buf,
+		})
+	}
+
+	res, err := h.svc.ImportFolder(r.Context(), project.ImportFolderInput{
+		Name:        name,
+		Description: description,
+		Files:       files,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, project.ErrInvalid):
+			response.WriteError(w, r, http.StatusBadRequest, "invalid_project_name",
+				"project name must be 1-64 lowercase letters, digits and single hyphens")
+		case errors.Is(err, project.ErrConflict):
+			response.WriteError(w, r, http.StatusConflict, "project_name_conflict",
+				"a project with this name already exists")
+		default:
+			h.log.Error("import folder failed", "error", err, "request_id", request.RequestID(r))
+			response.WriteError(w, r, http.StatusInternalServerError, "internal_error", "could not import folder")
+		}
+		return
+	}
+	response.WriteJSON(w, http.StatusCreated, map[string]any{"project": res.Project, "commits": res.Commits})
 }
 
 // Unarchive handles POST /api/v1/projects/{id}/unarchive.

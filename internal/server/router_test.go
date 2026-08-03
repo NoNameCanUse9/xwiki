@@ -89,12 +89,12 @@ func TestSPAServesPlaceholderAndFallsBack(t *testing.T) {
 	h := newTestRouter(t)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "AgentDocs placeholder") {
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "<div id=\"root\"></div>") {
 		t.Fatalf("root: status=%d body=%q", rec.Code, rec.Body.String())
 	}
 	rec = httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/login", nil))
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "AgentDocs placeholder") {
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "<div id=\"root\"></div>") {
 		t.Fatalf("spa fallback: status=%d body=%q", rec.Code, rec.Body.String())
 	}
 }

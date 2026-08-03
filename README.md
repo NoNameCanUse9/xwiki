@@ -35,7 +35,7 @@ cd web && npm run dev
 ./agentdocs admin create -username admin -password secret123
 ```
 
-浏览器打开 http://localhost:8080 登录。
+浏览器打开 <http://localhost:8080> 登录。
 
 ### 构建与测试
 

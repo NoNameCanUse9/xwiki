@@ -1,5 +1,10 @@
 # Local Pi runtime state
 .atl/
+.pi-subagents/
+.review-input/
+
+# Editor
+.vscode/
 
 # AgentDocs runtime
 /data/
