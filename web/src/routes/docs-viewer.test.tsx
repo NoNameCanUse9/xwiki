@@ -258,6 +258,7 @@ describe("DocsViewerPage", () => {
 		await user.keyboard("{Control>}a{/Control}");
 		await user.keyboard("# Updated{Enter}");
 		await user.click(screen.getByRole("button", { name: "上锁并提交" }));
+		await user.click(screen.getByRole("button", { name: "提交并上锁" }));
 		await vi.waitFor(() =>
 			expect(changesetsApi.submitChangeset).toHaveBeenCalledWith("prj_1", {
 				base_revision: "rev1",
@@ -351,6 +352,7 @@ describe("DocsViewerPage", () => {
 		await user.keyboard("x");
 		await new Promise((r) => setTimeout(r, 100));
 		await user.click(screen.getByRole("button", { name: "上锁并提交" }));
+		await user.click(screen.getByRole("button", { name: "提交并上锁" }));
 		await new Promise((r) => setTimeout(r, 400));
 		expect(screen.queryByText("文档已被他人修改，请刷新后重试")).not.toBeNull();
 	});
@@ -481,6 +483,7 @@ describe("DocsViewerPage edit sessions", () => {
 		await screen.findAllByRole("textbox");
 		expect(getEditor()?.textContent).toContain("Guide");
 		await user.click(screen.getByRole("button", { name: "上锁并提交" }));
+		await user.click(screen.getByRole("button", { name: "提交并上锁" }));
 		await new Promise((r) => setTimeout(r, 100));
 
 		// The raw fetch now returns the post-save content.
@@ -517,6 +520,7 @@ describe("DocsViewerPage edit sessions", () => {
 		expect(getEditor()?.textContent).toContain("Guide");
 
 		await user.click(screen.getByRole("button", { name: "上锁并提交" }));
+		await user.click(screen.getByRole("button", { name: "提交并上锁" }));
 		await new Promise((r) => setTimeout(r, 50));
 		expect(getEditor()).toBeUndefined();
 
@@ -740,11 +744,12 @@ describe("DocsViewerPage edit sessions", () => {
 		await user.keyboard("x");
 		await new Promise((r) => setTimeout(r, 100));
 
+		await user.click(screen.getByRole("button", { name: "上锁并提交" }));
 		await user.type(
 			screen.getByLabelText("commit message"),
 			"fix typo",
 		);
-		await user.click(screen.getByRole("button", { name: "上锁并提交" }));
+		await user.click(screen.getByRole("button", { name: "提交并上锁" }));
 		await vi.waitFor(() =>
 			expect(changesetsApi.submitChangeset).toHaveBeenCalledWith(
 				"prj_1",

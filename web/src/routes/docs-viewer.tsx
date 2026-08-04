@@ -14,6 +14,13 @@ import {
 import { toast } from "sonner";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogHeader,
+	DialogTitle,
+} from "@/components/ui/dialog";
 import { getRevision, submitChangeset } from "@/lib/api/changesets";
 import { fileHistory } from "@/lib/api/history";
 import { searchProject } from "@/lib/api/search";
@@ -405,6 +412,7 @@ export default function DocsViewerPage() {
 	const [lockHolder, setLockHolder] = useState<EditLock | null>(null);
 	const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
 	const [commitMessage, setCommitMessage] = useState("");
+	const [commitOpen, setCommitOpen] = useState(false);
 	const [showHistory, setShowHistory] = useState(false);
 	const [showAttachments, setShowAttachments] = useState(false);
 	const [showBacklinks, setShowBacklinks] = useState(false);
@@ -575,6 +583,7 @@ export default function DocsViewerPage() {
 	// Lock the page again: commit any pending edits, then release the lock.
 	const lockAndCommit = async () => {
 		if (!editing || saving) return;
+		setCommitOpen(false);
 		try {
 			if (dirty) await commitDraft();
 		} catch {
@@ -749,6 +758,41 @@ export default function DocsViewerPage() {
 			)}
 
 			<CommandPalette projectId={id} />
+			<Dialog open={commitOpen} onOpenChange={setCommitOpen}>
+				<DialogContent>
+					<DialogHeader>
+						<DialogTitle>提交修改</DialogTitle>
+						<DialogDescription>
+							填写 commit message，留空则使用默认（时间 + 用户名）。提交后文档将被锁定（只读）。
+						</DialogDescription>
+					</DialogHeader>
+					<div className="space-y-2">
+						<Input
+							aria-label="commit message"
+							placeholder="commit message（留空默认：时间 + 用户名）"
+							value={commitMessage}
+							onChange={(e) => setCommitMessage(e.target.value)}
+							onKeyDown={(e) => {
+								if (e.key === "Enter") void lockAndCommit();
+							}}
+							className="font-mono text-xs"
+							autoFocus
+						/>
+					</div>
+					<div className="flex justify-end gap-2">
+						<Button variant="outline" onClick={() => setCommitOpen(false)}>
+							取消
+						</Button>
+						<Button
+							onClick={() => void lockAndCommit()}
+							disabled={saving}
+						>
+							<Lock className="size-3.5" />
+							{saving ? "提交中…" : "提交并上锁"}
+						</Button>
+					</div>
+				</DialogContent>
+			</Dialog>
 			<div className="flex w-full flex-col">
 				<header className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-rule)] px-6 py-3">
 					<div className="flex items-center gap-3">
@@ -783,23 +827,13 @@ export default function DocsViewerPage() {
 														? "自动保存草稿中"
 														: "已是最新"}
 										</span>
-										<Input
-											aria-label="commit message"
-											placeholder="commit message（留空默认：时间 + 用户名）"
-											value={commitMessage}
-											onChange={(e) => setCommitMessage(e.target.value)}
-											onKeyDown={(e) => {
-												if (e.key === "Enter") void lockAndCommit();
-											}}
-											className="h-8 w-56 font-mono text-xs"
-										/>
 										<Button
 											size="sm"
-											onClick={() => void lockAndCommit()}
+											onClick={() => setCommitOpen(true)}
 											disabled={saving}
 										>
 											<Lock className="size-3.5" />
-											{saving ? "提交中…" : "上锁并提交"}
+											上锁并提交
 										</Button>
 									</>
 								) : (
