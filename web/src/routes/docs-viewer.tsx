@@ -387,8 +387,13 @@ export default function DocsViewerPage() {
 	const navigate = useNavigate();
 	const queryClient = useQueryClient();
 	const [editing, setEditing] = useState(false);
-	const [draft, setDraft] = useState("");
 	const [dirty, setDirty] = useState(false);
+	// The live draft lives in a ref so typing never re-renders the page;
+	// `seed` is the initial content the editor mounts with (a restored
+	// local draft, or the server raw content).
+	const draftRef = useRef("");
+	const dirtyRef = useRef(false);
+	const [seed, setSeed] = useState<string | null>(null);
 	const [saving, setSaving] = useState(false);
 	// Lock state machine: idle (locked/read-only) -> opening (acquiring) ->
 	// held (editing) | blocked (another user holds the page).
@@ -465,29 +470,22 @@ export default function DocsViewerPage() {
 		enabled: editing && !showHome,
 	});
 
-	// Which file the current draft was loaded for. Used to detect when the
-	// edit target changes so a stale draft never leaks into the editor.
-	const [draftTarget, setDraftTarget] = useState<string | null>(null);
-
-	useEffect(() => {
-		// Only fill once the raw fetch has settled: on a fresh edit session
-		// react-query still holds the cached payload for this key while it
-		// refetches in the background. Filling from the cache immediately is
-		// wrong in two ways: the payload may be stale (content saved since),
-		// and if the refetch returns structurally-equal content the `data`
-		// reference never changes, so this effect would not re-run and the
-		// editor would stay empty forever.
-		if (!rawQuery.data || rawQuery.isFetching) return;
-		const target = `${id}/${filePath}`;
-		if (draft === "" || draftTarget !== target) {
-			setDraftTarget(target);
-			setDraft(rawQuery.data.content);
-			setDirty(false);
-		}
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [rawQuery.data, rawQuery.isFetching, editing, id, filePath]);
-
 	// --- Exclusive edit lock: unlock to edit, lock to commit & finish. ---
+
+	// Keyed per keystroke: updates a ref only (no re-render). The first edit
+	// flips dirty once; further typing stays cheap.
+	const handleEditorChange = (md: string) => {
+		draftRef.current = md;
+		if (!dirtyRef.current) {
+			dirtyRef.current = true;
+			setDirty(true);
+		}
+	};
+
+	const markClean = () => {
+		dirtyRef.current = false;
+		setDirty(false);
+	};
 
 	const draftKey = (projectId: string, path: string) =>
 		`agentdocs:draft:${projectId}:${path}`;
@@ -498,8 +496,8 @@ export default function DocsViewerPage() {
 		const saved = localStorage.getItem(draftKey(id, filePath));
 		try {
 			await acquireLock(id, filePath);
-			setDraft(saved ?? "");
-			setDirty(false);
+			setSeed(saved ?? null);
+			markClean();
 			setLockHolder(null);
 			setLockState("held");
 			setEditing(true);
@@ -528,11 +526,11 @@ export default function DocsViewerPage() {
 				base_revision: rev.revision,
 				// 留空则后端生成默认：时间 + 操作者 修改 <path>
 				message: commitMessage.trim(),
-				changes: [{ op: "update", path: filePath, content: draft }],
+				changes: [{ op: "update", path: filePath, content: draftRef.current }],
 			});
 			setSaveState("saved");
 			toast.success("已提交");
-			setDirty(false);
+			markClean();
 			setCommitMessage("");
 			localStorage.removeItem(draftKey(id, filePath));
 			await queryClient.invalidateQueries({ queryKey: ["docs"] });
@@ -565,7 +563,7 @@ export default function DocsViewerPage() {
 		await releaseLock(id, filePath).catch(() => {});
 		setEditing(false);
 		setLockState("idle");
-		setDirty(false);
+		markClean();
 		localStorage.removeItem(draftKey(id, filePath));
 	};
 
@@ -596,7 +594,7 @@ export default function DocsViewerPage() {
 			heartbeatLock(id, filePath).catch(() => {
 				setEditing(false);
 				setLockState("idle");
-				setDirty(false);
+				markClean();
 				localStorage.removeItem(draftKey(id, filePath));
 				toast.error("编辑锁已失效，已回到只读模式");
 			});
@@ -609,16 +607,16 @@ export default function DocsViewerPage() {
 
 	// Debounced local draft persistence (never committed; survives refresh).
 	useEffect(() => {
-		if (!editing || !draft) return;
+		if (!editing || !dirtyRef.current) return;
 		const t = window.setTimeout(() => {
 			try {
-				localStorage.setItem(draftKey(id, filePath), draft);
+				localStorage.setItem(draftKey(id, filePath), draftRef.current);
 			} catch {
 				// quota exceeded — ignore, the draft lives in memory anyway
 			}
 		}, 800);
 		return () => window.clearTimeout(t);
-	}, [editing, draft, id, filePath]);
+	}, [editing, dirty, id, filePath]);
 
 	// Navigating to a different target (another file, a directory, or the docs
 	// root) releases the lock and ends the edit session. Without this,
@@ -630,7 +628,7 @@ export default function DocsViewerPage() {
 		void releaseLock(id, filePath).catch(() => {});
 		setEditing(false);
 		setLockState("idle");
-		setDirty(false);
+		markClean();
 		localStorage.removeItem(draftKey(id, filePath));
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [id, filePath]);
@@ -647,7 +645,7 @@ export default function DocsViewerPage() {
 		window.addEventListener("keydown", onKey);
 		return () => window.removeEventListener("keydown", onKey);
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [editing, saving, draft, id, filePath]);
+	}, [editing, saving, id, filePath]);
 
 	useEffect(() => {
 		if (!dirty || !editing) return;
@@ -667,7 +665,7 @@ export default function DocsViewerPage() {
 	useEffect(() => {
 		if (blocker.state !== "blocked") return;
 		if (window.confirm("有未保存的修改，确定放弃？")) {
-			setDirty(false);
+			markClean();
 			blocker.proceed();
 		} else {
 			blocker.reset();
@@ -986,18 +984,15 @@ export default function DocsViewerPage() {
 							</div>
 						)}
 						{editing && !showHome && !isDirPath && (
-							rawQuery.isLoading ? (
+							rawQuery.isLoading || rawQuery.isFetching ? (
 								<p className="mono-label text-[var(--color-ink-3)]">
 									loading…
 								</p>
 							) : (
 								<>
 									<RichEditor
-										initialMarkdown={draft}
-										onChange={(md) => {
-											setDraft(md);
-											setDirty(true);
-										}}
+										initialMarkdown={seed ?? rawQuery.data?.content ?? ""}
+										onChange={handleEditorChange}
 										onNavigateLink={(href) => {
 											const m = href.match(
 												/^\/projects\/[^/]+\/docs\/(.+)$/,

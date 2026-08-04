@@ -497,7 +497,7 @@ export default function RichEditor({
 				</BubbleMenu>
 			)}
 			{slashOpen && editor && (
-				<div className="absolute left-4 top-12 z-20 w-56 rounded-[var(--radius)] border border-[var(--color-rule)] bg-[var(--color-paper)] p-1 shadow-lg">
+				<div className="absolute left-4 top-12 z-20 max-h-80 w-44 overflow-y-auto rounded-[var(--radius)] border border-[var(--color-rule)] bg-[var(--color-paper)] p-0.5 shadow-lg">
 					{slashItems.length === 0 ? (
 						<p className="px-3 py-1.5 text-sm text-[var(--color-ink-3)]">
 							无匹配项
@@ -509,7 +509,7 @@ export default function RichEditor({
 								type="button"
 								onMouseDown={(e) => e.preventDefault()}
 								onClick={() => runSlash(item.run)}
-								className="flex w-full items-center justify-between rounded-sm px-3 py-1.5 text-left text-sm text-[var(--color-ink-2)] hover:bg-[var(--color-surface-accent)] hover:text-[var(--color-ink)]"
+								className="flex w-full items-center justify-between gap-2 rounded-sm px-2 py-1 text-left text-[13px] leading-tight text-[var(--color-ink-2)] hover:bg-[var(--color-surface-accent)] hover:text-[var(--color-ink)]"
 							>
 								<span>{item.label}</span>
 								<span className="mono-label text-[var(--color-ink-3)]">
