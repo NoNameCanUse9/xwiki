@@ -719,7 +719,7 @@ export default function DocsViewerPage() {
 						</Link>
 					</div>
 					{!showHome && (
-						<div className="flex min-h-0 flex-col border-b border-[var(--color-rule)]">
+						<div className="scrollbar-hidden flex min-h-0 flex-1 flex-col border-b border-[var(--color-rule)] overflow-x-hidden">
 							<div className="scrollbar-hidden min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-2">
 								<TocPanel entries={tocEntries} />
 							</div>
@@ -733,7 +733,7 @@ export default function DocsViewerPage() {
 							</div>
 						</div>
 					)}
-					<div className="scrollbar-hidden min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-2">
+					<div className="scrollbar-hidden min-h-0 overflow-y-auto overflow-x-hidden p-2">
 						{sidebarItems.length > 0 && (
 							<nav className="space-y-0.5">
 								<p className="mono-label px-2 pb-1 text-[var(--color-ink-3)]">
