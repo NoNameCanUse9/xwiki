@@ -749,15 +749,35 @@ export default function DocsViewerPage() {
 						{!showHome && !isDirPath && !atSha && (
 							<div className="mr-1 flex items-center gap-1.5">
 								{editing ? (
-									<span className="mono-label text-[var(--color-ink-3)]">
-										{saveState === "saving"
-											? "提交中…"
-											: saveState === "saved"
-												? "已提交"
-												: dirty
-													? "自动保存草稿中"
-													: "已是最新"}
-									</span>
+									<>
+										<span className="mono-label text-[var(--color-ink-3)]">
+											{saveState === "saving"
+												? "提交中…"
+												: saveState === "saved"
+													? "已提交"
+													: dirty
+														? "自动保存草稿中"
+														: "已是最新"}
+										</span>
+										<Input
+											aria-label="commit message"
+											placeholder="commit message（留空默认：时间 + 用户名）"
+											value={commitMessage}
+											onChange={(e) => setCommitMessage(e.target.value)}
+											onKeyDown={(e) => {
+												if (e.key === "Enter") void lockAndCommit();
+											}}
+											className="h-8 w-56 font-mono text-xs"
+										/>
+										<Button
+											size="sm"
+											onClick={() => void lockAndCommit()}
+											disabled={saving}
+										>
+											<Lock className="size-3.5" />
+											{saving ? "提交中…" : "上锁并提交"}
+										</Button>
+									</>
 								) : (
 									<>
 										<Button
@@ -847,19 +867,12 @@ export default function DocsViewerPage() {
 					</div>
 				)}
 
-				<main
-					className="flex-1 px-6 py-8 sm:ml-64 sm:px-10"
-					onClick={(e) => {
-						// Clicking outside the editor (but not on controls) locks the
-						// page again — the Notion-style "click away to finish".
-						if (!editing) return;
-						const target = e.target as HTMLElement;
-						if (target.closest("[data-editor-panel]")) return;
-						if (target.closest("button, a, input")) return;
-						void lockAndCommit();
-					}}
-				>
-					<div className="mx-auto w-full max-w-3xl">
+				<main className="flex-1 px-6 py-8 sm:ml-64 sm:px-10">
+					<div
+						className={`mx-auto w-full transition-[max-width] duration-200 ${
+							editing ? "max-w-4xl" : "max-w-3xl"
+						}`}
+					>
 						{loading && (
 							<p className="mono-label text-[var(--color-ink-3)]">loading…</p>
 						)}
@@ -1000,26 +1013,6 @@ export default function DocsViewerPage() {
 											if (m) navigate(`/projects/${id}/docs/${m[1]}`);
 										}}
 									/>
-									<div className="mt-3 flex items-center gap-2">
-										<Input
-											aria-label="commit message"
-											placeholder="commit message（留空默认：时间 + 用户名）"
-											value={commitMessage}
-											onChange={(e) => setCommitMessage(e.target.value)}
-											onKeyDown={(e) => {
-												if (e.key === "Enter") void lockAndCommit();
-											}}
-											className="h-8 flex-1 font-mono text-xs"
-										/>
-										<Button
-											size="sm"
-											onClick={() => void lockAndCommit()}
-											disabled={saving}
-										>
-											<Lock className="size-3.5" />
-											{saving ? "提交中…" : "上锁并提交"}
-										</Button>
-									</div>
 								</>
 							)
 						)}
