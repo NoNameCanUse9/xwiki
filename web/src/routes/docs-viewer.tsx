@@ -748,7 +748,7 @@ export default function DocsViewerPage() {
 							<div className="scrollbar-hidden min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-2">
 								<TocPanel entries={tocEntries} />
 							</div>
-							<div className="scrollbar-hidden min-h-0 flex-1 overflow-y-auto overflow-x-hidden border-t border-[var(--color-rule)] p-2">
+							<div className="scrollbar-hidden min-h-0 flex-1 overflow-y-auto border-t border-[var(--color-rule)] p-2">
 								<VersionPanel
 									projectId={id}
 									filePath={filePath}
