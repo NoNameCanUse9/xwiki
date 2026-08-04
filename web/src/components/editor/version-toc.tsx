@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, ChevronDown, CornerDownRight, History } from "lucide-react";
 import { fileHistory, type CommitSummary } from "@/lib/api/history";
@@ -135,6 +136,12 @@ export function VersionPanel({
 		enabled: filePath.length > 0,
 	});
 	const [open, setOpen] = useState(true);
+	// Hovered commit + its anchor rect, rendered via a portal to body so the
+	// tooltip escapes the sidebar's stacking context (aside is z-30) and is
+	// never clipped by overflow or covered by page-level floating layers.
+	const [hoverSha, setHoverSha] = useState<string | null>(null);
+	const [hoverRect, setHoverRect] = useState<DOMRect | null>(null);
+	const btnRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
 	if (!data || data.commits.length === 0) return null;
 	return (
 		<div className="space-y-0.5 p-2">
@@ -167,7 +174,20 @@ export function VersionPanel({
 							key={c.sha}
 							type="button"
 							onClick={() => onSelect(c.sha)}
-							className={`group relative flex w-full items-center gap-1.5 rounded-sm px-2 py-1 text-left text-xs hover:bg-[var(--color-surface-accent)] ${
+							onMouseEnter={() => {
+								const el = btnRefs.current.get(c.sha);
+								if (el) setHoverRect(el.getBoundingClientRect());
+								setHoverSha(c.sha);
+							}}
+							onMouseLeave={() => {
+								setHoverSha(null);
+								setHoverRect(null);
+							}}
+							ref={(el) => {
+								if (el) btnRefs.current.set(c.sha, el);
+								else btnRefs.current.delete(c.sha);
+							}}
+							className={`flex w-full items-center gap-1.5 rounded-sm px-2 py-1 text-left text-xs hover:bg-[var(--color-surface-accent)] ${
 								currentVersion === c.sha
 									? "text-[var(--color-accent)]"
 									: "text-[var(--color-ink-2)]"
@@ -177,18 +197,31 @@ export function VersionPanel({
 							<span className="truncate">
 								{c.sha.slice(0, 7)} · {c.message}
 							</span>
-							<span className="pointer-events-none invisible absolute left-full top-1/2 z-50 ml-2 w-64 -translate-y-1/2 rounded-[var(--radius)] border border-[var(--color-rule)] bg-[var(--color-paper)] p-3 shadow-lg group-hover:visible">
-								<p className="break-words text-sm leading-snug text-[var(--color-ink)]">
-									{c.message}
-								</p>
-								<p className="mono-label mt-2 text-[11px] text-[var(--color-ink-3)]">
-									{c.author} · {formatDate(c.date)}
-								</p>
-							</span>
 						</button>
 					))}
 				</>
 			)}
+			{hoverSha &&
+				hoverRect &&
+				createPortal(
+					<div
+						className="pointer-events-none fixed z-[100] w-64 rounded-[var(--radius)] border border-[var(--color-rule)] bg-[var(--color-paper)] p-3 shadow-lg"
+						style={{
+							left: hoverRect.right + 8,
+							top: hoverRect.top + hoverRect.height / 2,
+							transform: "translateY(-50%)",
+						}}
+					>
+						<p className="break-words text-sm leading-snug text-[var(--color-ink)]">
+							{data.commits.find((c) => c.sha === hoverSha)?.message}
+						</p>
+						<p className="mono-label mt-2 text-[11px] text-[var(--color-ink-3)]">
+							{data.commits.find((c) => c.sha === hoverSha)?.author} ·{" "}
+							{formatDate(data.commits.find((c) => c.sha === hoverSha)?.date ?? "")}
+						</p>
+					</div>,
+					document.body,
+				)}
 		</div>
 	);
 }
