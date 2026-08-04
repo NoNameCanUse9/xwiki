@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import type { EditorState } from "@tiptap/pm/state";
 import {
 	EditorContent,
 	useEditor,
@@ -19,6 +20,7 @@ import { TableHeader } from "@tiptap/extension-table-header";
 import { TableCell } from "@tiptap/extension-table-cell";
 import { Markdown, type MarkdownStorage } from "tiptap-markdown";
 import { cn } from "../../lib/utils";
+import type { TocEntry } from "./version-toc";
 
 // Extension instances are module-level constants so they are not recreated
 // on every render. Each editor clones them during creation, so sharing the
@@ -35,6 +37,103 @@ const extensions = [
 	Markdown,
 ];
 
+/**
+ * The "/" command menu opens at the start of a paragraph (including an
+ * empty one), so typing "/" inside a word, URL, or code block never pops
+ * the menu while block-level commands stay reachable from any block.
+ */
+function isSlashTrigger(state: EditorState): boolean {
+	const { $from } = state.selection;
+	if ($from.parent.type.name !== "paragraph") return false;
+	return $from.parentOffset === 0;
+}
+
+/** Commands offered by the "/" menu (module-level so the keydown handler can reference them). */
+const SLASH_ITEMS: Array<{
+	label: string;
+	hint: string;
+	run: (editor: Editor) => void;
+}> = [
+	{
+		label: "标题 1",
+		hint: "#",
+		run: (e) => e.chain().focus().toggleHeading({ level: 1 }).run(),
+	},
+	{
+		label: "标题 2",
+		hint: "##",
+		run: (e) => e.chain().focus().toggleHeading({ level: 2 }).run(),
+	},
+	{
+		label: "标题 3",
+		hint: "###",
+		run: (e) => e.chain().focus().toggleHeading({ level: 3 }).run(),
+	},
+	{
+		label: "引用",
+		hint: ">",
+		run: (e) => e.chain().focus().toggleBlockquote().run(),
+	},
+	{
+		label: "代码块",
+		hint: "```",
+		run: (e) => e.chain().focus().toggleCodeBlock().run(),
+	},
+	{
+		label: "无序列表",
+		hint: "-",
+		run: (e) => e.chain().focus().toggleBulletList().run(),
+	},
+	{
+		label: "有序列表",
+		hint: "1.",
+		run: (e) => e.chain().focus().toggleOrderedList().run(),
+	},
+	{
+		label: "插入表格",
+		hint: "▦",
+		run: (e) =>
+			e
+				.chain()
+				.focus()
+				.insertTable({ rows: 3, cols: 3, withHeaderRow: true })
+				.run(),
+	},
+	{
+		label: "插入折叠块",
+		hint: "▸",
+		run: (e) =>
+			e
+				.chain()
+				.focus()
+				.insertContent({
+					type: "paragraph",
+					content: [{ type: "text", text: ":::details 标题\n\n内容\n:::" }],
+				})
+				.run(),
+	},
+	{
+		label: "上移块",
+		hint: "↑",
+		run: (e) => moveBlock(e, -1),
+	},
+	{
+		label: "下移块",
+		hint: "↓",
+		run: (e) => moveBlock(e, 1),
+	},
+	{
+		label: "复制块",
+		hint: "⧉",
+		run: (e) => copyBlock(e),
+	},
+	{
+		label: "删除块",
+		hint: "×",
+		run: (e) => deleteBlock(e),
+	},
+];
+
 export interface RichEditorProps {
 	/** Markdown content used to initialize the editor (parsed by the Markdown extension). */
 	initialMarkdown: string;
@@ -42,6 +141,10 @@ export interface RichEditorProps {
 	onChange: (markdown: string) => void;
 	/** When true, the editor content is not editable. */
 	readOnly?: boolean;
+	/** Reports the current heading structure so a TOC can stay in sync. */
+	onTocChange?: (entries: TocEntry[]) => void;
+	/** Called when a wiki link is Cmd/Ctrl+clicked inside the editor. */
+	onNavigateLink?: (href: string) => void;
 }
 
 const BUTTON_BASE_CLASS =
@@ -86,249 +189,80 @@ function ToolbarDivider() {
 	);
 }
 
-interface ToolbarProps {
-	editor: Editor;
+/** Top-level block index under the cursor (used by block move/copy/delete). */
+function currentBlockIndex(e: Editor): number {
+	const { from } = e.state.selection;
+	let idx = 0;
+	e.state.doc.forEach((node, offset) => {
+		if (offset + node.nodeSize <= from) idx++;
+	});
+	const total = (e.getJSON().content ?? []).length;
+	return Math.min(idx, Math.max(total - 1, 0));
 }
 
-function Toolbar({ editor }: ToolbarProps) {
-	// Subscribe to editor state so the active/disabled button states stay in
-	// sync with the current selection and document (tiptap v3 recommended way).
-	const state = useEditorState({
-		editor,
-		selector: ({ editor: e }) => ({
-			bold: e.isActive("bold"),
-			italic: e.isActive("italic"),
-			strike: e.isActive("strike"),
-			heading1: e.isActive("heading", { level: 1 }),
-			heading2: e.isActive("heading", { level: 2 }),
-			heading3: e.isActive("heading", { level: 3 }),
-			blockquote: e.isActive("blockquote"),
-			codeBlock: e.isActive("codeBlock"),
-			bulletList: e.isActive("bulletList"),
-			orderedList: e.isActive("orderedList"),
-			canUndo: e.can().undo(),
-			canRedo: e.can().redo(),
-			editable: e.isEditable,
-		}),
-	});
+function moveBlock(editor: Editor, dir: -1 | 1) {
+	const json = editor.getJSON();
+	const blocks = [...((json.content ?? []) as object[])];
+	const idx = currentBlockIndex(editor);
+	const swap = idx + dir;
+	if (blocks.length < 2 || swap < 0 || swap >= blocks.length) return;
+	[blocks[idx], blocks[swap]] = [blocks[swap], blocks[idx]];
+	editor
+		.chain()
+		.focus()
+		.setContent({ ...json, content: blocks })
+		.run();
+}
 
-	// Insert a raw ":::details" block as plain text. The details extension that
-	// renders it as a collapsible block is wired up in a later task.
-	// Locate the block index the cursor is in (top-level blocks only).
-	const currentBlockIndex = (e: Editor): number => {
-		const { from } = e.state.selection;
-		let idx = 0;
-		e.state.doc.forEach((node, offset) => {
-			if (offset + node.nodeSize <= from) idx++;
-		});
-		const total = (e.getJSON().content ?? []).length;
-		return Math.min(idx, Math.max(total - 1, 0));
-	};
+function copyBlock(editor: Editor) {
+	const json = editor.getJSON();
+	const blocks = [...((json.content ?? []) as object[])];
+	const idx = currentBlockIndex(editor);
+	if (blocks.length === 0) return;
+	blocks.splice(idx + 1, 0, JSON.parse(JSON.stringify(blocks[idx])));
+	editor
+		.chain()
+		.focus()
+		.setContent({ ...json, content: blocks })
+		.run();
+}
 
-	const moveBlock = (dir: -1 | 1) => {
-		const json = editor.getJSON();
-		const blocks = [...((json.content ?? []) as object[])];
-		const idx = currentBlockIndex(editor);
-		const swap = idx + dir;
-		if (blocks.length < 2 || swap < 0 || swap >= blocks.length) return;
-		[blocks[idx], blocks[swap]] = [blocks[swap], blocks[idx]];
-		editor
-			.chain()
-			.focus()
-			.setContent({ ...json, content: blocks })
-			.run();
-	};
+function deleteBlock(editor: Editor) {
+	const json = editor.getJSON();
+	const blocks = [...((json.content ?? []) as object[])];
+	const idx = currentBlockIndex(editor);
+	if (blocks.length === 0) return;
+	blocks.splice(idx, 1);
+	if (blocks.length === 0) {
+		blocks.push({ type: "paragraph" });
+	}
+	editor
+		.chain()
+		.focus()
+		.setContent({ ...json, content: blocks })
+		.run();
+}
 
-	const copyBlock = () => {
-		const json = editor.getJSON();
-		const blocks = [...((json.content ?? []) as object[])];
-		const idx = currentBlockIndex(editor);
-		if (blocks.length === 0) return;
-		blocks.splice(idx + 1, 0, JSON.parse(JSON.stringify(blocks[idx])));
-		editor
-			.chain()
-			.focus()
-			.setContent({ ...json, content: blocks })
-			.run();
-	};
-
-	const deleteBlock = () => {
-		const json = editor.getJSON();
-		const blocks = [...((json.content ?? []) as object[])];
-		const idx = currentBlockIndex(editor);
-		if (blocks.length === 0) return;
-		blocks.splice(idx, 1);
-		if (blocks.length === 0) {
-			blocks.push({ type: "paragraph" });
+/** Heading index matches the HTML-based extractToc (counts empty headings too). */
+function extractTocFromEditor(editor: Editor): TocEntry[] {
+	const out: TocEntry[] = [];
+	let idx = 0;
+	editor.state.doc.descendants((node) => {
+		if (node.type.name === "heading") {
+			const text = node.textContent.trim();
+			if (text) {
+				out.push({
+					id: `toc-${idx}`,
+					index: idx,
+					text,
+					level: (node.attrs.level as number) ?? 1,
+				});
+			}
+			idx++;
 		}
-		editor
-			.chain()
-			.focus()
-			.setContent({ ...json, content: blocks })
-			.run();
-	};
-
-	const insertDetailsBlock = () =>
-		editor
-			.chain()
-			.focus()
-			.insertContent({
-				type: "paragraph",
-				content: [{ type: "text", text: ":::details 标题\n\n内容\n:::" }],
-			})
-			.run();
-
-	return (
-		<div className="flex flex-wrap items-center gap-1 border-b border-[var(--color-rule)] px-2 py-1.5">
-			<ToolbarButton
-				label="加粗"
-				active={state.bold}
-				disabled={!state.editable}
-				onClick={() => editor.chain().focus().toggleBold().run()}
-			>
-				<strong>B</strong>
-			</ToolbarButton>
-			<ToolbarButton
-				label="斜体"
-				active={state.italic}
-				disabled={!state.editable}
-				onClick={() => editor.chain().focus().toggleItalic().run()}
-			>
-				<em>I</em>
-			</ToolbarButton>
-			<ToolbarButton
-				label="删除线"
-				active={state.strike}
-				disabled={!state.editable}
-				onClick={() => editor.chain().focus().toggleStrike().run()}
-			>
-				<s>S̶</s>
-			</ToolbarButton>
-			<ToolbarDivider />
-			<ToolbarButton
-				label="标题 1"
-				active={state.heading1}
-				disabled={!state.editable}
-				onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}
-			>
-				H1
-			</ToolbarButton>
-			<ToolbarButton
-				label="标题 2"
-				active={state.heading2}
-				disabled={!state.editable}
-				onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}
-			>
-				H2
-			</ToolbarButton>
-			<ToolbarButton
-				label="标题 3"
-				active={state.heading3}
-				disabled={!state.editable}
-				onClick={() => editor.chain().focus().toggleHeading({ level: 3 }).run()}
-			>
-				H3
-			</ToolbarButton>
-			<ToolbarDivider />
-			<ToolbarButton
-				label="引用"
-				active={state.blockquote}
-				disabled={!state.editable}
-				onClick={() => editor.chain().focus().toggleBlockquote().run()}
-			>
-				❝
-			</ToolbarButton>
-			<ToolbarButton
-				label="代码块"
-				active={state.codeBlock}
-				disabled={!state.editable}
-				onClick={() => editor.chain().focus().toggleCodeBlock().run()}
-			>
-				{"</>"}
-			</ToolbarButton>
-			<ToolbarButton
-				label="插入表格"
-				disabled={!state.editable}
-				onClick={() =>
-					editor
-						.chain()
-						.focus()
-						.insertTable({ rows: 3, cols: 3, withHeaderRow: true })
-						.run()
-				}
-			>
-				▦
-			</ToolbarButton>
-			<ToolbarDivider />
-			<ToolbarButton
-				label="无序列表"
-				active={state.bulletList}
-				disabled={!state.editable}
-				onClick={() => editor.chain().focus().toggleBulletList().run()}
-			>
-				{"•≡"}
-			</ToolbarButton>
-			<ToolbarButton
-				label="有序列表"
-				active={state.orderedList}
-				disabled={!state.editable}
-				onClick={() => editor.chain().focus().toggleOrderedList().run()}
-			>
-				{"1≡"}
-			</ToolbarButton>
-			<ToolbarButton
-				label="插入折叠块"
-				disabled={!state.editable}
-				onClick={insertDetailsBlock}
-			>
-				{"▸≡"}
-			</ToolbarButton>
-			<ToolbarDivider />
-			<ToolbarButton
-				label="撤销"
-				disabled={!state.editable || !state.canUndo}
-				onClick={() => editor.chain().focus().undo().run()}
-			>
-				↶
-			</ToolbarButton>
-			<ToolbarButton
-				label="重做"
-				disabled={!state.editable || !state.canRedo}
-				onClick={() => editor.chain().focus().redo().run()}
-			>
-				↷
-			</ToolbarButton>
-			<ToolbarDivider />
-			<ToolbarButton
-				label="上移块"
-				disabled={!state.editable}
-				onClick={() => moveBlock(-1)}
-			>
-				↑块
-			</ToolbarButton>
-			<ToolbarButton
-				label="下移块"
-				disabled={!state.editable}
-				onClick={() => moveBlock(1)}
-			>
-				↓块
-			</ToolbarButton>
-			<ToolbarButton
-				label="复制块"
-				disabled={!state.editable}
-				onClick={copyBlock}
-			>
-				⧉块
-			</ToolbarButton>
-			<ToolbarButton
-				label="删除块"
-				disabled={!state.editable}
-				onClick={deleteBlock}
-			>
-				×块
-			</ToolbarButton>
-		</div>
-	);
+		return true;
+	});
+	return out;
 }
 
 interface BubbleMenuBarProps {
@@ -401,10 +335,31 @@ export default function RichEditor({
 	initialMarkdown,
 	onChange,
 	readOnly = false,
+	onTocChange,
+	onNavigateLink,
 }: RichEditorProps) {
 	const [slashOpen, setSlashOpen] = useState(false);
 	const [slashPos, setSlashPos] = useState(0);
+	const [slashQuery, setSlashQuery] = useState("");
+	// Refs mirror the slash-menu state so the keydown/onUpdate handlers (whose
+	// closures are captured once when the editor is created) read fresh values.
+	const slashOpenRef = useRef(false);
+	const slashPosRef = useRef(0);
+	const slashQueryRef = useRef("");
 	const editorRef = useRef<HTMLDivElement>(null);
+
+	const openSlash = (pos: number) => {
+		slashPosRef.current = pos;
+		slashOpenRef.current = true;
+		slashQueryRef.current = "";
+		setSlashPos(pos);
+		setSlashQuery("");
+		setSlashOpen(true);
+	};
+	const closeSlash = () => {
+		slashOpenRef.current = false;
+		setSlashOpen(false);
+	};
 
 	const editor = useEditor({
 		extensions,
@@ -416,13 +371,23 @@ export default function RichEditor({
 				role: "textbox",
 			},
 			handleKeyDown: (view, event) => {
-				if (event.key === "/" && !readOnly) {
+				if (event.key === "/" && !readOnly && isSlashTrigger(view.state)) {
 					// keydown fires before the "/" is inserted, so selection.from is
 					// exactly the position where the slash will land.
-					setSlashPos(view.state.selection.from);
-					setSlashOpen(true);
+					openSlash(view.state.selection.from);
+					return false;
 				}
-				if (event.key === "Escape") setSlashOpen(false);
+				if (event.key === "Escape") {
+					closeSlash();
+					return false;
+				}
+				if (slashOpenRef.current && event.key === "Backspace") {
+					// Backspacing over the "/" itself closes the menu.
+					if (view.state.selection.from <= slashPosRef.current + 1) {
+						closeSlash();
+					}
+					return false;
+				}
 				return false;
 			},
 			handlePaste: (view, event) => {
@@ -452,6 +417,18 @@ export default function RichEditor({
 				}
 				return false;
 			},
+			// Cmd/Ctrl+click on a wiki link navigates instead of placing the caret.
+			handleClick: (_view, _pos, event) => {
+				if (!event.metaKey && !event.ctrlKey) return false;
+				const anchor = (event.target as HTMLElement | null)?.closest?.("a");
+				const href = anchor?.getAttribute("href") ?? "";
+				if (!href) return false;
+				if (href.startsWith("/projects/")) {
+					onNavigateLink?.(href);
+					return true;
+				}
+				return false;
+			},
 		},
 		onUpdate: ({ editor }) => {
 			onChange(
@@ -459,6 +436,19 @@ export default function RichEditor({
 					editor.storage as unknown as { markdown: MarkdownStorage }
 				).markdown.getMarkdown(),
 			);
+			onTocChange?.(extractTocFromEditor(editor));
+			// Keep the "/" query in sync with what was typed after the slash.
+			// onUpdate runs after each transaction, so the doc text is fresh
+			// (unlike the keydown handler, which runs before insertion).
+			if (slashOpenRef.current) {
+				const from = editor.state.selection.from;
+				const text =
+					from > slashPosRef.current
+						? editor.state.doc.textBetween(slashPosRef.current, from)
+						: "";
+				slashQueryRef.current = text.startsWith("/") ? text.slice(1) : "";
+				setSlashQuery(slashQueryRef.current);
+			}
 		},
 	});
 
@@ -486,28 +476,36 @@ export default function RichEditor({
 		if (!slashOpen) return;
 		const onDown = (e: MouseEvent) => {
 			if (editorRef.current && !editorRef.current.contains(e.target as Node)) {
-				setSlashOpen(false);
+				closeSlash();
 			}
 		};
 		document.addEventListener("mousedown", onDown);
 		return () => document.removeEventListener("mousedown", onDown);
 	}, [slashOpen]);
 
-	// Delete the typed "/" first, then run the selected command.
-	const runSlash = (run: () => void) => {
+	// Delete the typed "/" first (plus any query text typed after it), then
+	// run the selected command. The deleted range is validated against the
+	// actual document text so an unrelated caret move never deletes a chunk.
+	const runSlash = (run: (editor: Editor) => void) => {
 		if (!editor) return;
-		editor
-			.chain()
-			.focus()
-			.deleteRange({ from: slashPos, to: slashPos + 1 })
-			.run();
-		run();
-		setSlashOpen(false);
+		const { from } = editor.state.selection;
+		const typed =
+			from > slashPos ? editor.state.doc.textBetween(slashPos, from) : "";
+		const to = typed.startsWith("/") ? from : slashPos + 1;
+		editor.chain().focus().deleteRange({ from: slashPos, to }).run();
+		run(editor);
+		closeSlash();
 	};
+
+	// The query is whatever was typed after "/", kept fresh by onUpdate.
+	const q = slashQuery.trim().toLowerCase();
+	const slashItems = SLASH_ITEMS.filter(
+		(item) =>
+			item.label.toLowerCase().includes(q) || item.hint.toLowerCase().includes(q),
+	);
 
 	return (
 		<div className="hairline-panel relative overflow-hidden" ref={editorRef}>
-			{editor && <Toolbar editor={editor} />}
 			<EditorContent className="px-4 py-3" editor={editor} />
 			{editor && (
 				<BubbleMenu
@@ -523,69 +521,26 @@ export default function RichEditor({
 			)}
 			{slashOpen && editor && (
 				<div className="absolute left-4 top-12 z-20 w-56 rounded-[var(--radius)] border border-[var(--color-rule)] bg-[var(--color-paper)] p-1 shadow-lg">
-					{[
-						{
-							label: "标题 1",
-							hint: "#",
-							run: () =>
-								editor.chain().focus().toggleHeading({ level: 1 }).run(),
-						},
-						{
-							label: "标题 2",
-							hint: "##",
-							run: () =>
-								editor.chain().focus().toggleHeading({ level: 2 }).run(),
-						},
-						{
-							label: "标题 3",
-							hint: "###",
-							run: () =>
-								editor.chain().focus().toggleHeading({ level: 3 }).run(),
-						},
-						{
-							label: "引用",
-							hint: ">",
-							run: () => editor.chain().focus().toggleBlockquote().run(),
-						},
-						{
-							label: "代码块",
-							hint: "```",
-							run: () => editor.chain().focus().toggleCodeBlock().run(),
-						},
-						{
-							label: "无序列表",
-							hint: "-",
-							run: () => editor.chain().focus().toggleBulletList().run(),
-						},
-						{
-							label: "有序列表",
-							hint: "1.",
-							run: () => editor.chain().focus().toggleOrderedList().run(),
-						},
-						{
-							label: "插入表格",
-							hint: "▦",
-							run: () =>
-								editor
-									.chain()
-									.focus()
-									.insertTable({ rows: 3, cols: 3, withHeaderRow: true })
-									.run(),
-						},
-					].map((item) => (
-						<button
-							key={item.label}
-							type="button"
-							onMouseDown={(e) => e.preventDefault()}
-							onClick={() => runSlash(item.run)}
-							className="flex w-full items-center justify-between rounded-sm px-3 py-1.5 text-left text-sm text-[var(--color-ink-2)] hover:bg-[var(--color-surface-accent)] hover:text-[var(--color-ink)]"
-						>
-							<span>{item.label}</span>
-							<span className="mono-label text-[var(--color-ink-3)]">
-								{item.hint}
-							</span>
-						</button>
-					))}
+					{slashItems.length === 0 ? (
+						<p className="px-3 py-1.5 text-sm text-[var(--color-ink-3)]">
+							无匹配项
+						</p>
+					) : (
+						slashItems.map((item) => (
+							<button
+								key={item.label}
+								type="button"
+								onMouseDown={(e) => e.preventDefault()}
+								onClick={() => runSlash(item.run)}
+								className="flex w-full items-center justify-between rounded-sm px-3 py-1.5 text-left text-sm text-[var(--color-ink-2)] hover:bg-[var(--color-surface-accent)] hover:text-[var(--color-ink)]"
+							>
+								<span>{item.label}</span>
+								<span className="mono-label text-[var(--color-ink-3)]">
+									{item.hint}
+								</span>
+							</button>
+						))
+					)}
 				</div>
 			)}
 		</div>

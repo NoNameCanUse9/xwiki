@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useBlocker, useNavigate, useParams } from "react-router-dom";
 import {
 	ArrowLeft,
 	ChevronRight,
@@ -8,13 +8,21 @@ import {
 	FileText,
 	Folder,
 	History,
-	Pencil,
+	Lock,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { getRevision, submitChangeset } from "@/lib/api/changesets";
 import { fileHistory } from "@/lib/api/history";
 import { searchProject } from "@/lib/api/search";
+import {
+	acquireLock,
+	forceReleaseLock,
+	heartbeatLock,
+	lockFromError,
+	releaseLock,
+	type EditLock,
+} from "@/lib/api/locks";
 import { getPage, getTree, type TreeEntry } from "@/lib/api/docs";
 import CommandPalette from "@/components/editor/command-palette";
 import RichEditor from "@/components/editor/rich-editor";
@@ -381,6 +389,13 @@ export default function DocsViewerPage() {
 	const [draft, setDraft] = useState("");
 	const [dirty, setDirty] = useState(false);
 	const [saving, setSaving] = useState(false);
+	// Lock state machine: idle (locked/read-only) -> opening (acquiring) ->
+	// held (editing) | blocked (another user holds the page).
+	const [lockState, setLockState] = useState<
+		"idle" | "opening" | "held" | "blocked"
+	>("idle");
+	const [lockHolder, setLockHolder] = useState<EditLock | null>(null);
+	const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
 	const [showHistory, setShowHistory] = useState(false);
 	const [showAttachments, setShowAttachments] = useState(false);
 	const [showBacklinks, setShowBacklinks] = useState(false);
@@ -448,25 +463,180 @@ export default function DocsViewerPage() {
 		enabled: editing && !showHome,
 	});
 
+	// Which file the current draft was loaded for. Used to detect when the
+	// edit target changes so a stale draft never leaks into the editor.
+	const [draftTarget, setDraftTarget] = useState<string | null>(null);
+
 	useEffect(() => {
-		if (rawQuery.data && draft === "") {
+		// Only fill once the raw fetch has settled: on a fresh edit session
+		// react-query still holds the cached payload for this key while it
+		// refetches in the background. Filling from the cache immediately is
+		// wrong in two ways: the payload may be stale (content saved since),
+		// and if the refetch returns structurally-equal content the `data`
+		// reference never changes, so this effect would not re-run and the
+		// editor would stay empty forever.
+		if (!rawQuery.data || rawQuery.isFetching) return;
+		const target = `${id}/${filePath}`;
+		if (draft === "" || draftTarget !== target) {
+			setDraftTarget(target);
 			setDraft(rawQuery.data.content);
+			setDirty(false);
 		}
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [rawQuery.data]);
+	}, [rawQuery.data, rawQuery.isFetching, editing, id, filePath]);
 
-	const startEdit = () => {
-		setDraft("");
-		setDirty(false);
-		setEditing(true);
+	// --- Exclusive edit lock: unlock to edit, lock to commit & finish. ---
+
+	const draftKey = (projectId: string, path: string) =>
+		`agentdocs:draft:${projectId}:${path}`;
+
+	const startEditing = async () => {
+		if (lockState === "opening") return;
+		setLockState("opening");
+		const saved = localStorage.getItem(draftKey(id, filePath));
+		try {
+			await acquireLock(id, filePath);
+			setDraft(saved ?? "");
+			setDirty(false);
+			setLockHolder(null);
+			setLockState("held");
+			setEditing(true);
+		} catch (err) {
+			const holder = lockFromError(err);
+			if (holder) {
+				setLockHolder(holder);
+				setLockState("blocked");
+				toast.error(`${holder.username} 正在编辑此页面`);
+			} else {
+				toast.error(err instanceof Error ? err.message : "无法获取编辑锁");
+				setLockState("idle");
+			}
+		}
 	};
 
-	// Cmd/Ctrl+S saves; beforeunload guards against losing unsaved edits.
+	// Commit the current draft as one changeset (Cmd/Ctrl+S). One edit = one
+	// commit; message stays empty so the backend stamps 时间 + 用户名.
+	const commitDraft = async () => {
+		if (!editing || saving) return;
+		setSaving(true);
+		setSaveState("saving");
+		try {
+			const rev = await getRevision(id);
+			await submitChangeset(id, {
+				base_revision: rev.revision,
+				message: "", // 后端生成默认：时间 + 操作者 修改 <path>
+				changes: [{ op: "update", path: filePath, content: draft }],
+			});
+			setSaveState("saved");
+			setDirty(false);
+			localStorage.removeItem(draftKey(id, filePath));
+			await queryClient.invalidateQueries({ queryKey: ["docs"] });
+			await queryClient.invalidateQueries({ queryKey: ["tree"] });
+			// Keep the raw cache in sync so a re-edit of the same file shows
+			// the just-committed content, not the pre-commit snapshot.
+			await queryClient.invalidateQueries({ queryKey: ["docs", "raw"] });
+		} catch (err) {
+			setSaveState("idle");
+			if ((err as { status?: number })?.status === 409) {
+				toast.error("文档已被他人修改，请刷新后重试");
+				setEditing(false);
+				setLockState("idle");
+			} else {
+				toast.error(err instanceof Error ? err.message : "保存失败");
+			}
+		} finally {
+			setSaving(false);
+		}
+	};
+
+	// Lock the page again: commit any pending edits, then release the lock.
+	const lockAndCommit = async () => {
+		if (!editing || saving) return;
+		try {
+			if (dirty) await commitDraft();
+		} catch {
+			return; // commit failed; stay editing so nothing is lost
+		}
+		await releaseLock(id, filePath).catch(() => {});
+		setEditing(false);
+		setLockState("idle");
+		setDirty(false);
+		localStorage.removeItem(draftKey(id, filePath));
+	};
+
+	// Any signed-in user may force a held lock open (holder's draft is lost).
+	const forceUnlock = async () => {
+		if (!lockHolder) return;
+		if (
+			!window.confirm(
+				`强制解锁将中断 ${lockHolder.username} 的编辑并丢弃其未提交修改，确定？`,
+			)
+		)
+			return;
+		try {
+			await forceReleaseLock(id, filePath);
+			setLockHolder(null);
+			setLockState("idle");
+			toast.success("已强制解锁，可重新获取编辑锁");
+		} catch (err) {
+			toast.error(err instanceof Error ? err.message : "强制解锁失败");
+		}
+	};
+
+	// Renew the lease every 30s while editing; a lost lock (expired or
+	// force-released) drops the editor back to read-only.
+	useEffect(() => {
+		if (!editing || !filePath) return;
+		const beat = () => {
+			heartbeatLock(id, filePath).catch(() => {
+				setEditing(false);
+				setLockState("idle");
+				setDirty(false);
+				localStorage.removeItem(draftKey(id, filePath));
+				toast.error("编辑锁已失效，已回到只读模式");
+			});
+		};
+		beat();
+		const t = window.setInterval(beat, 30_000);
+		return () => window.clearInterval(t);
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [editing, id, filePath]);
+
+	// Debounced local draft persistence (never committed; survives refresh).
+	useEffect(() => {
+		if (!editing || !draft) return;
+		const t = window.setTimeout(() => {
+			try {
+				localStorage.setItem(draftKey(id, filePath), draft);
+			} catch {
+				// quota exceeded — ignore, the draft lives in memory anyway
+			}
+		}, 800);
+		return () => window.clearTimeout(t);
+	}, [editing, draft, id, filePath]);
+
+	// Navigating to a different target (another file, a directory, or the docs
+	// root) releases the lock and ends the edit session. Without this,
+	// `editing` survives SPA navigation and the editor UI leaks onto the
+	// file-list views. (`editing` is intentionally not a dependency: starting
+	// to edit must not cancel itself.)
+	useEffect(() => {
+		if (!editing) return;
+		void releaseLock(id, filePath).catch(() => {});
+		setEditing(false);
+		setLockState("idle");
+		setDirty(false);
+		localStorage.removeItem(draftKey(id, filePath));
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [id, filePath]);
+
+	// Cmd/Ctrl+S commits; beforeunload guards against losing unsaved edits
+	// and best-effort releases the lock so the page is not left locked.
 	useEffect(() => {
 		const onKey = (e: KeyboardEvent) => {
 			if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
 				e.preventDefault();
-				if (editing && !saving) void saveEdit();
+				if (editing && !saving) void commitDraft();
 			}
 		};
 		window.addEventListener("keydown", onKey);
@@ -475,46 +645,29 @@ export default function DocsViewerPage() {
 	}, [editing, saving, draft, id, filePath]);
 
 	useEffect(() => {
-		if (!dirty) return;
+		if (!dirty || !editing) return;
 		const onBeforeUnload = (e: BeforeUnloadEvent) => {
 			e.preventDefault();
 			e.returnValue = "";
+			void releaseLock(id, filePath).catch(() => {});
 		};
 		window.addEventListener("beforeunload", onBeforeUnload);
 		return () => window.removeEventListener("beforeunload", onBeforeUnload);
-	}, [dirty]);
+	}, [dirty, editing, id, filePath]);
 
-	const cancelEdit = () => {
-		if (dirty && !window.confirm("有未保存的修改，确定放弃？")) return;
-		setEditing(false);
-		setDirty(false);
-	};
-
-	const saveEdit = async () => {
-		setSaving(true);
-		try {
-			const rev = await getRevision(id);
-			await submitChangeset(id, {
-				base_revision: rev.revision,
-				message: "", // 后端生成默认：时间 + 操作者 修改 <path>
-				changes: [{ op: "update", path: filePath, content: draft }],
-			});
-			toast.success("已保存");
-			setEditing(false);
-			await queryClient.invalidateQueries({ queryKey: ["docs"] });
-			await queryClient.invalidateQueries({ queryKey: ["tree"] });
+	// Block SPA navigation while there are unsaved edits (beforeunload only
+	// covers full-page unload). The blocker effect shows a confirm dialog;
+	// 放弃 keeps editing, proceeding discards the draft.
+	const blocker = useBlocker(editing && dirty);
+	useEffect(() => {
+		if (blocker.state !== "blocked") return;
+		if (window.confirm("有未保存的修改，确定放弃？")) {
 			setDirty(false);
-		} catch (err) {
-			if ((err as { status?: number })?.status === 409) {
-				toast.error("文档已被他人修改，请刷新后重试");
-				setEditing(false);
-			} else {
-				toast.error(err instanceof Error ? err.message : "保存失败");
-			}
-		} finally {
-			setSaving(false);
+			blocker.proceed();
+		} else {
+			blocker.reset();
 		}
-	};
+	}, [blocker]);
 
 	const content = pageQuery.data;
 	const loading = pageQuery.isLoading;
@@ -590,16 +743,17 @@ export default function DocsViewerPage() {
 							void runSearch();
 						}}
 					>
-						{!showHome && !editing && !isDirPath && (
+						{!showHome && !editing && !isDirPath && !atSha && (
 							<div className="mr-1 flex items-center gap-1.5">
 								<Button
 									variant="outline"
 									size="sm"
 									className="gap-2"
-									onClick={startEdit}
+									onClick={() => void startEditing()}
+									disabled={lockState === "opening"}
 								>
-									<Pencil className="size-3.5" />
-									编辑
+									<Lock className="size-3.5" />
+									{lockState === "opening" ? "获取中…" : "解锁编辑"}
 								</Button>
 								<Button
 									variant="ghost"
@@ -614,7 +768,7 @@ export default function DocsViewerPage() {
 									projectId={id}
 									filePath={filePath}
 									items={{
-										onEdit: startEdit,
+										onEdit: () => void startEditing(),
 										onToggleHistory: () => setShowHistory((v) => !v),
 										onToggleAttachments: () => setShowAttachments((v) => !v),
 										onToggleBacklinks: () => setShowBacklinks((v) => !v),
@@ -676,7 +830,18 @@ export default function DocsViewerPage() {
 					</div>
 				)}
 
-				<main className="flex-1 px-6 py-8 sm:ml-64 sm:px-10">
+				<main
+					className="flex-1 px-6 py-8 sm:ml-64 sm:px-10"
+					onClick={(e) => {
+						// Clicking outside the editor (but not on controls) locks the
+						// page again — the Notion-style "click away to finish".
+						if (!editing) return;
+						const target = e.target as HTMLElement;
+						if (target.closest("[data-editor-panel]")) return;
+						if (target.closest("button, a, input")) return;
+						void lockAndCommit();
+					}}
+				>
 					<div className="mx-auto w-full max-w-3xl">
 						{loading && (
 							<p className="mono-label text-[var(--color-ink-3)]">loading…</p>
@@ -689,6 +854,20 @@ export default function DocsViewerPage() {
 								<p className="mt-2 text-sm text-[var(--color-ink-2)]">
 									请从左侧文档树选择其他页面。
 								</p>
+							</div>
+						)}
+						{lockState === "blocked" && lockHolder && (
+							<div className="mb-4 flex items-center justify-between gap-3 rounded-[var(--radius)] border border-[var(--color-accent)] bg-[var(--color-surface-accent)] px-4 py-2.5">
+								<p className="mono-label text-[var(--color-ink-2)]">
+									{lockHolder.username} 正在编辑此页面，当前只读
+								</p>
+								<Button
+									size="sm"
+									variant="outline"
+									onClick={() => void forceUnlock()}
+								>
+									强制解锁
+								</Button>
 							</div>
 						)}
 						{atSha && (
@@ -787,33 +966,48 @@ export default function DocsViewerPage() {
 								))}
 							</div>
 						)}
-						{editing && (
+						{editing && !showHome && !isDirPath && (
 							<div className="space-y-3">
 								{rawQuery.isLoading ? (
 									<p className="mono-label text-[var(--color-ink-3)]">
 										loading…
 									</p>
 								) : (
-									<div className="code-card p-1">
+									<div className="code-card p-1" data-editor-panel>
 										<RichEditor
 											initialMarkdown={draft}
 											onChange={(md) => {
 												setDraft(md);
 												setDirty(true);
 											}}
+											onTocChange={setTocEntries}
+											onNavigateLink={(href) => {
+												const m = href.match(
+													/^\/projects\/[^/]+\/docs\/(.+)$/,
+												);
+												if (m) navigate(`/projects/${id}/docs/${m[1]}`);
+											}}
 										/>
 									</div>
 								)}
-								<div className="flex justify-end gap-2">
-									<Button variant="outline" size="sm" onClick={cancelEdit}>
-										放弃
-									</Button>
+								<div className="flex items-center justify-end gap-2">
+									<span className="mono-label text-[var(--color-ink-3)]">
+										{saveState === "saving"
+											? "提交中…"
+											: saveState === "saved"
+												? "已提交"
+												: dirty
+													? "自动保存草稿中"
+													: "已是最新"}
+									</span>
 									<Button
+										variant="outline"
 										size="sm"
-										onClick={() => void saveEdit()}
+										onClick={() => void lockAndCommit()}
 										disabled={saving}
 									>
-										{saving ? "保存中…" : "保存"}
+										<Lock className="size-3.5" />
+										上锁
 									</Button>
 								</div>
 							</div>
