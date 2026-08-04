@@ -31,6 +31,8 @@ import (
 // maxDocBlobBytes is the readable document size cap (see project.MaxDocBlobBytes).
 const maxDocBlobBytes = project.MaxDocBlobBytes
 
+var errDocTooLarge = errors.New("document exceeds size limit")
+
 // DocsHandler serves read-only document endpoints backed directly by Git.
 type DocsHandler struct {
 	cfg      *config.Config
@@ -236,30 +238,36 @@ func (h *DocsHandler) ServeView(w http.ResponseWriter, r *http.Request) {
 		response.WriteError(w, r, http.StatusBadRequest, "invalid_doc_path", "invalid document path")
 		return
 	}
+	page, err := h.renderDocHTML(r, projectID, filePath)
+	if err != nil {
+		h.writeViewError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = io.WriteString(w, page)
+}
+
+// renderDocHTML renders a document file into a standalone HTML page.
+func (h *DocsHandler) renderDocHTML(r *http.Request, projectID, filePath string) (string, error) {
 	repo, err := h.repoFor(r, projectID)
 	if err != nil {
-		response.WriteError(w, r, http.StatusNotFound, "project_not_found", "project not found")
-		return
+		return "", err
 	}
 	branch, err := repo.DefaultBranch(r.Context())
 	if err != nil {
-		response.WriteError(w, r, http.StatusInternalServerError, "internal_error", "could not resolve branch")
-		return
+		return "", err
 	}
 	content, err := repo.ReadBlobAt(r.Context(), branch, filePath)
 	if err != nil {
-		response.WriteError(w, r, http.StatusNotFound, "doc_not_found", "document not found")
-		return
+		return "", err
 	}
 	if len(content) > maxDocBlobBytes {
-		response.WriteError(w, r, http.StatusRequestEntityTooLarge, "doc_too_large", "document exceeds size limit")
-		return
+		return "", errDocTooLarge
 	}
 	var buf bytes.Buffer
 	if err := h.markdown.Convert(rewriteWikiLinks(content, projectID), &buf); err != nil {
-		h.log.Error("view render failed", "error", err, "request_id", request.RequestID(r))
-		response.WriteError(w, r, http.StatusInternalServerError, "internal_error", "could not render document")
-		return
+		return "", err
 	}
 	title := filePath
 	if i := strings.LastIndex(title, "/"); i >= 0 {
@@ -267,10 +275,19 @@ func (h *DocsHandler) ServeView(w http.ResponseWriter, r *http.Request) {
 	}
 	title = strings.TrimSuffix(title, ".md")
 	page := strings.ReplaceAll(viewPageTemplate, "__TITLE__", html.EscapeString(title))
-	page = strings.ReplaceAll(page, "__BODY__", buf.String())
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	_, _ = io.WriteString(w, page)
+	return strings.ReplaceAll(page, "__BODY__", buf.String()), nil
+}
+
+// writeViewError maps rendering errors onto HTTP responses.
+func (h *DocsHandler) writeViewError(w http.ResponseWriter, r *http.Request, err error) {
+	switch {
+	case errors.Is(err, project.ErrNotFound):
+		response.WriteError(w, r, http.StatusNotFound, "project_not_found", "project not found")
+	case errors.Is(err, errDocTooLarge):
+		response.WriteError(w, r, http.StatusRequestEntityTooLarge, "doc_too_large", "document exceeds size limit")
+	default:
+		response.WriteError(w, r, http.StatusNotFound, "doc_not_found", "document not found")
+	}
 }
 
 // wikiLinkRe matches [[path]] and [[path|label]] wiki links.

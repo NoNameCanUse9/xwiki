@@ -10,6 +10,7 @@ import * as changesetsApi from "@/lib/api/changesets";
 import * as historyApi from "@/lib/api/history";
 import * as locksApi from "@/lib/api/locks";
 import type { EditLock } from "@/lib/api/locks";
+import * as sharesApi from "@/lib/api/shares";
 
 vi.mock("@/lib/api/docs", () => ({
 	getTree: vi.fn(),
@@ -33,6 +34,10 @@ vi.mock("@/lib/api/locks", () => ({
 	heartbeatLock: vi.fn(),
 	forceReleaseLock: vi.fn(),
 	lockFromError: vi.fn(),
+}));
+
+vi.mock("@/lib/api/shares", () => ({
+	createShare: vi.fn(),
 }));
 
 vi.mock("@/lib/api/search", () => ({
@@ -609,6 +614,22 @@ describe("DocsViewerPage edit sessions", () => {
 
 		// Editing is not offered while viewing history.
 		expect(screen.queryByRole("button", { name: /解锁编辑/ })).toBeNull();
+	});
+
+	it("copies a share link for the current page", async () => {
+		mockGuidePage();
+		vi.mocked(sharesApi.createShare).mockResolvedValue({
+			token: "t1",
+			url: "/share/t1",
+		});
+		const user = userEvent.setup();
+		renderPage("/projects/prj_1/docs/guide.md");
+
+		await user.click(await screen.findByRole("button", { name: "分享" }));
+		// The share API is called for the current page with the page path.
+		await vi.waitFor(() =>
+			expect(sharesApi.createShare).toHaveBeenCalledWith("prj_1", "guide.md"),
+		);
 	});
 
 	it("shows the lock holder banner when another user holds the page", async () => {

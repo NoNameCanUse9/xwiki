@@ -9,6 +9,7 @@ import {
 	Folder,
 	History,
 	Lock,
+	Share2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -16,6 +17,7 @@ import { Input } from "@/components/ui/input";
 import { getRevision, submitChangeset } from "@/lib/api/changesets";
 import { fileHistory } from "@/lib/api/history";
 import { searchProject } from "@/lib/api/search";
+import { createShare } from "@/lib/api/shares";
 import {
 	acquireLock,
 	forceReleaseLock,
@@ -463,6 +465,24 @@ export default function DocsViewerPage() {
 		setTocEntries([]);
 	};
 
+	// Share the current page: creates/reuses a /share/{token} link and copies
+	// it to the clipboard so it can be handed out directly.
+	const sharePage = async () => {
+		if (!filePath) return;
+		try {
+			const { url } = await createShare(id, filePath);
+			const full = `${window.location.origin}${url}`;
+			try {
+				await navigator.clipboard.writeText(full);
+				toast.success(`分享链接已复制：${full}`);
+			} catch {
+				window.prompt("分享链接（复制）", full);
+			}
+		} catch (err) {
+			toast.error(err instanceof Error ? err.message : "生成分享链接失败");
+		}
+	};
+
 	// Edit flow: load raw content, submit an update changeset on save.
 	const rawQuery = useQuery({
 		queryKey: ["docs", "raw", id, filePath],
@@ -798,6 +818,15 @@ export default function DocsViewerPage() {
 										>
 											<History className="size-3.5" />
 											历史
+										</Button>
+										<Button
+											variant="ghost"
+											size="sm"
+											className="gap-2 text-[var(--color-ink-3)]"
+											onClick={() => void sharePage()}
+										>
+											<Share2 className="size-3.5" />
+											分享
 										</Button>
 										<FileMenu
 											projectId={id}

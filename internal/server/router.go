@@ -49,6 +49,7 @@ func NewRouter(cfg *config.Config, log *slog.Logger, db *sql.DB, users *user.Sto
 	lh := handlers.NewLockHandler(db, log)
 	hh := handlers.NewHistoryHandler(cfg, projectsSvc, searchSvc, log)
 	sh := handlers.NewSearchHandler(cfg, searchSvc, projectsSvc, agentSvc, log)
+	shareH := handlers.NewShareHandler(db, dh, projectsSvc, log)
 
 	r.Get("/api/openapi.json", httpapi.OpenAPIHandler)
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -118,6 +119,7 @@ func NewRouter(cfg *config.Config, log *slog.Logger, db *sql.DB, users *user.Sto
 				r.Delete("/{id}/locks", lh.Release)
 				r.Post("/{id}/locks/heartbeat", lh.Heartbeat)
 				r.Post("/{id}/locks/force-release", lh.ForceRelease)
+				r.Post("/{id}/shares", shareH.Create)
 				r.Get("/{id}/search", sh.Search)
 				r.Get("/{id}/backlinks", sh.Backlinks)
 				r.Get("/{id}/export.zip", xh.ExportZip)
@@ -133,6 +135,9 @@ func NewRouter(cfg *config.Config, log *slog.Logger, db *sql.DB, users *user.Sto
 			})
 		})
 	})
+
+	// Public per-page share links: /share/{token} renders a standalone page.
+	r.Get("/share/{token}", shareH.View)
 
 	// Docs URL is a SPA route for browsers, but agents/crawlers/curl get a
 	// server-rendered HTML page so a shared docs link "just works" without
