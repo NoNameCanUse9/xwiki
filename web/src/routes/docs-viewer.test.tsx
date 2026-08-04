@@ -252,7 +252,7 @@ describe("DocsViewerPage", () => {
 		await user.click(editor as HTMLElement);
 		await user.keyboard("{Control>}a{/Control}");
 		await user.keyboard("# Updated{Enter}");
-		await user.click(screen.getByRole("button", { name: "上锁" }));
+		await user.click(screen.getByRole("button", { name: "上锁并提交" }));
 		await vi.waitFor(() =>
 			expect(changesetsApi.submitChangeset).toHaveBeenCalledWith("prj_1", {
 				base_revision: "rev1",
@@ -345,7 +345,7 @@ describe("DocsViewerPage", () => {
 		await user.click(editor as HTMLElement);
 		await user.keyboard("x");
 		await new Promise((r) => setTimeout(r, 100));
-		await user.click(screen.getByRole("button", { name: "上锁" }));
+		await user.click(screen.getByRole("button", { name: "上锁并提交" }));
 		await new Promise((r) => setTimeout(r, 400));
 		expect(screen.queryByText("文档已被他人修改，请刷新后重试")).not.toBeNull();
 	});
@@ -475,7 +475,7 @@ describe("DocsViewerPage edit sessions", () => {
 		await user.click(await screen.findByRole("button", { name: /解锁编辑/ }));
 		await screen.findAllByRole("textbox");
 		expect(getEditor()?.textContent).toContain("Guide");
-		await user.click(screen.getByRole("button", { name: "上锁" }));
+		await user.click(screen.getByRole("button", { name: "上锁并提交" }));
 		await new Promise((r) => setTimeout(r, 100));
 
 		// The raw fetch now returns the post-save content.
@@ -511,7 +511,7 @@ describe("DocsViewerPage edit sessions", () => {
 		await screen.findAllByRole("textbox");
 		expect(getEditor()?.textContent).toContain("Guide");
 
-		await user.click(screen.getByRole("button", { name: "上锁" }));
+		await user.click(screen.getByRole("button", { name: "上锁并提交" }));
 		await new Promise((r) => setTimeout(r, 50));
 		expect(getEditor()).toBeUndefined();
 
@@ -698,5 +698,37 @@ describe("DocsViewerPage edit sessions", () => {
 		// Cmd+S commits but stays in edit mode.
 		expect(getEditor()).toBeTruthy();
 		expect(locksApi.releaseLock).not.toHaveBeenCalled();
+	});
+
+	it("submits with a custom commit message", async () => {
+		mockGuidePage();
+		vi.mocked(changesetsApi.getRevision).mockResolvedValue({
+			revision: "rev1",
+		});
+		vi.mocked(changesetsApi.submitChangeset).mockResolvedValue({
+			commit: "c1",
+			revision: "c1",
+		});
+		const user = userEvent.setup();
+		renderPage("/projects/prj_1/docs/guide.md");
+
+		await user.click(await screen.findByRole("button", { name: /解锁编辑/ }));
+		await screen.findAllByRole("textbox");
+		const editor = getEditor() as HTMLElement;
+		await user.click(editor);
+		await user.keyboard("x");
+		await new Promise((r) => setTimeout(r, 100));
+
+		await user.type(
+			screen.getByLabelText("commit message"),
+			"fix typo",
+		);
+		await user.click(screen.getByRole("button", { name: "上锁并提交" }));
+		await vi.waitFor(() =>
+			expect(changesetsApi.submitChangeset).toHaveBeenCalledWith(
+				"prj_1",
+				expect.objectContaining({ message: "fix typo" }),
+			),
+		);
 	});
 });

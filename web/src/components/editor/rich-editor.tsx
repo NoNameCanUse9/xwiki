@@ -20,7 +20,6 @@ import { TableHeader } from "@tiptap/extension-table-header";
 import { TableCell } from "@tiptap/extension-table-cell";
 import { Markdown, type MarkdownStorage } from "tiptap-markdown";
 import { cn } from "../../lib/utils";
-import type { TocEntry } from "./version-toc";
 
 // Extension instances are module-level constants so they are not recreated
 // on every render. Each editor clones them during creation, so sharing the
@@ -141,8 +140,6 @@ export interface RichEditorProps {
 	onChange: (markdown: string) => void;
 	/** When true, the editor content is not editable. */
 	readOnly?: boolean;
-	/** Reports the current heading structure so a TOC can stay in sync. */
-	onTocChange?: (entries: TocEntry[]) => void;
 	/** Called when a wiki link is Cmd/Ctrl+clicked inside the editor. */
 	onNavigateLink?: (href: string) => void;
 }
@@ -243,28 +240,6 @@ function deleteBlock(editor: Editor) {
 		.run();
 }
 
-/** Heading index matches the HTML-based extractToc (counts empty headings too). */
-function extractTocFromEditor(editor: Editor): TocEntry[] {
-	const out: TocEntry[] = [];
-	let idx = 0;
-	editor.state.doc.descendants((node) => {
-		if (node.type.name === "heading") {
-			const text = node.textContent.trim();
-			if (text) {
-				out.push({
-					id: `toc-${idx}`,
-					index: idx,
-					text,
-					level: (node.attrs.level as number) ?? 1,
-				});
-			}
-			idx++;
-		}
-		return true;
-	});
-	return out;
-}
-
 interface BubbleMenuBarProps {
 	editor: Editor;
 }
@@ -335,7 +310,6 @@ export default function RichEditor({
 	initialMarkdown,
 	onChange,
 	readOnly = false,
-	onTocChange,
 	onNavigateLink,
 }: RichEditorProps) {
 	const [slashOpen, setSlashOpen] = useState(false);
@@ -436,7 +410,6 @@ export default function RichEditor({
 					editor.storage as unknown as { markdown: MarkdownStorage }
 				).markdown.getMarkdown(),
 			);
-			onTocChange?.(extractTocFromEditor(editor));
 			// Keep the "/" query in sync with what was typed after the slash.
 			// onUpdate runs after each transaction, so the doc text is fresh
 			// (unlike the keydown handler, which runs before insertion).

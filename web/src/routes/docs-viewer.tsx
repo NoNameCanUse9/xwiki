@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button, buttonVariants } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { getRevision, submitChangeset } from "@/lib/api/changesets";
 import { fileHistory } from "@/lib/api/history";
 import { searchProject } from "@/lib/api/search";
@@ -396,6 +397,7 @@ export default function DocsViewerPage() {
 	>("idle");
 	const [lockHolder, setLockHolder] = useState<EditLock | null>(null);
 	const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
+	const [commitMessage, setCommitMessage] = useState("");
 	const [showHistory, setShowHistory] = useState(false);
 	const [showAttachments, setShowAttachments] = useState(false);
 	const [showBacklinks, setShowBacklinks] = useState(false);
@@ -524,12 +526,14 @@ export default function DocsViewerPage() {
 			const rev = await getRevision(id);
 			await submitChangeset(id, {
 				base_revision: rev.revision,
-				message: "", // 后端生成默认：时间 + 操作者 修改 <path>
+				// 留空则后端生成默认：时间 + 操作者 修改 <path>
+				message: commitMessage.trim(),
 				changes: [{ op: "update", path: filePath, content: draft }],
 			});
 			setSaveState("saved");
 			toast.success("已提交");
 			setDirty(false);
+			setCommitMessage("");
 			localStorage.removeItem(draftKey(id, filePath));
 			await queryClient.invalidateQueries({ queryKey: ["docs"] });
 			await queryClient.invalidateQueries({ queryKey: ["tree"] });
@@ -747,27 +751,15 @@ export default function DocsViewerPage() {
 						{!showHome && !isDirPath && !atSha && (
 							<div className="mr-1 flex items-center gap-1.5">
 								{editing ? (
-									<>
-										<span className="mono-label text-[var(--color-ink-3)]">
-											{saveState === "saving"
-												? "提交中…"
-												: saveState === "saved"
-													? "已提交"
-													: dirty
-														? "自动保存草稿中"
-														: "已是最新"}
-										</span>
-										<Button
-											variant="outline"
-											size="sm"
-											className="gap-2"
-											onClick={() => void lockAndCommit()}
-											disabled={saving}
-										>
-											<Lock className="size-3.5" />
-											上锁
-										</Button>
-									</>
+									<span className="mono-label text-[var(--color-ink-3)]">
+										{saveState === "saving"
+											? "提交中…"
+											: saveState === "saved"
+												? "已提交"
+												: dirty
+													? "自动保存草稿中"
+													: "已是最新"}
+									</span>
 								) : (
 									<>
 										<Button
@@ -999,20 +991,41 @@ export default function DocsViewerPage() {
 									loading…
 								</p>
 							) : (
-								<RichEditor
-									initialMarkdown={draft}
-									onChange={(md) => {
-										setDraft(md);
-										setDirty(true);
-									}}
-									onTocChange={setTocEntries}
-									onNavigateLink={(href) => {
-										const m = href.match(
-											/^\/projects\/[^/]+\/docs\/(.+)$/,
-										);
-										if (m) navigate(`/projects/${id}/docs/${m[1]}`);
-									}}
-								/>
+								<>
+									<RichEditor
+										initialMarkdown={draft}
+										onChange={(md) => {
+											setDraft(md);
+											setDirty(true);
+										}}
+										onNavigateLink={(href) => {
+											const m = href.match(
+												/^\/projects\/[^/]+\/docs\/(.+)$/,
+											);
+											if (m) navigate(`/projects/${id}/docs/${m[1]}`);
+										}}
+									/>
+									<div className="mt-3 flex items-center gap-2">
+										<Input
+											aria-label="commit message"
+											placeholder="commit message（留空默认：时间 + 用户名）"
+											value={commitMessage}
+											onChange={(e) => setCommitMessage(e.target.value)}
+											onKeyDown={(e) => {
+												if (e.key === "Enter") void lockAndCommit();
+											}}
+											className="h-8 flex-1 font-mono text-xs"
+										/>
+										<Button
+											size="sm"
+											onClick={() => void lockAndCommit()}
+											disabled={saving}
+										>
+											<Lock className="size-3.5" />
+											{saving ? "提交中…" : "上锁并提交"}
+										</Button>
+									</div>
+								</>
 							)
 						)}
 					</div>
