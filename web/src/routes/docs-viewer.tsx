@@ -720,10 +720,10 @@ export default function DocsViewerPage() {
 					</div>
 					{!showHome && (
 						<div className="flex min-h-0 flex-col border-b border-[var(--color-rule)]">
-							<div className="min-h-0 flex-1 overflow-y-auto p-2">
+							<div className="scrollbar-hidden min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-2">
 								<TocPanel entries={tocEntries} />
 							</div>
-							<div className="max-h-[40%] overflow-y-auto border-t border-[var(--color-rule)] p-2">
+							<div className="scrollbar-hidden min-h-0 flex-1 overflow-y-auto overflow-x-hidden border-t border-[var(--color-rule)] p-2">
 								<VersionPanel
 									projectId={id}
 									filePath={filePath}
@@ -733,7 +733,7 @@ export default function DocsViewerPage() {
 							</div>
 						</div>
 					)}
-					<div className="min-h-0 flex-1 overflow-y-auto p-2">
+					<div className="scrollbar-hidden min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-2">
 						{sidebarItems.length > 0 && (
 							<nav className="space-y-0.5">
 								<p className="mono-label px-2 pb-1 text-[var(--color-ink-3)]">

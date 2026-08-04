@@ -297,3 +297,12 @@ body {
   margin-right: 0.5rem;
   accent-color: var(--color-accent);
 }
+
+/* Hide scrollbars on scrollable panes (still scrollable with wheel/trackpad). */
+.scrollbar-hidden {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* legacy Edge/IE */
+}
+.scrollbar-hidden::-webkit-scrollbar {
+  display: none; /* Chrome/Safari/Edge */
+}
