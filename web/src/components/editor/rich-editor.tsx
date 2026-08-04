@@ -505,7 +505,11 @@ export default function RichEditor({
 	);
 
 	return (
-		<div className="hairline-panel relative overflow-hidden" ref={editorRef}>
+		<div
+			className="relative overflow-hidden"
+			data-editor-panel
+			ref={editorRef}
+		>
 			<EditorContent className="px-4 py-3" editor={editor} />
 			{editor && (
 				<BubbleMenu

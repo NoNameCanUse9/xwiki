@@ -528,6 +528,7 @@ export default function DocsViewerPage() {
 				changes: [{ op: "update", path: filePath, content: draft }],
 			});
 			setSaveState("saved");
+			toast.success("已提交");
 			setDirty(false);
 			localStorage.removeItem(draftKey(id, filePath));
 			await queryClient.invalidateQueries({ queryKey: ["docs"] });
@@ -743,37 +744,63 @@ export default function DocsViewerPage() {
 							void runSearch();
 						}}
 					>
-						{!showHome && !editing && !isDirPath && !atSha && (
+						{!showHome && !isDirPath && !atSha && (
 							<div className="mr-1 flex items-center gap-1.5">
-								<Button
-									variant="outline"
-									size="sm"
-									className="gap-2"
-									onClick={() => void startEditing()}
-									disabled={lockState === "opening"}
-								>
-									<Lock className="size-3.5" />
-									{lockState === "opening" ? "获取中…" : "解锁编辑"}
-								</Button>
-								<Button
-									variant="ghost"
-									size="sm"
-									className="gap-2 text-[var(--color-ink-3)]"
-									onClick={() => setShowHistory((v) => !v)}
-								>
-									<History className="size-3.5" />
-									历史
-								</Button>
-								<FileMenu
-									projectId={id}
-									filePath={filePath}
-									items={{
-										onEdit: () => void startEditing(),
-										onToggleHistory: () => setShowHistory((v) => !v),
-										onToggleAttachments: () => setShowAttachments((v) => !v),
-										onToggleBacklinks: () => setShowBacklinks((v) => !v),
-									}}
-								/>
+								{editing ? (
+									<>
+										<span className="mono-label text-[var(--color-ink-3)]">
+											{saveState === "saving"
+												? "提交中…"
+												: saveState === "saved"
+													? "已提交"
+													: dirty
+														? "自动保存草稿中"
+														: "已是最新"}
+										</span>
+										<Button
+											variant="outline"
+											size="sm"
+											className="gap-2"
+											onClick={() => void lockAndCommit()}
+											disabled={saving}
+										>
+											<Lock className="size-3.5" />
+											上锁
+										</Button>
+									</>
+								) : (
+									<>
+										<Button
+											variant="outline"
+											size="sm"
+											className="gap-2"
+											onClick={() => void startEditing()}
+											disabled={lockState === "opening"}
+										>
+											<Lock className="size-3.5" />
+											{lockState === "opening" ? "获取中…" : "解锁编辑"}
+										</Button>
+										<Button
+											variant="ghost"
+											size="sm"
+											className="gap-2 text-[var(--color-ink-3)]"
+											onClick={() => setShowHistory((v) => !v)}
+										>
+											<History className="size-3.5" />
+											历史
+										</Button>
+										<FileMenu
+											projectId={id}
+											filePath={filePath}
+											items={{
+												onEdit: () => void startEditing(),
+												onToggleHistory: () => setShowHistory((v) => !v),
+												onToggleAttachments: () => setShowAttachments((v) => !v),
+												onToggleBacklinks: () => setShowBacklinks((v) => !v),
+											}}
+										/>
+									</>
+								)}
 							</div>
 						)}
 						{!showHome && <ImportFilesButton projectId={id} />}
@@ -967,50 +994,26 @@ export default function DocsViewerPage() {
 							</div>
 						)}
 						{editing && !showHome && !isDirPath && (
-							<div className="space-y-3">
-								{rawQuery.isLoading ? (
-									<p className="mono-label text-[var(--color-ink-3)]">
-										loading…
-									</p>
-								) : (
-									<div className="code-card p-1" data-editor-panel>
-										<RichEditor
-											initialMarkdown={draft}
-											onChange={(md) => {
-												setDraft(md);
-												setDirty(true);
-											}}
-											onTocChange={setTocEntries}
-											onNavigateLink={(href) => {
-												const m = href.match(
-													/^\/projects\/[^/]+\/docs\/(.+)$/,
-												);
-												if (m) navigate(`/projects/${id}/docs/${m[1]}`);
-											}}
-										/>
-									</div>
-								)}
-								<div className="flex items-center justify-end gap-2">
-									<span className="mono-label text-[var(--color-ink-3)]">
-										{saveState === "saving"
-											? "提交中…"
-											: saveState === "saved"
-												? "已提交"
-												: dirty
-													? "自动保存草稿中"
-													: "已是最新"}
-									</span>
-									<Button
-										variant="outline"
-										size="sm"
-										onClick={() => void lockAndCommit()}
-										disabled={saving}
-									>
-										<Lock className="size-3.5" />
-										上锁
-									</Button>
-								</div>
-							</div>
+							rawQuery.isLoading ? (
+								<p className="mono-label text-[var(--color-ink-3)]">
+									loading…
+								</p>
+							) : (
+								<RichEditor
+									initialMarkdown={draft}
+									onChange={(md) => {
+										setDraft(md);
+										setDirty(true);
+									}}
+									onTocChange={setTocEntries}
+									onNavigateLink={(href) => {
+										const m = href.match(
+											/^\/projects\/[^/]+\/docs\/(.+)$/,
+										);
+										if (m) navigate(`/projects/${id}/docs/${m[1]}`);
+									}}
+								/>
+							)
 						)}
 					</div>
 				</main>
