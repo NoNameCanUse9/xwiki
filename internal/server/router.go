@@ -134,9 +134,35 @@ func NewRouter(cfg *config.Config, log *slog.Logger, db *sql.DB, users *user.Sto
 		})
 	})
 
+	// Docs URL is a SPA route for browsers, but agents/crawlers/curl get a
+	// server-rendered HTML page so a shared docs link "just works" without
+	// JavaScript (e.g. Claude fetching the URL directly).
+	spa := spaHandler()
+	r.Get("/projects/{id}/docs/*", func(w http.ResponseWriter, r *http.Request) {
+		if isBrowserAgent(r) {
+			spa.ServeHTTP(w, r)
+			return
+		}
+		dh.ServeView(w, r)
+	})
 	r.Handle("/git/{projectID}/*", gh)
-	r.Handle("/*", spaHandler())
+	r.Handle("/*", spa)
 	return r
+}
+
+// isBrowserAgent reports whether the client is a real browser (keep the SPA)
+// vs an agent/crawler/CLI that should get server-rendered HTML.
+func isBrowserAgent(r *http.Request) bool {
+	ua := strings.ToLower(r.UserAgent())
+	if ua == "" {
+		return false
+	}
+	for _, marker := range []string{"bot", "spider", "crawler", "curl", "wget", "python", "node", "claude", "gptbot"} {
+		if strings.Contains(ua, marker) {
+			return false
+		}
+	}
+	return strings.Contains(ua, "mozilla")
 }
 
 // spaHandler serves the embedded frontend with SPA fallback; unknown /api

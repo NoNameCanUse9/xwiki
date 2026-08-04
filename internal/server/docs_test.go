@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"strings"
@@ -246,5 +247,59 @@ func TestWikiLinksRenderAsProjectLinks(t *testing.T) {
 	}
 	if !strings.Contains(page.Content, `href="/projects/`+projectID+`/docs/docs/plain.md"`) {
 		t.Fatalf("plain link missing: %s", page.Content)
+	}
+}
+
+func TestDocsViewServeRenderedPage(t *testing.T) {
+	h, _ := newTestRouterWithService(t)
+	cookie := loginAndGetCookie(t, h)
+	projectID, _ := createProjectViaAPI(t, h, cookie, "view-site")
+
+	// Seed a markdown file.
+	rev := getRevision(t, h, cookie, projectID)
+	submitChangeset(t, h, cookie, projectID,
+		`{"base_revision":"`+rev+`","message":"seed",
+		  "changes":[{"op":"create","path":"guide.md","content":"# Guide\n\nHello **world**.\n"}]}`)
+
+	path := "/projects/" + projectID + "/docs/guide.md"
+
+	// Non-browser client (agent/curl) gets the server-rendered page.
+	req := httptest.NewRequest(http.MethodGet, path, nil)
+	req.Header.Set("User-Agent", "ClaudeBot/1.0")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("agent view: status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "<h1>Guide</h1>") ||
+		!strings.Contains(rec.Body.String(), "<strong>world</strong>") {
+		t.Fatalf("agent view missing rendered content: %s", rec.Body.String())
+	}
+	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
+		t.Fatalf("agent view content-type = %s", ct)
+	}
+
+	// Browser gets the SPA shell.
+	req = httptest.NewRequest(http.MethodGet, path, nil)
+	req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) Chrome/120")
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("browser view: status = %d", rec.Code)
+	}
+	if strings.Contains(rec.Body.String(), "<h1>Guide</h1>") {
+		t.Fatalf("browser should get the SPA shell, got rendered page")
+	}
+	if !strings.Contains(rec.Body.String(), "<!doctype html>") {
+		t.Fatalf("browser should get an html document")
+	}
+
+	// Unknown doc -> 404.
+	req = httptest.NewRequest(http.MethodGet, "/projects/"+projectID+"/docs/missing.md", nil)
+	req.Header.Set("User-Agent", "ClaudeBot/1.0")
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("missing doc: status = %d", rec.Code)
 	}
 }

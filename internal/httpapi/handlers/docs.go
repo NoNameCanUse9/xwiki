@@ -5,6 +5,8 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"html"
+	"io"
 	"log/slog"
 	"net/http"
 	"path"
@@ -183,6 +185,92 @@ func (h *DocsHandler) Page(w http.ResponseWriter, r *http.Request) {
 		resp["content"] = string(content)
 	}
 	response.WriteJSON(w, http.StatusOK, resp)
+}
+
+// viewPageTemplate wraps server-rendered markdown into a minimal, readable
+// HTML page for agents and crawlers that fetch the docs URL directly
+// (no JavaScript). Browsers keep the interactive SPA instead.
+const viewPageTemplate = `<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>__TITLE__</title>
+<style>
+body{margin:0;background:#fff;color:#1f2328;font:16px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+main{max-width:760px;margin:0 auto;padding:40px 24px 80px}
+h1,h2,h3,h4{line-height:1.35;margin:1.2em 0 .5em}
+h1{font-size:1.75rem;padding-bottom:.35em;border-bottom:1px solid #d8dee4}
+h2{font-size:1.375rem;padding-bottom:.3em;border-bottom:1px solid #d8dee4}
+h3{font-size:1.125rem}
+p{margin:.9em 0}
+a{color:#0969da;text-decoration:none}a:hover{text-decoration:underline}
+code{background:#f6f8fa;border-radius:4px;padding:.15em .35em;font-size:.9em}
+pre{background:#f6f8fa;border-radius:8px;padding:14px 16px;overflow-x:auto}
+pre code{background:none;padding:0}
+blockquote{border-left:4px solid #d8dee4;margin:1em 0;padding:.2em 1em;color:#57606a}
+table{border-collapse:collapse;margin:1em 0}
+th,td{border:1px solid #d8dee4;padding:6px 12px}
+th{background:#f6f8fa}
+ul,ol{padding-left:1.6em}
+hr{border:none;border-top:1px solid #d8dee4;margin:1.5em 0}
+img{max-width:100%}
+.admonition{border-left:4px solid #d8dee4;border-radius:6px;padding:.6em 1em;margin:1em 0;background:#f6f8fa}
+.admonition-title{font-weight:600}
+</style>
+</head>
+<body><main>__BODY__</main></body>
+</html>`
+
+// ServeView renders a document as a plain HTML page for non-browser
+// clients (agents, curl, crawlers) hitting the docs URL directly. Browsers
+// get the interactive SPA via the router. Public read-only: no auth, so a
+// shared link "just works" — documents are already readable via the API.
+func (h *DocsHandler) ServeView(w http.ResponseWriter, r *http.Request) {
+	projectID := request.PathParam(r, "id")
+	filePath := request.PathParam(r, "*")
+	if filePath == "" {
+		filePath = "README.md"
+	}
+	if !validateDocPath(filePath) {
+		response.WriteError(w, r, http.StatusBadRequest, "invalid_doc_path", "invalid document path")
+		return
+	}
+	repo, err := h.repoFor(r, projectID)
+	if err != nil {
+		response.WriteError(w, r, http.StatusNotFound, "project_not_found", "project not found")
+		return
+	}
+	branch, err := repo.DefaultBranch(r.Context())
+	if err != nil {
+		response.WriteError(w, r, http.StatusInternalServerError, "internal_error", "could not resolve branch")
+		return
+	}
+	content, err := repo.ReadBlobAt(r.Context(), branch, filePath)
+	if err != nil {
+		response.WriteError(w, r, http.StatusNotFound, "doc_not_found", "document not found")
+		return
+	}
+	if len(content) > maxDocBlobBytes {
+		response.WriteError(w, r, http.StatusRequestEntityTooLarge, "doc_too_large", "document exceeds size limit")
+		return
+	}
+	var buf bytes.Buffer
+	if err := h.markdown.Convert(rewriteWikiLinks(content, projectID), &buf); err != nil {
+		h.log.Error("view render failed", "error", err, "request_id", request.RequestID(r))
+		response.WriteError(w, r, http.StatusInternalServerError, "internal_error", "could not render document")
+		return
+	}
+	title := filePath
+	if i := strings.LastIndex(title, "/"); i >= 0 {
+		title = title[i+1:]
+	}
+	title = strings.TrimSuffix(title, ".md")
+	page := strings.ReplaceAll(viewPageTemplate, "__TITLE__", html.EscapeString(title))
+	page = strings.ReplaceAll(page, "__BODY__", buf.String())
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = io.WriteString(w, page)
 }
 
 // wikiLinkRe matches [[path]] and [[path|label]] wiki links.
