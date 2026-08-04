@@ -413,6 +413,31 @@ export default function DocsViewerPage() {
 	const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
 	const [commitMessage, setCommitMessage] = useState("");
 	const [commitOpen, setCommitOpen] = useState(false);
+	const [restoring, setRestoring] = useState(false);
+
+	// Restore the current page to a historical version (from atSha).
+	const restoreVersion = async () => {
+		if (!atSha) return;
+		setRestoring(true);
+		try {
+			const raw = await getPage(id, filePath, "raw", atSha);
+			const rev = await getRevision(id);
+			await submitChangeset(id, {
+				base_revision: rev.revision,
+				message: `恢复到版本 ${atSha.slice(0, 7)}`,
+				changes: [{ op: "update", path: filePath, content: raw.content }],
+			});
+			setAtSha(null);
+			toast.success("已恢复到此版本");
+			await queryClient.invalidateQueries({ queryKey: ["docs"] });
+			await queryClient.invalidateQueries({ queryKey: ["tree"] });
+			await queryClient.invalidateQueries({ queryKey: ["docs", "raw"] });
+		} catch (err) {
+			toast.error(err instanceof Error ? err.message : "恢复失败");
+		} finally {
+			setRestoring(false);
+		}
+	};
 	const [showHistory, setShowHistory] = useState(false);
 	const [showAttachments, setShowAttachments] = useState(false);
 	const [showBacklinks, setShowBacklinks] = useState(false);
@@ -972,13 +997,23 @@ export default function DocsViewerPage() {
 								<p className="mono-label text-[var(--color-ink-2)]">
 									viewing historical version {atSha.slice(0, 7)}
 								</p>
-								<Button
-									size="sm"
-									variant="outline"
-									onClick={() => selectVersion(null)}
-								>
-									返回最新版本
-								</Button>
+								<div className="flex items-center gap-2">
+									<Button
+										size="sm"
+										variant="outline"
+										onClick={() => void restoreVersion()}
+										disabled={restoring}
+									>
+										{restoring ? "恢复中…" : "恢复到此版本"}
+									</Button>
+									<Button
+										size="sm"
+										variant="outline"
+										onClick={() => selectVersion(null)}
+									>
+										返回最新版本
+									</Button>
+								</div>
 							</div>
 						)}
 						{content && content.format === "html" && !editing && (
