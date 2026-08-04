@@ -20,6 +20,18 @@ type ReindexStats struct {
 	Removed int `json:"removed"`
 }
 
+// ExtractTitle returns the first Markdown heading ("# ...") from content,
+// or an empty string if none is found.
+func ExtractTitle(md string) string {
+	for _, line := range strings.Split(md, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "# ") {
+			return strings.TrimPrefix(line, "# ")
+		}
+	}
+	return ""
+}
+
 // Service coordinates FTS indexing with the project Git trees.
 type Service struct {
 	store    *Store
@@ -44,7 +56,9 @@ func (s *Service) Search(ctx context.Context, projectID, query string, limit int
 	if q == "" || len(q) > 200 {
 		return nil, fmt.Errorf("invalid query")
 	}
-	return s.store.Query(ctx, projectID, BuildMatchExpr(q), limit)
+	// For FTS, use the raw query (no spacing) so trigram can match substrings.
+	// For LIKE fallback, the store applies SpaceCJK internally.
+	return s.store.Query(ctx, projectID, BuildMatchExprRaw(q), q, limit)
 }
 
 // ReindexProject incrementally syncs the index with the project's current
@@ -86,8 +100,10 @@ func (s *Service) ReindexProject(ctx context.Context, projectID string) (*Reinde
 			if err != nil {
 				return err
 			}
+			content := string(blob)
 			changed, err := s.store.Upsert(ctx, &StateEntry{
-				ProjectID: projectID, Path: e.Path, BlobSHA: sha, Content: string(blob),
+				ProjectID: projectID, Path: e.Path, BlobSHA: sha,
+				Title: ExtractTitle(content), Content: content,
 			})
 			if err != nil {
 				return err

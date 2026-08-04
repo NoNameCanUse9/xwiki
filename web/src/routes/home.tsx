@@ -36,7 +36,9 @@ function ProjectCard({ project }: { project: Project }) {
 	const queryClient = useQueryClient();
 	const [busy, setBusy] = useState(false);
 
-	const onArchive = async () => {
+	const onArchive = async (e: React.MouseEvent) => {
+		e.preventDefault();
+		e.stopPropagation();
 		setBusy(true);
 		try {
 			await archiveProject(project.id);
@@ -49,7 +51,9 @@ function ProjectCard({ project }: { project: Project }) {
 		}
 	};
 
-	const onUnarchive = async () => {
+	const onUnarchive = async (e: React.MouseEvent) => {
+		e.preventDefault();
+		e.stopPropagation();
 		setBusy(true);
 		try {
 			await unarchiveProject(project.id);
@@ -63,28 +67,21 @@ function ProjectCard({ project }: { project: Project }) {
 	};
 
 	return (
-		<div className="hairline-panel flex flex-col gap-3 p-5 transition-colors hover:border-[var(--color-rule-2)]">
+		<Link
+			to={`/projects/${project.id}/docs`}
+			className="hairline-panel block flex flex-col gap-3 p-5 transition-colors hover:border-[var(--color-rule-2)] hover:bg-[var(--color-surface-accent)]"
+		>
 			<div className="flex items-start justify-between gap-3">
 				<div className="min-w-0">
-					<Link
-						to={`/projects/${project.id}/docs`}
-						className="font-display text-base font-semibold text-[var(--color-ink)] hover:text-[var(--color-accent)]"
-						title="阅读文档"
-					>
+					<span className="font-display text-lg font-semibold text-[var(--color-ink)]">
 						{project.name}
-					</Link>
-					<Link
-						to={`/projects/${project.id}`}
-						className="mono-label ml-2 text-[var(--color-ink-3)] hover:text-[var(--color-accent)]"
-					>
-						详情
-					</Link>
+					</span>
 					{project.archived && (
 						<span className="mono-label ml-2 inline-block text-[var(--color-ink-3)]">
 							archived
 						</span>
 					)}
-					<p className="mt-1 truncate text-sm text-[var(--color-ink-2)]">
+					<p className="mt-1.5 line-clamp-2 text-sm text-[var(--color-ink-2)]">
 						{project.description || "—"}
 					</p>
 				</div>
@@ -120,7 +117,7 @@ function ProjectCard({ project }: { project: Project }) {
 					{formatDate(project.created_at)}
 				</span>
 			</div>
-		</div>
+		</Link>
 	);
 }
 

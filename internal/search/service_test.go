@@ -58,7 +58,8 @@ func TestUpsertQueryDelete(t *testing.T) {
 }
 
 func TestBuildMatchExpr(t *testing.T) {
-	if got := BuildMatchExpr(`say "hello" world`); got != `"say"* """hello"""* "world"*` {
+	// Trigram tokenizer: quoted phrases, no prefix wildcard.
+	if got := BuildMatchExpr(`say "hello" world`); got != `"say" """hello""" "world"` {
 		t.Fatalf("match expr wrong: %q", got)
 	}
 }

@@ -10,17 +10,19 @@ import (
 	"agentdocs/internal/httpapi/request"
 	"agentdocs/internal/httpapi/response"
 	"agentdocs/internal/project"
+	"agentdocs/internal/search"
 )
 
 // ProjectHandler serves the /api/v1/projects endpoints.
 type ProjectHandler struct {
-	cfg *config.Config
-	svc *project.Service
-	log *slog.Logger
+	cfg      *config.Config
+	svc      *project.Service
+	searchSvc *search.Service
+	log      *slog.Logger
 }
 
-func NewProjectHandler(cfg *config.Config, svc *project.Service, log *slog.Logger) *ProjectHandler {
-	return &ProjectHandler{cfg: cfg, svc: svc, log: log}
+func NewProjectHandler(cfg *config.Config, svc *project.Service, searchSvc *search.Service, log *slog.Logger) *ProjectHandler {
+	return &ProjectHandler{cfg: cfg, svc: svc, searchSvc: searchSvc, log: log}
 }
 
 type createProjectRequest struct {
@@ -147,6 +149,10 @@ func (h *ProjectHandler) ImportFolder(w http.ResponseWriter, r *http.Request) {
 			response.WriteError(w, r, http.StatusInternalServerError, "internal_error", "could not import folder")
 		}
 		return
+	}
+	// Trigger incremental reindex so the new project is searchable immediately.
+	if _, err := h.searchSvc.ReindexProject(r.Context(), res.Project.ID); err != nil {
+		h.log.Warn("reindex after import failed", "error", err, "project_id", res.Project.ID)
 	}
 	response.WriteJSON(w, http.StatusCreated, map[string]any{"project": res.Project, "commits": res.Commits})
 }

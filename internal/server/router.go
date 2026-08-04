@@ -38,7 +38,7 @@ func NewRouter(cfg *config.Config, log *slog.Logger, db *sql.DB, users *user.Sto
 	}))
 
 	h := handlers.NewAuthHandler(cfg, authSvc, users, log)
-	ph := handlers.NewProjectHandler(cfg, projectsSvc, log)
+	ph := handlers.NewProjectHandler(cfg, projectsSvc, searchSvc, log)
 	dh := handlers.NewDocsHandler(cfg, projectsSvc, agentSvc, log)
 	ch := handlers.NewChangesetHandler(cfg, projectsSvc, agentSvc, searchSvc, log)
 	th := handlers.NewTokenHandler(cfg, agentSvc, log)
