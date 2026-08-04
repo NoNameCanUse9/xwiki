@@ -184,6 +184,18 @@ describe("slash menu", () => {
     expect(screen.queryByText("标题 1")).not.toBeInTheDocument();
   });
 
+  it("typing markdown shortcut characters does not convert the block", async () => {
+    const onChange = vi.fn();
+    render(<RichEditor initialMarkdown="" onChange={onChange} />);
+    const editable = screen.getByRole("textbox");
+    await userEvent.click(editable);
+    await userEvent.keyboard("# not a heading");
+    // Block shortcuts are disabled: no instant h1, text stays literal.
+    expect(editable.querySelector("h1")).toBeNull();
+    const last = onChange.mock.calls.at(-1)?.[0] as string;
+    expect(last).toContain("# not a heading");
+  });
+
   it("filters slash items by the query typed after /", async () => {
     render(<RichEditor initialMarkdown="" onChange={vi.fn()} />);
     const editable = screen.getByRole("textbox");

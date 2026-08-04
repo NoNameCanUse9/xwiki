@@ -10,7 +10,20 @@ import {
 // subpath (not from the package root), and positions them with Floating UI
 // (there is no tippy.js anymore, hence `options` instead of `tippyOptions`).
 import { BubbleMenu } from "@tiptap/react/menus";
-import StarterKit from "@tiptap/starter-kit";
+import { Document } from "@tiptap/extension-document";
+import { Paragraph } from "@tiptap/extension-paragraph";
+import { Text } from "@tiptap/extension-text";
+import { Bold } from "@tiptap/extension-bold";
+import { Italic } from "@tiptap/extension-italic";
+import { Strike } from "@tiptap/extension-strike";
+import { Code } from "@tiptap/extension-code";
+import { Heading } from "@tiptap/extension-heading";
+import { Blockquote } from "@tiptap/extension-blockquote";
+import { CodeBlock } from "@tiptap/extension-code-block";
+import { BulletList, ListItem, ListKeymap, OrderedList } from "@tiptap/extension-list";
+import { HorizontalRule } from "@tiptap/extension-horizontal-rule";
+import { HardBreak } from "@tiptap/extension-hard-break";
+import { Dropcursor, Gapcursor, TrailingNode, UndoRedo } from "@tiptap/extensions";
 import Placeholder from "@tiptap/extension-placeholder";
 import Link from "@tiptap/extension-link";
 import Image from "@tiptap/extension-image";
@@ -24,8 +37,31 @@ import { cn } from "../../lib/utils";
 // Extension instances are module-level constants so they are not recreated
 // on every render. Each editor clones them during creation, so sharing the
 // instances across editor instances is safe.
+// Manually assembled instead of StarterKit: block-level markdown shortcuts
+// (#, -, >, ```) are disabled so typing them never instantly converts a
+// paragraph into a huge heading/list/quote (Notion-like predictability).
+// Inline marks (bold/italic/code) keep their input rules.
 const extensions = [
-	StarterKit,
+	Document,
+	Paragraph,
+	Text,
+	Bold,
+	Italic,
+	Strike,
+	Code,
+	Heading.configure({ levels: [1, 2, 3] }).extend({ addInputRules: () => [] }),
+	Blockquote.extend({ addInputRules: () => [] }),
+	BulletList.extend({ addInputRules: () => [] }),
+	OrderedList.extend({ addInputRules: () => [] }),
+	CodeBlock.extend({ addInputRules: () => [] }),
+	ListItem,
+	ListKeymap,
+	HorizontalRule,
+	HardBreak,
+	Dropcursor,
+	Gapcursor,
+	TrailingNode,
+	UndoRedo,
 	Placeholder.configure({ placeholder: "输入 / 唤起命令菜单…" }),
 	Link.configure({ openOnClick: false }),
 	Image,
