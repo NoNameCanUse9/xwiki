@@ -541,7 +541,7 @@ impl XWikiApp {
                                 div()
                                     .id(format!("commit-{short}"))
                                     .px_3()
-                                    .py_2()
+                                    .py_2_5()
                                     .border_b_1()
                                     .border_color(theme.border)
                                     .hover(|s| s.bg(theme.list_hover))
@@ -550,22 +550,19 @@ impl XWikiApp {
                                     .gap_1()
                                     .child(
                                         div()
-                                            .font_family("JetBrains Mono")
-                                            .text_xs()
-                                            .text_color(theme.foreground)
-                                            .child(short),
-                                    )
-                                    .child(
-                                        div()
                                             .text_sm()
-                                            .text_color(theme.muted_foreground)
+                                            .text_color(theme.foreground)
                                             .child(c.message.clone()),
                                     )
                                     .child(
                                         div()
+                                            .flex()
+                                            .items_center()
+                                            .gap_2()
                                             .font_family("JetBrains Mono")
                                             .text_xs()
                                             .text_color(theme.muted_foreground)
+                                            .child(short)
                                             .child(format!("{} · {}", c.author, c.date)),
                                     )
                                     .on_click(cx.listener(move |this, _, _, cx| {
@@ -938,6 +935,23 @@ impl XWikiApp {
                 .text_color(theme.muted_foreground)
                 .child(format!("root · {count} {}", if count == 1 { "item" } else { "items" })),
         );
+        if self.tree_entries.iter().filter(|e| e.path != "_sidebar.md").count() == 0 {
+            list = list.child(
+                div()
+                    .mx_3()
+                    .my_4()
+                    .px_4()
+                    .py_6()
+                    .rounded(px(6.0))
+                    .border_1()
+                    .border_color(theme.border)
+                    .text_center()
+                    .text_sm()
+                    .text_color(theme.muted_foreground)
+                    .child("空目录"),
+            );
+            return list;
+        }
         for e in self.tree_entries.iter().filter(|e| e.path != "_sidebar.md") {
             let is_dir = e.r#type == "tree";
             let path = e.path.clone();
