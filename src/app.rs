@@ -96,7 +96,7 @@ impl ProjectRow {
 impl XWikiApp {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let server_input = cx.new(|cx| {
-            InputState::new(window, cx).placeholder("http://127.0.0.1:9090")
+            InputState::new(window, cx).placeholder(config::load_server())
         });
         let user_input =
             cx.new(|cx| InputState::new(window, cx).placeholder("用户名"));
@@ -1318,7 +1318,7 @@ impl XWikiApp {
         let server = {
             let v = self.server_input.read(cx).value().to_string();
             if v.trim().is_empty() {
-                "http://127.0.0.1:9090".to_string()
+                config::load_server()
             } else {
                 v.trim().to_string()
             }
@@ -1336,6 +1336,7 @@ impl XWikiApp {
         cx.spawn(async move |this, cx| {
             match client.login(username.trim(), &password).await {
                 Ok(user) => {
+                    config::save_server(&server);
                     let _ = this.update(cx, |app, cx| app.on_login_ok(user, cx));
                 }
                 Err(e) => {
@@ -1565,6 +1566,14 @@ impl XWikiApp {
                                             .child("使用管理员账号访问你的文档工作台"),
                                     ),
                             )
+                            .child(
+                                div()
+                                    .font_family("JetBrains Mono")
+                                    .text_xs()
+                                    .text_color(theme.muted_foreground)
+                                    .child("服务地址"),
+                            )
+                            .child(Input::new(&self.server_input).w_full())
                             .child(
                                 div()
                                     .font_family("JetBrains Mono")
