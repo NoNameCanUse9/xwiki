@@ -7,6 +7,7 @@ mod api;
 mod app;
 mod cli;
 mod config;
+mod ui;
 
 use app::XWikiApp;
 
@@ -39,13 +40,22 @@ fn main() {
         gpui_component::init(cx);
 
         // Load the Cobalt theme (cool engineered paper, one electric-blue
-        // signal accent, hairlines over shadows) as the light theme.
-        let registry = ThemeRegistry::global_mut(cx);
-        if let Err(err) = registry.load_themes_from_str(include_str!("themes/cobalt.json")) {
-            eprintln!("cobalt theme failed to load: {err}");
+        // signal accent, hairlines over shadows) for both modes.
+        let (light, dark) = {
+            let registry = ThemeRegistry::global_mut(cx);
+            if let Err(err) = registry.load_themes_from_str(include_str!("themes/cobalt.json")) {
+                eprintln!("cobalt theme failed to load: {err}");
+            }
+            let light = registry.themes().get("Cobalt Light").cloned();
+            let dark = registry.themes().get("Cobalt Dark").cloned();
+            (light, dark)
+        };
+        let global = Theme::global_mut(cx);
+        if let Some(cobalt) = light {
+            global.light_theme = cobalt;
         }
-        if let Some(cobalt) = registry.themes().get("Cobalt Light").cloned() {
-            Theme::global_mut(cx).light_theme = cobalt;
+        if let Some(cobalt) = dark {
+            global.dark_theme = cobalt;
         }
         Theme::change(config::load_theme(), None, cx);
 

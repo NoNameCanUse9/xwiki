@@ -10,12 +10,12 @@ use gpui_component::{
     input::{Input, InputEvent, InputState},
     scroll::ScrollableElement as _,
     notification::Notification,
-    text::TextView,
     *,
 };
 
 use crate::api::{Client, dto};
 use crate::config;
+use crate::ui::{mono_label, tokens};
 use crate::{TogglePalette, ToggleTheme};
 
 /// Command palette entries: (id, label, hint). Availability is decided by
@@ -495,7 +495,7 @@ impl XWikiApp {
             .child(
                 // History toolbar.
                 div()
-                    .h(px(44.0))
+                    .h(px(tokens::TOOLBAR_H))
                     .px_4()
                     .flex()
                     .items_center()
@@ -503,17 +503,11 @@ impl XWikiApp {
                     .border_b_1()
                     .border_color(theme.border)
                     .bg(theme.sidebar)
-                    .child(
-                        div()
-                            .font_family("JetBrains Mono")
-                            .text_xs()
-                            .text_color(theme.muted_foreground)
-                            .child("HISTORY"),
-                    )
+                    .child(mono_label("HISTORY").text_color(theme.muted_foreground))
                     .child(div().flex_1())
                     .child(
                         Button::new("close-history")
-                            .rounded(px(6.0))
+                            .rounded(px(tokens::RADIUS))
                             .label("← 返回文档")
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.close_history(cx)
@@ -528,7 +522,7 @@ impl XWikiApp {
                     .child(
                         // Commit list.
                         div()
-                            .w(px(320.0))
+                            .w(px(tokens::PANEL_HISTORY))
                             .h_full()
                             .flex()
                             .flex_col()
@@ -559,7 +553,7 @@ impl XWikiApp {
                                             .flex()
                                             .items_center()
                                             .gap_2()
-                                            .font_family("JetBrains Mono")
+                                            .font_family(tokens::FONT_MONO)
                                             .text_xs()
                                             .text_color(theme.muted_foreground)
                                             .child(short)
@@ -592,7 +586,7 @@ impl XWikiApp {
                                     )
                                     .child(
                                         div()
-                                            .font_family("JetBrains Mono")
+                                            .font_family(tokens::FONT_MONO)
                                             .text_xs()
                                             .text_color(theme.muted_foreground)
                                             .child(format!(
@@ -606,13 +600,7 @@ impl XWikiApp {
                                             .h(px(1.0))
                                             .bg(theme.border),
                                     )
-                                    .child(
-                                        div()
-                                            .font_family("JetBrains Mono")
-                                            .text_xs()
-                                            .text_color(theme.muted_foreground)
-                                            .child("FILES"),
-                                    )
+                                    .child(mono_label("FILES").text_color(theme.muted_foreground))
                                     .children(d.files.iter().map(|f| {
                                         let color = if f.status.as_str() == "D" {
                                             theme.danger
@@ -625,14 +613,14 @@ impl XWikiApp {
                                             .items_center()
                                             .child(
                                                 div()
-                                                    .font_family("JetBrains Mono")
+                                                    .font_family(tokens::FONT_MONO)
                                                     .text_xs()
                                                     .text_color(theme.foreground)
                                                     .child(f.status.clone()),
                                             )
                                             .child(
                                                 div()
-                                                    .font_family("JetBrains Mono")
+                                                    .font_family(tokens::FONT_MONO)
                                                     .text_xs()
                                                     .text_color(color)
                                                     .child(f.path.clone()),
@@ -644,13 +632,7 @@ impl XWikiApp {
                                             .h(px(1.0))
                                             .bg(theme.border),
                                     )
-                                    .child(
-                                        div()
-                                            .font_family("JetBrains Mono")
-                                            .text_xs()
-                                            .text_color(theme.muted_foreground)
-                                            .child("NUMSTAT"),
-                                    )
+                                    .child(mono_label("NUMSTAT").text_color(theme.muted_foreground))
                                     .children(self.diff_stats.iter().map(|s| {
                                         div()
                                             .flex()
@@ -658,25 +640,25 @@ impl XWikiApp {
                                             .items_center()
                                             .child(
                                                 div()
-                                                    .w(px(56.0))
+                                                    .w(px(tokens::NUMSTAT_W))
                                                     .text_right()
-                                                    .font_family("JetBrains Mono")
+                                                    .font_family(tokens::FONT_MONO)
                                                     .text_xs()
                                                     .text_color(theme.foreground)
                                                     .child(format!("+{}", s.added)),
                                             )
                                             .child(
                                                 div()
-                                                    .w(px(56.0))
+                                                    .w(px(tokens::NUMSTAT_W))
                                                     .text_right()
-                                                    .font_family("JetBrains Mono")
+                                                    .font_family(tokens::FONT_MONO)
                                                     .text_xs()
                                                     .text_color(theme.danger)
                                                     .child(format!("-{}", s.deleted)),
                                             )
                                             .child(
                                                 div()
-                                                    .font_family("JetBrains Mono")
+                                                    .font_family(tokens::FONT_MONO)
                                                     .text_xs()
                                                     .text_color(theme.muted_foreground)
                                                     .child(s.path.clone()),
@@ -688,7 +670,7 @@ impl XWikiApp {
                                     .flex()
                                     .items_center()
                                     .justify_center()
-                                    .font_family("JetBrains Mono")
+                                    .font_family(tokens::FONT_MONO)
                                     .text_xs()
                                     .text_color(theme.muted_foreground)
                                     .child("选择左侧提交查看详情")
@@ -751,7 +733,7 @@ impl XWikiApp {
             dialog
                 .title(
                     div()
-                        .font_family("JetBrains Mono")
+                        .font_family(tokens::FONT_MONO)
                         .text_xs()
                         .text_color(theme.muted_foreground)
                         .child("命令面板 · ⌘K"),
@@ -775,7 +757,7 @@ impl XWikiApp {
                                 .justify_between()
                                 .px_2()
                                 .py_1_5()
-                                .rounded(px(4.0))
+                                .rounded(px(tokens::RADIUS_SMALL))
                                 .hover(|s| s.bg(theme.list_hover))
                                 .cursor_pointer()
                                 .child(
@@ -786,7 +768,7 @@ impl XWikiApp {
                                 )
                                 .child(
                                     div()
-                                        .font_family("JetBrains Mono")
+                                        .font_family(tokens::FONT_MONO)
                                         .text_xs()
                                         .text_color(theme.muted_foreground)
                                         .child(hint),
@@ -794,7 +776,7 @@ impl XWikiApp {
                                 .on_click(move |_, window, cx| {
                                     window.close_dialog(cx);
                                     let h = handle.clone();
-                                    let _ = h.update(cx, |app, cx| {
+                                    h.update(cx, |app, cx| {
                                         app.run_command(id, cx)
                                     });
                                 }),
@@ -815,7 +797,7 @@ impl XWikiApp {
                 let handle = cx.entity();
                 cx.defer(move |cx| {
                     let inner = handle.clone();
-                    let _ = handle.update(cx, |app, cx| {
+                    handle.update(cx, |app, cx| {
                         let client = app.client.clone();
                         if let Some(h) = cx.active_window() {
                             let inner = inner.clone();
@@ -839,7 +821,7 @@ impl XWikiApp {
         } else {
             ThemeMode::Dark
         };
-        config::save_theme(next.clone());
+        config::save_theme(next);
         Theme::change(next, None, cx);
         cx.notify();
     }
@@ -862,7 +844,7 @@ impl XWikiApp {
             .child(
                 // Edit toolbar: path, commit message, save/cancel.
                 div()
-                    .h(px(44.0))
+                    .h(px(tokens::TOOLBAR_H))
                     .px_4()
                     .flex()
                     .items_center()
@@ -872,7 +854,7 @@ impl XWikiApp {
                     .bg(theme.sidebar)
                     .child(
                         div()
-                            .font_family("JetBrains Mono")
+                            .font_family(tokens::FONT_MONO)
                             .text_xs()
                             .text_color(theme.muted_foreground)
                             .child(self.edit_path.clone().unwrap_or_default()),
@@ -886,7 +868,7 @@ impl XWikiApp {
                     .child(
                         Button::new("save-edit")
                             .primary()
-                            .rounded(px(6.0))
+                            .rounded(px(tokens::RADIUS))
                             .label("保存")
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.save_edit(cx)
@@ -894,7 +876,7 @@ impl XWikiApp {
                     )
                     .child(
                         Button::new("cancel-edit")
-                            .rounded(px(6.0))
+                            .rounded(px(tokens::RADIUS))
                             .label("取消")
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.cancel_edit(cx)
@@ -905,7 +887,7 @@ impl XWikiApp {
                 div()
                     .px_4()
                     .py_1()
-                    .font_family("JetBrains Mono")
+                    .font_family(tokens::FONT_MONO)
                     .text_xs()
                     .text_color(theme.danger)
                     .child(msg.clone())
@@ -930,8 +912,8 @@ impl XWikiApp {
             div()
                 .px_3()
                 .py_2()
-                .font_family("JetBrains Mono")
-                .text_xs()
+                .font_family(tokens::FONT_MONO)
+                .text_size(px(tokens::FONT_SIZE_LABEL))
                 .text_color(theme.muted_foreground)
                 .child(format!("root · {count} {}", if count == 1 { "item" } else { "items" })),
         );
@@ -942,13 +924,13 @@ impl XWikiApp {
                     .my_4()
                     .px_4()
                     .py_6()
-                    .rounded(px(6.0))
+                    .rounded(px(tokens::RADIUS))
                     .border_1()
                     .border_color(theme.border)
                     .text_center()
                     .text_sm()
                     .text_color(theme.muted_foreground)
-                    .child("空目录"),
+                    .child(mono_label("空目录")),
             );
             return list;
         }
@@ -970,7 +952,7 @@ impl XWikiApp {
                     div()
                         .w(px(16.0))
                         .text_center()
-                        .font_family("JetBrains Mono")
+                        .font_family(tokens::FONT_MONO)
                         .text_xs()
                         .text_color(if is_dir { theme.accent } else { theme.muted_foreground })
                         .child(if is_dir { "▸" } else { "·" }),
@@ -978,7 +960,7 @@ impl XWikiApp {
                 .child(
                     div()
                         .flex_1()
-                        .font_family("JetBrains Mono")
+                        .font_family(tokens::FONT_MONO)
                         .text_xs()
                         .text_color(if is_dir { theme.foreground } else { theme.muted_foreground })
                         .child(e.name.clone()),
@@ -1018,7 +1000,7 @@ impl XWikiApp {
                 .flex()
                 .items_center()
                 .justify_center()
-                .font_family("JetBrains Mono")
+                .font_family(tokens::FONT_MONO)
                 .text_xs()
                 .text_color(theme.muted_foreground)
                 .child(if q.is_empty() {
@@ -1032,9 +1014,9 @@ impl XWikiApp {
             let id = p.id.clone();
             let card = div()
                 .id(format!("project-card-{}", p.name))
-                .w(px(340.0))
+                .w(px(tokens::CARD_WIDTH))
                 .p_4()
-                .rounded(px(6.0))
+                .rounded(px(tokens::RADIUS))
                 .border_1()
                 .border_color(theme.border)
                 .hover(|s| {
@@ -1051,15 +1033,14 @@ impl XWikiApp {
                         .justify_between()
                         .gap_3()
                         .child(
-                            div()
+                            crate::ui::display(p.name.clone())
                                 .text_lg()
                                 .font_weight(FontWeight::SEMIBOLD)
-                                .text_color(theme.foreground)
-                                .child(p.name.clone()),
+                                .text_color(theme.foreground),
                         )
                         .child(
                             div()
-                                .font_family("JetBrains Mono")
+                                .font_family(tokens::FONT_MONO)
                                 .text_xs()
                                 .text_color(theme.muted_foreground)
                                 .child(p.updated.clone()),
@@ -1085,7 +1066,7 @@ impl XWikiApp {
                         .pt_3()
                         .child(
                             div()
-                                .font_family("JetBrains Mono")
+                                .font_family(tokens::FONT_MONO)
                                 .text_xs()
                                 .text_color(if p.archived {
                                     theme.muted_foreground
@@ -1096,7 +1077,7 @@ impl XWikiApp {
                         )
                         .child(
                             div()
-                                .font_family("JetBrains Mono")
+                                .font_family(tokens::FONT_MONO)
                                 .text_xs()
                                 .text_color(theme.accent)
                                 .child("打开 →"),
@@ -1118,7 +1099,7 @@ impl XWikiApp {
             .child(
                 // Doc rail: tree navigation + breadcrumb.
                 div()
-                    .w(px(280.0))
+                    .w(px(tokens::PANEL_DOC_RAIL))
                     .h_full()
                     .flex()
                     .flex_col()
@@ -1134,14 +1115,14 @@ impl XWikiApp {
                             .justify_between()
                             .child(
                                 div()
-                                    .font_family("JetBrains Mono")
+                                    .font_family(tokens::FONT_MONO)
                                     .text_xs()
                                     .text_color(theme.muted_foreground)
                                     .child("DOCS"),
                             )
                             .child(
                                 Button::new("back-projects")
-                                    .rounded(px(6.0))
+                                    .rounded(px(tokens::RADIUS))
                                     .label("← 项目")
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.back_to_projects(cx)
@@ -1160,7 +1141,7 @@ impl XWikiApp {
                             .child(
                                 div()
                                     .id("crumb-root")
-                                    .font_family("JetBrains Mono")
+                                    .font_family(tokens::FONT_MONO)
                                     .text_xs()
                                     .text_color(theme.muted_foreground)
                                     .hover(|s| s.text_color(theme.accent))
@@ -1195,7 +1176,7 @@ impl XWikiApp {
                                         .to_string();
                                     out.push(
                                         div()
-                                            .font_family("JetBrains Mono")
+                                            .font_family(tokens::FONT_MONO)
                                             .text_xs()
                                             .text_color(theme.muted_foreground)
                                             .child("›")
@@ -1204,7 +1185,7 @@ impl XWikiApp {
                                     if is_last {
                                         out.push(
                                             div()
-                                                .font_family("JetBrains Mono")
+                                                .font_family(tokens::FONT_MONO)
                                                 .text_xs()
                                                 .text_color(theme.foreground)
                                                 .child(name)
@@ -1214,7 +1195,7 @@ impl XWikiApp {
                                         out.push(
                                             div()
                                                 .id(format!("crumb-{target}"))
-                                                .font_family("JetBrains Mono")
+                                                .font_family(tokens::FONT_MONO)
                                                 .text_xs()
                                                 .text_color(theme.muted_foreground)
                                                 .hover(|s| s.text_color(theme.accent))
@@ -1255,7 +1236,7 @@ impl XWikiApp {
                             .child(if self.doc_loading {
                                 div()
                                     .p_6()
-                                    .font_family("JetBrains Mono")
+                                    .font_family(tokens::FONT_MONO)
                                     .text_xs()
                                     .text_color(theme.muted_foreground)
                                     .child("加载中…")
@@ -1274,7 +1255,7 @@ impl XWikiApp {
                                             .justify_between()
                                             .child(
                                                 div()
-                                                    .font_family("JetBrains Mono")
+                                                    .font_family(tokens::FONT_MONO)
                                                     .text_xs()
                                                     .text_color(theme.muted_foreground)
                                                     .child(path.clone()),
@@ -1285,7 +1266,7 @@ impl XWikiApp {
                                                     .gap_2()
                                                     .child(
                                                         Button::new("open-history")
-                                                            .rounded(px(6.0))
+                                                            .rounded(px(tokens::RADIUS))
                                                             .label("历史")
                                                             .on_click(cx.listener(
                                                                 |this, _, _, cx| {
@@ -1295,7 +1276,7 @@ impl XWikiApp {
                                                     )
                                                     .child(
                                                         Button::new("start-edit")
-                                                            .rounded(px(6.0))
+                                                            .rounded(px(tokens::RADIUS))
                                                             .label("编辑")
                                                             .on_click(cx.listener(
                                                                 |this, _, _, cx| {
@@ -1312,13 +1293,12 @@ impl XWikiApp {
                                             .justify_center()
                                             .child(
                                                 div()
-                                                    .w(px(720.0))
+                                                    .w(px(tokens::MEASURE))
                                                     .child(
-                                                        TextView::markdown(
+                                                        crate::ui::markdown(
                                                             "doc-content",
                                                             self.doc_content.clone(),
-                                                        )
-                                                        .w_full(),
+                                                        ),
                                                     ),
                                             ),
                                     )
@@ -1328,7 +1308,7 @@ impl XWikiApp {
                                     .flex()
                                     .items_center()
                                     .justify_center()
-                                    .font_family("JetBrains Mono")
+                                    .font_family(tokens::FONT_MONO)
                                     .text_xs()
                                     .text_color(theme.muted_foreground)
                                     .child("选择左侧文档")
@@ -1432,7 +1412,7 @@ impl XWikiApp {
 
     fn eyebrow(&self, label: &'static str, cx: &Context<Self>) -> Div {
         div()
-            .font_family("JetBrains Mono")
+            .font_family(tokens::FONT_MONO)
             .text_xs()
             .text_color(cx.theme().muted_foreground)
             .child(label)
@@ -1440,8 +1420,9 @@ impl XWikiApp {
 
     fn render_login(&self, cx: &mut Context<Self>) -> Div {
         let theme = cx.theme();
-        let graphite = gpui::rgb(0x1a2028);
-        let graphite_soft = gpui::rgb(0x9aa4b2);
+        let cobalt = tokens::Cobalt::from_theme(theme);
+        let graphite = cobalt.graphite;
+        let graphite_soft = cobalt.graphite_soft;
         div()
             .size_full()
             .flex()
@@ -1451,8 +1432,8 @@ impl XWikiApp {
             .child(
                 div()
                     .flex()
-                    .w(px(1024.0))
-                    .gap(px(64.0))
+                    .w(px(tokens::LOGIN_WIDTH))
+                    .gap(px(tokens::LOGIN_GAP))
                     .items_center()
                     .child(
                         // Left — brand statement + terminal card.
@@ -1466,7 +1447,7 @@ impl XWikiApp {
                                     .gap_3()
                                     .child(
                                         div()
-                                            .font_family("JetBrains Mono")
+                                            .font_family(tokens::FONT_MONO)
                                             .text_xs()
                                             .text_color(theme.accent)
                                             .child("Git-backed documentation"),
@@ -1475,15 +1456,18 @@ impl XWikiApp {
                                         div()
                                             .text_2xl()
                                             .font_weight(FontWeight::SEMIBOLD)
+                                            .font_family(tokens::FONT_DISPLAY)
                                             .text_color(theme.foreground)
                                             .child("AgentDocs"),
                                     )
                                     .child(
                                         div()
-                                            .w(px(420.0))
-                                            .text_color(theme.muted_foreground)
+                                            .w(px(tokens::LOGIN_TEXT))
                                             .child(
-                                                "面向人类与 AI Agent 的轻量文档管理系统。一项目一 Git 仓库，文档即版本，ChangeSet 原子提交。",
+                                                crate::ui::body(
+                                                    "面向人类与 AI Agent 的轻量文档管理系统。一项目一 Git 仓库，文档即版本，ChangeSet 原子提交。",
+                                                )
+                                                .text_color(theme.muted_foreground),
                                             ),
                                     ),
                             )
@@ -1491,7 +1475,7 @@ impl XWikiApp {
                                 // The graphite code card — one dark beat.
                                 div()
                                     .w_full()
-                                    .rounded(px(6.0))
+                                    .rounded(px(tokens::RADIUS))
                                     .overflow_hidden()
                                     .bg(graphite)
                                     .child(
@@ -1502,20 +1486,20 @@ impl XWikiApp {
                                             .px_4()
                                             .py_2()
                                             .border_b_1()
-                                            .border_color(gpui::rgba(0xffffff1a))
+                                            .border_color(tokens::card_rule())
                                             .child(
                                                 div()
                                                     .flex()
                                                     .gap_1_5()
-                                                    .child(div().size_2_5().rounded_full().bg(gpui::rgba(0xffffff26)))
-                                                    .child(div().size_2_5().rounded_full().bg(gpui::rgba(0xffffff26)))
-                                                    .child(div().size_2_5().rounded_full().bg(gpui::rgba(0xffffff26))),
+                                                    .child(div().size_2_5().rounded_full().bg(tokens::card_dot()))
+                                                    .child(div().size_2_5().rounded_full().bg(tokens::card_dot()))
+                                                    .child(div().size_2_5().rounded_full().bg(tokens::card_dot())),
                                             )
                                             .child(
                                                 div()
-                                                    .font_family("JetBrains Mono")
+                                                    .font_family(tokens::FONT_MONO)
                                                     .text_xs()
-                                                    .text_color(gpui::rgba(0xffffff66))
+                                                    .text_color(tokens::card_muted())
                                                     .child("agentdocs — session"),
                                             ),
                                     )
@@ -1527,35 +1511,35 @@ impl XWikiApp {
                                             .py_4()
                                             .child(
                                                 div()
-                                                    .font_family("JetBrains Mono")
+                                                    .font_family(tokens::FONT_MONO)
                                                     .text_sm()
                                                     .child(
                                                         div().flex().gap_2().child(
                                                             div().text_color(theme.accent).child("$"),
                                                         ).child(
-                                                            div().text_color(gpui::rgba(0xffffffd9)).child("agentdocs admin create -username admin"),
+                                                            div().text_color(tokens::card_title()).child("agentdocs admin create -username admin"),
                                                         ),
                                                     ),
                                             )
                                             .child(
                                                 div()
-                                                    .font_family("JetBrains Mono")
+                                                    .font_family(tokens::FONT_MONO)
                                                     .text_sm()
                                                     .text_color(graphite_soft)
                                                     .child("› argon2id · session persisted to sqlite"),
                                             )
                                             .child(
                                                 div()
-                                                    .font_family("JetBrains Mono")
+                                                    .font_family(tokens::FONT_MONO)
                                                     .text_sm()
-                                                    .text_color(gpui::rgb(0x4ade80))
+                                                    .text_color(tokens::card_ok())
                                                     .child("✓ 200 OK — agentdocs_session set (HttpOnly)"),
                                             ),
                                     ),
                             )
                             .child(
                                 div()
-                                    .font_family("JetBrains Mono")
+                                    .font_family(tokens::FONT_MONO)
                                     .text_xs()
                                     .text_color(theme.muted_foreground)
                                     .child("phase 01 · skeleton · serve / admin create"),
@@ -1564,9 +1548,9 @@ impl XWikiApp {
                     .child(
                         // Right — sign-in panel (hairline).
                         div()
-                            .w(px(380.0))
+                            .w(px(tokens::LOGIN_PANEL))
                             .p_8()
-                            .rounded(px(6.0))
+                            .rounded(px(tokens::RADIUS))
                             .border_1()
                             .border_color(theme.border)
                             .bg(theme.sidebar)
@@ -1592,7 +1576,7 @@ impl XWikiApp {
                             )
                             .child(
                                 div()
-                                    .font_family("JetBrains Mono")
+                                    .font_family(tokens::FONT_MONO)
                                     .text_xs()
                                     .text_color(theme.muted_foreground)
                                     .child("服务地址"),
@@ -1600,7 +1584,7 @@ impl XWikiApp {
                             .child(Input::new(&self.server_input).w_full())
                             .child(
                                 div()
-                                    .font_family("JetBrains Mono")
+                                    .font_family(tokens::FONT_MONO)
                                     .text_xs()
                                     .text_color(theme.muted_foreground)
                                     .child("用户名"),
@@ -1608,7 +1592,7 @@ impl XWikiApp {
                             .child(Input::new(&self.user_input).w_full())
                             .child(
                                 div()
-                                    .font_family("JetBrains Mono")
+                                    .font_family(tokens::FONT_MONO)
                                     .text_xs()
                                     .text_color(theme.muted_foreground)
                                     .child("密码"),
@@ -1616,7 +1600,7 @@ impl XWikiApp {
                             .child(Input::new(&self.password_input).w_full())
                             .child(if let Some(err) = &self.login_error {
                                 div()
-                                    .font_family("JetBrains Mono")
+                                    .font_family(tokens::FONT_MONO)
                                     .text_xs()
                                     .text_color(theme.danger)
                                     .child(err.clone())
@@ -1627,7 +1611,7 @@ impl XWikiApp {
                                 Button::new("login")
                                     .primary()
                                     .w_full()
-                                    .rounded(px(6.0))
+                                    .rounded(px(tokens::RADIUS))
                                     .label("登录")
                                     .on_click(cx.listener(|this, _, window, cx| {
                                         this.do_login(window, cx)
@@ -1635,7 +1619,7 @@ impl XWikiApp {
                             )
                             .child(
                                 div()
-                                    .font_family("JetBrains Mono")
+                                    .font_family(tokens::FONT_MONO)
                                     .text_xs()
                                     .text_color(theme.muted_foreground)
                                     .child("session · argon2id · http-only cookie"),
@@ -1653,7 +1637,7 @@ impl XWikiApp {
             .child(
                 // Top bar: flush, hairline bottom border, mono labels.
                 div()
-                    .h(px(44.0))
+                    .h(px(tokens::TOOLBAR_H))
                     .px_4()
                     .flex()
                     .items_center()
@@ -1670,7 +1654,7 @@ impl XWikiApp {
                             .child(div().w(px(1.0)).h(px(16.0)).bg(theme.border))
                             .child(
                                 div()
-                                    .font_family("JetBrains Mono")
+                                    .font_family(tokens::FONT_MONO)
                                     .text_xs()
                                     .text_color(theme.muted_foreground)
                                     .child(
@@ -1698,24 +1682,24 @@ impl XWikiApp {
                                     .gap_1()
                                     .px_2()
                                     .py_1()
-                                    .rounded(px(6.0))
+                                    .rounded(px(tokens::RADIUS))
                                     .border_1()
                                     .border_color(theme.border)
-                                    .font_family("JetBrains Mono")
+                                    .font_family(tokens::FONT_MONO)
                                     .text_xs()
                                     .text_color(theme.muted_foreground)
                                     .child("⌘K"),
                             )
                             .child(
                                 div()
-                                    .font_family("JetBrains Mono")
+                                    .font_family(tokens::FONT_MONO)
                                     .text_xs()
                                     .text_color(theme.muted_foreground)
                                     .child(self.username.clone()),
                             )
                             .child(if let Some(v) = &self.meta_version {
                                 div()
-                                    .font_family("JetBrains Mono")
+                                    .font_family(tokens::FONT_MONO)
                                     .text_xs()
                                     .text_color(theme.muted_foreground)
                                     .child(format!("v{v}"))
@@ -1724,7 +1708,7 @@ impl XWikiApp {
                             })
                             .child(
                                 Button::new("toggle-theme")
-                                    .rounded(px(6.0))
+                                    .rounded(px(tokens::RADIUS))
                                     .label(if cx.theme().is_dark() { "浅色" } else { "深色" })
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.toggle_theme(cx)
@@ -1732,7 +1716,7 @@ impl XWikiApp {
                             )
                             .child(
                                 Button::new("logout")
-                                    .rounded(px(6.0))
+                                    .rounded(px(tokens::RADIUS))
                                     .label("退出")
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.logout(cx)
@@ -1747,7 +1731,7 @@ impl XWikiApp {
                     .child(
                         // Project rail: mono section label, hairline divider.
                         div()
-                            .w(px(200.0))
+                            .w(px(tokens::PANEL_RAIL))
                             .h_full()
                             .flex()
                             .flex_col()
@@ -1758,7 +1742,7 @@ impl XWikiApp {
                                 div()
                                     .px_3()
                                     .py_3()
-                                    .font_family("JetBrains Mono")
+                                    .font_family(tokens::FONT_MONO)
                                     .text_xs()
                                     .text_color(theme.muted_foreground)
                                     .child("PROJECTS"),
@@ -1780,7 +1764,7 @@ impl XWikiApp {
                                             .cursor_pointer()
                                             .child(
                                                 div()
-                                                    .font_family("JetBrains Mono")
+                                                    .font_family(tokens::FONT_MONO)
                                                     .text_xs()
                                                     .text_color(if p.archived {
                                                         theme2.muted_foreground
@@ -1820,7 +1804,7 @@ impl XWikiApp {
                                     .child(
                                         Button::new("new-project")
                                             .primary()
-                                            .rounded(px(6.0))
+                                            .rounded(px(tokens::RADIUS))
                                             .label("新建项目")
                                             .on_click(cx.listener(
                                                 |this, _, window, cx| {
@@ -1833,7 +1817,7 @@ impl XWikiApp {
                             )
                             .child(if self.loading {
                                 div()
-                                    .font_family("JetBrains Mono")
+                                    .font_family(tokens::FONT_MONO)
                                     .text_xs()
                                     .text_color(theme.muted_foreground)
                                     .child("加载中…")
@@ -1902,7 +1886,7 @@ fn open_new_project_dialog_window(
                             .w_full()
                             .child(
                                 div()
-                                    .font_family("JetBrains Mono")
+                                    .font_family(tokens::FONT_MONO)
                                     .text_xs()
                                     .text_color(theme.muted_foreground)
                                     .child("名称"),
@@ -1910,7 +1894,7 @@ fn open_new_project_dialog_window(
                             .child(Input::new(&content_name).w_full())
                             .child(
                                 div()
-                                    .font_family("JetBrains Mono")
+                                    .font_family(tokens::FONT_MONO)
                                     .text_xs()
                                     .text_color(theme.muted_foreground)
                                     .child("描述"),
@@ -1920,7 +1904,7 @@ fn open_new_project_dialog_window(
             };
 
             let cancel = Button::new("cancel-project")
-                .rounded(px(6.0))
+                .rounded(px(tokens::RADIUS))
                 .label("取消")
                 .on_click(move |_, window, cx| window.close_dialog(cx));
 
@@ -1930,7 +1914,7 @@ fn open_new_project_dialog_window(
             let app_handle = handle.clone();
             let create = Button::new("create-project")
                 .primary()
-                .rounded(px(6.0))
+                .rounded(px(tokens::RADIUS))
                 .label("创建")
                 .on_click(move |_, window, cx| {
                     let name = create_name.read(cx).value().to_string();
@@ -1943,7 +1927,7 @@ fn open_new_project_dialog_window(
                     cx.spawn(async move |cx| {
                         match c.create_project(name.trim(), desc.trim()).await {
                             Ok(p) => {
-                                let _ = h.update(cx, |app, cx| {
+                                h.update(cx, |app, cx| {
                                     app.projects
                                         .write()
                                         .unwrap()
@@ -1952,7 +1936,7 @@ fn open_new_project_dialog_window(
                                 });
                             }
                             Err(e) => {
-                                let _ = h.update(cx, |app, cx| {
+                                h.update(cx, |app, cx| {
                                     app.login_error = Some(e.to_string());
                                     cx.notify();
                                 });
