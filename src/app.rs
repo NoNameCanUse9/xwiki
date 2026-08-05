@@ -1,11 +1,14 @@
 use std::sync::{Arc, RwLock};
 
 use gpui::*;
+use gpui::StatefulInteractiveElement;
 use gpui_component::{
     button::*,
     dialog::DialogContent,
     input::{Input, InputEvent, InputState},
-    table::{Column, DataTable, TableDelegate, TableState},
+    scroll::ScrollableElement as _,
+    table::{Column, DataTable, TableDelegate, TableEvent, TableState},
+    text::TextView,
     *,
 };
 
@@ -21,12 +24,20 @@ pub struct XWikiApp {
     username: String,
     login_error: Option<String>,
     loading: bool,
+    meta_version: Option<String>,
     server_input: Entity<InputState>,
     user_input: Entity<InputState>,
     password_input: Entity<InputState>,
     projects: Arc<RwLock<Vec<ProjectRow>>>,
     filter_input: Entity<InputState>,
     table: Entity<TableState<ProjectsTable>>,
+    // Document workspace state.
+    selected_project: Option<String>,
+    tree_entries: Vec<dto::TreeEntry>,
+    tree_path: String,
+    doc_path: Option<String>,
+    doc_content: String,
+    doc_loading: bool,
     /// Keep input subscriptions alive with the app entity.
     _subscriptions: Vec<Subscription>,
 }
@@ -38,6 +49,7 @@ enum Screen {
 
 #[derive(Clone)]
 struct ProjectRow {
+    id: String,
     name: String,
     description: String,
     updated: String,
@@ -47,6 +59,7 @@ struct ProjectRow {
 impl ProjectRow {
     fn from_dto(p: &dto::Project) -> Self {
         Self {
+            id: p.id.clone(),
             name: p.name.clone(),
             description: p.description.clone(),
             updated: p.updated_at.split('T').next().unwrap_or("").to_string(),
@@ -162,6 +175,18 @@ impl XWikiApp {
             cx.new(|cx| TableState::new(ProjectsTable::new(projects.clone()), window, cx));
 
         let mut subs = Vec::new();
+        // Double-click a project row to open its document workspace.
+        {
+            let table = table.clone();
+            subs.push(cx.subscribe(&table, |this, _table, ev, cx| {
+                if let TableEvent::DoubleClickedRow(ix) = ev {
+                    let rows = this.table.read(cx).delegate().visible();
+                    if let Some(row) = rows.get(*ix) {
+                        this.open_project(&row.id, cx);
+                    }
+                }
+            }));
+        }
         for state in [&server_input, &user_input, &password_input] {
             subs.push(cx.subscribe_in(state, window, |_, _, _: &InputEvent, _, cx| {
                 cx.notify()
@@ -190,14 +215,279 @@ impl XWikiApp {
             username: String::new(),
             login_error: None,
             loading: false,
+            meta_version: None,
             server_input,
             user_input,
             password_input,
             projects,
             filter_input,
             table,
+            selected_project: None,
+            tree_entries: Vec::new(),
+            tree_path: String::new(),
+            doc_path: None,
+            doc_content: String::new(),
+            doc_loading: false,
             _subscriptions: subs,
         }
+    }
+
+    fn open_project(&mut self, project_id: &str, cx: &mut Context<Self>) {
+        self.selected_project = Some(project_id.to_string());
+        self.tree_path.clear();
+        self.doc_path = None;
+        self.doc_content.clear();
+        self.load_tree("", cx);
+    }
+
+    fn load_tree(&mut self, path: &str, cx: &mut Context<Self>) {
+        let Some(client) = self.client.clone() else {
+            return;
+        };
+        let Some(project) = self.selected_project.clone() else {
+            return;
+        };
+        self.tree_path = path.to_string();
+        self.doc_path = None;
+        self.doc_content.clear();
+        self.doc_loading = false;
+        let path = path.to_string();
+        cx.spawn(async move |this, cx| {
+            match client.tree(&project, &path).await {
+                Ok(entries) => {
+                    let _ = this.update(cx, |app, cx| {
+                        app.tree_entries = entries;
+                        cx.notify();
+                    });
+                }
+                Err(e) => {
+                    let _ = this.update(cx, |app, cx| {
+                        app.login_error = Some(e.to_string());
+                        cx.notify();
+                    });
+                }
+            }
+        })
+        .detach();
+    }
+
+    fn open_doc(&mut self, path: &str, cx: &mut Context<Self>) {
+        let Some(client) = self.client.clone() else {
+            return;
+        };
+        let Some(project) = self.selected_project.clone() else {
+            return;
+        };
+        self.doc_path = Some(path.to_string());
+        self.doc_loading = true;
+        let path = path.to_string();
+        cx.spawn(async move |this, cx| {
+            match client.page(&project, &path).await {
+                Ok(page) => {
+                    let _ = this.update(cx, |app, cx| {
+                        app.doc_content = page.content;
+                        app.doc_loading = false;
+                        cx.notify();
+                    });
+                }
+                Err(e) => {
+                    let _ = this.update(cx, |app, cx| {
+                        app.doc_loading = false;
+                        app.login_error = Some(e.to_string());
+                        cx.notify();
+                    });
+                }
+            }
+        })
+        .detach();
+    }
+
+    fn back_to_projects(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        self.selected_project = None;
+        self.tree_entries.clear();
+        self.tree_path.clear();
+        self.doc_path = None;
+        self.doc_content.clear();
+        cx.notify();
+    }
+
+    /// Breadcrumb trail for the current tree directory; clicking a crumb
+    /// navigates back up.
+    fn render_tree(&self, cx: &mut Context<Self>) -> Div {
+        let theme = cx.theme();
+        let mut list = div().v_flex().gap_1().w_full();
+        for e in &self.tree_entries {
+            let is_dir = e.r#type == "tree";
+            let path = e.path.clone();
+            let row = div()
+                .id(path.clone())
+                .flex()
+                .items_center()
+                .gap_2()
+                .px_2()
+                .py_1()
+                .rounded(px(4.0))
+                .hover(|s| s.bg(theme.list_hover))
+                .cursor_pointer()
+                .child(
+                    div()
+                        .font_family("JetBrains Mono")
+                        .text_xs()
+                        .text_color(if is_dir {
+                            theme.foreground
+                        } else {
+                            theme.muted_foreground
+                        })
+                        .child(if is_dir {
+                            format!("{}/", e.name)
+                        } else {
+                            e.name.clone()
+                        }),
+                )
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    if is_dir {
+                        this.load_tree(&path, cx);
+                    } else {
+                        this.open_doc(&path, cx);
+                    }
+                }));
+            list = list.child(row);
+        }
+        list
+    }
+
+    fn render_doc_view(&self, cx: &mut Context<Self>) -> Div {
+        let theme = cx.theme().clone();
+        div()
+            .flex()
+            .size_full()
+            .child(
+                // Doc rail: tree navigation + breadcrumb.
+                div()
+                    .w(px(280.0))
+                    .h_full()
+                    .flex()
+                    .flex_col()
+                    .border_r_1()
+                    .border_color(theme.border)
+                    .bg(theme.sidebar)
+                    .child(
+                        div()
+                            .px_3()
+                            .py_3()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .child(
+                                div()
+                                    .font_family("JetBrains Mono")
+                                    .text_xs()
+                                    .text_color(theme.muted_foreground)
+                                    .child("DOCS"),
+                            )
+                            .child(
+                                Button::new("back-projects")
+                                    .rounded(px(6.0))
+                                    .label("← 项目")
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.back_to_projects(window, cx)
+                                    })),
+                            ),
+                    )
+                    .child(
+                        // Breadcrumb: root → dir1 → dir2
+                        div()
+                            .px_3()
+                            .pb_2()
+                            .flex()
+                            .flex_wrap()
+                            .gap_1()
+                            .child(if self.tree_path.is_empty() {
+                                div()
+                                    .font_family("JetBrains Mono")
+                                    .text_xs()
+                                    .text_color(theme.foreground)
+                                    .child("/")
+                            } else {
+                                let mut crumbs = div().flex().flex_wrap().gap_1();
+                                let mut acc = String::new();
+                                for part in self.tree_path.split('/') {
+                                    if part.is_empty() {
+                                        continue;
+                                    }
+                                    acc = if acc.is_empty() {
+                                        part.to_string()
+                                    } else {
+                                        format!("{acc}/{part}")
+                                    };
+                                    let target = acc.clone();
+                                    crumbs = crumbs.child(
+                                        div()
+                                            .id(format!("crumb-{target}"))
+                                            .font_family("JetBrains Mono")
+                                            .text_xs()
+                                            .text_color(theme.muted_foreground)
+                                            .hover(|s| s.text_color(theme.foreground))
+                                            .cursor_pointer()
+                                            .child(format!("{part}/"))
+                                            .on_click(cx.listener(
+                                                move |this, _, _, cx| {
+                                                    this.load_tree(&target, cx);
+                                                },
+                                            )),
+                                    );
+                                }
+                                crumbs
+                            }),
+                    )
+                    .child(div().flex_1().overflow_y_scrollbar().child(self.render_tree(cx))),
+            )
+            .child(
+                // Content pane: markdown rendering.
+                div()
+                    .flex_1()
+                    .h_full()
+                    .flex()
+                    .flex_col()
+                    .overflow_y_scrollbar()
+                    .child(if self.doc_loading {
+                        div()
+                            .p_6()
+                            .font_family("JetBrains Mono")
+                            .text_xs()
+                            .text_color(theme.muted_foreground)
+                            .child("加载中…")
+                    } else if let Some(path) = &self.doc_path {
+                        div()
+                            .p_6()
+                            .flex_1()
+                            .child(
+                                div()
+                                    .pb_4()
+                                    .mb_4()
+                                    .border_b_1()
+                                    .border_color(theme.border)
+                                    .font_family("JetBrains Mono")
+                                    .text_xs()
+                                    .text_color(theme.muted_foreground)
+                                    .child(path.clone()),
+                            )
+                            .child(
+                                TextView::markdown("doc-content", self.doc_content.clone())
+                                    .w_full(),
+                            )
+                    } else {
+                        div()
+                            .flex_1()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .font_family("JetBrains Mono")
+                            .text_xs()
+                            .text_color(theme.muted_foreground)
+                            .child("选择左侧文档")
+                    }),
+            )
     }
 
     fn do_login(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
@@ -248,12 +538,17 @@ impl XWikiApp {
         };
         self.loading = true;
         cx.spawn(async move |this, cx| {
-            match client.projects().await {
+            let projects = client.projects().await;
+            let meta = client.meta().await;
+            match projects {
                 Ok(list) => {
                     let _ = this.update(cx, |app, cx| {
                         *app.projects.write().unwrap() =
                             list.iter().map(ProjectRow::from_dto).collect();
                         app.loading = false;
+                        if let Ok(m) = meta {
+                            app.meta_version = Some(m.version);
+                        }
                         app.table.update(cx, |s, cx| s.refresh(cx));
                         cx.notify();
                     });
@@ -453,7 +748,7 @@ impl XWikiApp {
                             .font_family("JetBrains Mono")
                             .text_xs()
                             .text_color(theme.muted_foreground)
-                            .child("v0.8.0")
+                            .child("session · cookie")
                             .child("/api/v1"),
                     ),
             )
@@ -520,6 +815,15 @@ impl XWikiApp {
                                     .text_color(theme.muted_foreground)
                                     .child(self.username.clone()),
                             )
+                            .child(if let Some(v) = &self.meta_version {
+                                div()
+                                    .font_family("JetBrains Mono")
+                                    .text_xs()
+                                    .text_color(theme.muted_foreground)
+                                    .child(format!("v{v}"))
+                            } else {
+                                div()
+                            })
                             .child(
                                 Button::new("logout")
                                     .rounded(px(6.0))
@@ -639,7 +943,13 @@ impl Render for XWikiApp {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         match self.screen {
             Screen::Login => self.render_login(cx),
-            Screen::Workspace => self.render_workspace(cx),
+            Screen::Workspace => {
+                if self.selected_project.is_some() {
+                    self.render_doc_view(cx)
+                } else {
+                    self.render_workspace(cx)
+                }
+            }
         }
     }
 }

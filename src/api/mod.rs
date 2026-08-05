@@ -21,17 +21,14 @@ pub struct ApiError {
 
 impl std::fmt::Display for ApiError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{} ({}): {}", self.code, self.status, self.message)
+        match &self.request_id {
+            Some(id) => write!(f, "{} ({}): {} [{}]", self.code, self.status, self.message, id),
+            None => write!(f, "{} ({}): {}", self.code, self.status, self.message),
+        }
     }
 }
 
 impl std::error::Error for ApiError {}
-
-#[derive(Deserialize)]
-struct Envelope<T> {
-    #[serde(flatten)]
-    data: T,
-}
 
 #[derive(Deserialize)]
 struct ErrorEnvelope {
@@ -103,6 +100,7 @@ impl Client {
         Ok(resp.user)
     }
 
+    #[allow(dead_code)] // used by the CLI milestone
     pub async fn me(&self) -> Result<dto::User, ApiError> {
         let resp: dto::UserResponse = self
             .send(self.http.get(self.url("/api/v1/auth/me")))
@@ -137,6 +135,41 @@ impl Client {
             .await?;
         Ok(resp.project)
     }
+
+    pub async fn tree(
+        &self,
+        project_id: &str,
+        path: &str,
+    ) -> Result<Vec<dto::TreeEntry>, ApiError> {
+        let resp: dto::TreeResponse = self
+            .send(
+                self.http
+                    .get(self.url(&format!(
+                        "/api/v1/projects/{}/docs/tree",
+                        project_id
+                    )))
+                    .query(&[("path", path)]),
+            )
+            .await?;
+        Ok(resp.tree)
+    }
+
+    /// Reads a doc as markdown source (format=raw).
+    pub async fn page(
+        &self,
+        project_id: &str,
+        path: &str,
+    ) -> Result<dto::DocPage, ApiError> {
+        self.send(
+            self.http
+                .get(self.url(&format!(
+                    "/api/v1/projects/{}/docs/pages/{}",
+                    project_id, path
+                )))
+                .query(&[("format", "raw")]),
+        )
+        .await
+    }
 }
 
 fn network_error(e: reqwest::Error) -> ApiError {
@@ -159,6 +192,9 @@ where
 }
 
 /// Shared types for the api layer. Mirrors `doc/api.md` response shapes.
+/// DTO fields are API contract — the UI reads a subset and serde fills the
+/// rest, so field-level dead-code warnings are silenced.
+#[allow(dead_code)]
 pub mod dto {
     use serde::Deserialize;
 
@@ -210,6 +246,32 @@ pub mod dto {
     #[derive(Debug, Deserialize)]
     pub struct ProjectResponse {
         pub project: Project,
+    }
+
+    #[derive(Debug, Deserialize)]
+    pub struct TreeEntry {
+        pub name: String,
+        pub r#type: String,
+        pub path: String,
+        #[serde(default)]
+        pub sha: String,
+    }
+
+    #[derive(Debug, Deserialize)]
+    pub struct TreeResponse {
+        pub path: String,
+        #[serde(default, deserialize_with = "crate::api::de_null_default")]
+        pub tree: Vec<TreeEntry>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    pub struct DocPage {
+        pub path: String,
+        pub format: String,
+        #[serde(default)]
+        pub content: String,
+        #[serde(default)]
+        pub encoding: String,
     }
 
     #[derive(Debug, Deserialize)]
