@@ -12,6 +12,17 @@ fn main() {
         // Must be called before any GPUI Component features are used.
         gpui_component::init(cx);
 
+        // Load the Cobalt theme (cool engineered paper, one electric-blue
+        // signal accent, hairlines over shadows) as the active light theme.
+        let registry = ThemeRegistry::global_mut(cx);
+        if let Err(err) = registry.load_themes_from_str(include_str!("themes/cobalt.json")) {
+            eprintln!("cobalt theme failed to load: {err}");
+        }
+        if let Some(cobalt) = registry.themes().get("Cobalt Light").cloned() {
+            Theme::global_mut(cx).light_theme = cobalt;
+        }
+        Theme::change(ThemeMode::Light, None, cx);
+
         cx.spawn(async move |cx| {
             cx.open_window(WindowOptions::default(), |window, cx| {
                 let view = cx.new(|cx| XWikiApp::new(window, cx));
