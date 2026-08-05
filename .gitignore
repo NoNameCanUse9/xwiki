@@ -10,6 +10,15 @@ Cargo.lock
 # Editor
 .vscode/
 
+# Design skills & tooling (local only, not part of the product)
+.agents/
+.claude/
+.config/
+skills-lock.json
+node_modules/
+package.json
+package-lock.json
+
 # AgentDocs runtime (Go branch)
 /data/
 /agentdocs
