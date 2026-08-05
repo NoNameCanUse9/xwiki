@@ -1,0 +1,1349 @@
+openapi: 3.0.3
+info:
+  title: AgentDocs API
+  version: 0.8.0
+  description: |
+    面向人类与 AI Agent 的 Git-backed 文档管理系统。
+    写入端点支持 Idempotency-Key 幂等。
+servers:
+  - url: /api/v1
+security:
+  - sessionCookie: []
+  - bearerAuth: []
+paths:
+  /meta:
+    get:
+      summary: 服务元信息与能力探测（无需认证）
+      security: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Meta"
+
+  /auth/login:
+    post:
+      summary: 登录（session cookie）
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [user]
+                properties:
+                  user:
+                    $ref: "#/components/schemas/User"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /auth/logout:
+    post:
+      summary: 退出登录
+      responses:
+        "200":
+          $ref: "#/components/responses/Ok"
+  /auth/me:
+    get:
+      summary: 当前用户
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [user]
+                properties:
+                  user:
+                    $ref: "#/components/schemas/User"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /auth/password:
+    post:
+      summary: 修改密码
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PasswordRequest"
+      responses:
+        "200":
+          $ref: "#/components/responses/Ok"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /import/bundle:
+    post:
+      summary: 导入 Git Bundle 创建项目（multipart file）
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [name, file]
+              properties:
+                name:
+                  type: string
+                file:
+                  type: string
+                  format: binary
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportBundleResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+  /import/repo:
+    post:
+      summary: 从远程 Git 仓库导入创建项目
+      parameters:
+        - name: name
+          in: query
+          required: true
+          schema: { type: string }
+        - name: url
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportBundleResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /users:
+    get:
+      summary: 用户列表（管理员）
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [users]
+                properties:
+                  users:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/User"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      summary: 创建用户（管理员）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserCreateRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [user]
+                properties:
+                  user:
+                    $ref: "#/components/schemas/User"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /users/{id}/disable:
+    post:
+      summary: 禁用用户（管理员）
+      parameters:
+        - $ref: "#/components/parameters/UserID"
+      responses:
+        "200":
+          $ref: "#/components/responses/UserResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /users/{id}/enable:
+    post:
+      summary: 启用用户（管理员）
+      parameters:
+        - $ref: "#/components/parameters/UserID"
+      responses:
+        "200":
+          $ref: "#/components/responses/UserResult"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /tokens:
+    post:
+      summary: 创建 Agent Token（secret 仅此一次返回）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TokenCreateRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [token, secret]
+                properties:
+                  token:
+                    $ref: "#/components/schemas/Token"
+                  secret:
+                    type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+    get:
+      summary: Token 列表
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [tokens]
+                properties:
+                  tokens:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Token"
+  /tokens/{id}:
+    delete:
+      summary: 撤销 Token（幂等）
+      parameters:
+        - $ref: "#/components/parameters/TokenID"
+      responses:
+        "200":
+          $ref: "#/components/responses/Ok"
+
+  /projects:
+    post:
+      summary: 创建项目（自动初始化 Git 仓库与 README）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectCreateRequest"
+      responses:
+        "201":
+          $ref: "#/components/responses/ProjectResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          $ref: "#/components/responses/Conflict"
+    get:
+      summary: 项目列表（含已归档，按创建时间倒序）
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [projects]
+                properties:
+                  projects:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Project"
+  /projects/import-folder:
+    post:
+      summary: 从本地文件夹导入创建项目（multipart files）
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [name, files]
+              properties:
+                name:
+                  type: string
+                description:
+                  type: string
+                files:
+                  type: array
+                  items:
+                    type: string
+                    format: binary
+      responses:
+        "201":
+          $ref: "#/components/responses/ProjectResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+  /projects/{id}:
+    get:
+      summary: 项目详情
+      parameters:
+        - $ref: "#/components/parameters/ProjectID"
+      responses:
+        "200":
+          $ref: "#/components/responses/ProjectResult"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /projects/{id}/archive:
+    post:
+      summary: 归档项目（幂等）
+      parameters:
+        - $ref: "#/components/parameters/ProjectID"
+      responses:
+        "200":
+          $ref: "#/components/responses/ProjectResult"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /projects/{id}/unarchive:
+    post:
+      summary: 恢复归档项目（幂等）
+      parameters:
+        - $ref: "#/components/parameters/ProjectID"
+      responses:
+        "200":
+          $ref: "#/components/responses/ProjectResult"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /projects/{id}/docs/tree:
+    get:
+      summary: 文档树（Git Tree 单层）
+      parameters:
+        - $ref: "#/components/parameters/ProjectID"
+        - name: path
+          in: query
+          required: false
+          schema: { type: string }
+          description: 目录路径，省略或空为仓库根
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [path, tree]
+                properties:
+                  path:
+                    type: string
+                  tree:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/TreeEntry"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /projects/{id}/docs/home:
+    get:
+      summary: 项目首页（README 渲染 HTML）
+      parameters:
+        - $ref: "#/components/parameters/ProjectID"
+      responses:
+        "200":
+          $ref: "#/components/responses/DocPage"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /projects/{id}/docs/pages/{path}:
+    get:
+      summary: 读取文档（raw/html/base64）
+      parameters:
+        - $ref: "#/components/parameters/ProjectID"
+        - name: path
+          in: path
+          required: true
+          schema: { type: string }
+        - name: format
+          in: query
+          required: false
+          schema: { type: string, enum: [raw, html, base64] }
+          description: 输出格式，默认 raw
+      responses:
+        "200":
+          $ref: "#/components/responses/DocPage"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "413":
+          $ref: "#/components/responses/TooLarge"
+
+  /projects/{id}/revision:
+    get:
+      summary: 当前 revision（HEAD，写入 base）
+      parameters:
+        - $ref: "#/components/parameters/ProjectID"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Revision"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /projects/{id}/changesets:
+    post:
+      summary: 原子提交 ChangeSet（可带 Idempotency-Key）
+      parameters:
+        - $ref: "#/components/parameters/ProjectID"
+        - name: dry_run
+          in: query
+          required: false
+          schema: { type: boolean }
+          description: 只预览不写 ref
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChangesetRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChangesetResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "410":
+          $ref: "#/components/responses/Gone"
+
+  /projects/{id}/locks:
+    get:
+      summary: 锁状态
+      parameters:
+        - $ref: "#/components/parameters/ProjectID"
+        - $ref: "#/components/parameters/LockPath"
+      responses:
+        "200":
+          $ref: "#/components/responses/LockResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+    post:
+      summary: 获取页面锁
+      parameters:
+        - $ref: "#/components/parameters/ProjectID"
+        - $ref: "#/components/parameters/LockPath"
+      responses:
+        "200":
+          $ref: "#/components/responses/LockResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          $ref: "#/components/responses/Conflict"
+    delete:
+      summary: 释放页面锁
+      parameters:
+        - $ref: "#/components/parameters/ProjectID"
+        - $ref: "#/components/parameters/LockPath"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [released]
+                properties:
+                  released:
+                    type: boolean
+        "400":
+          $ref: "#/components/responses/BadRequest"
+  /projects/{id}/locks/heartbeat:
+    post:
+      summary: 续租页面锁
+      parameters:
+        - $ref: "#/components/parameters/ProjectID"
+        - $ref: "#/components/parameters/LockPath"
+      responses:
+        "200":
+          $ref: "#/components/responses/LockResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /projects/{id}/locks/force-release:
+    post:
+      summary: 强制释放页面锁
+      parameters:
+        - $ref: "#/components/parameters/ProjectID"
+        - $ref: "#/components/parameters/LockPath"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [released]
+                properties:
+                  released:
+                    type: boolean
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /projects/{id}/shares:
+    post:
+      summary: 创建页面分享链接（同页幂等复用）
+      parameters:
+        - $ref: "#/components/parameters/ProjectID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [path]
+              properties:
+                path:
+                  type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Share"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /projects/{id}/search:
+    get:
+      summary: 项目内全文搜索
+      parameters:
+        - $ref: "#/components/parameters/ProjectID"
+        - name: q
+          in: query
+          required: true
+          schema: { type: string, maxLength: 200 }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, maximum: 50, default: 20 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [query, results]
+                properties:
+                  query:
+                    type: string
+                  results:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/SearchResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /projects/{id}/backlinks:
+    get:
+      summary: 指向某文档的反向链接
+      parameters:
+        - $ref: "#/components/parameters/ProjectID"
+        - name: path
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [path, backlinks]
+                properties:
+                  path:
+                    type: string
+                  backlinks:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Backlink"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /projects/{id}/export.zip:
+    get:
+      summary: 导出项目工作树 ZIP 快照
+      parameters:
+        - $ref: "#/components/parameters/ProjectID"
+      responses:
+        "200":
+          description: ZIP 文件
+          content:
+            application/zip: {}
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /projects/{id}/export.bundle:
+    get:
+      summary: 导出 Git Bundle（全仓历史）
+      parameters:
+        - $ref: "#/components/parameters/ProjectID"
+      responses:
+        "200":
+          description: Git bundle
+          content:
+            application/octet-stream: {}
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /projects/{id}/import:
+    post:
+      summary: 批量导入文件（单次原子提交）
+      parameters:
+        - $ref: "#/components/parameters/ProjectID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ImportRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "410":
+          $ref: "#/components/responses/Gone"
+
+  /projects/{id}/attachments/{path}:
+    get:
+      summary: 下载附件（原始字节流）
+      parameters:
+        - $ref: "#/components/parameters/ProjectID"
+        - name: path
+          in: path
+          required: true
+          schema: { type: string }
+          description: attachments/ 下的文件路径
+      responses:
+        "200":
+          description: 文件字节流，Content-Type 按扩展名映射
+          content:
+            application/octet-stream: {}
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /projects/{id}/audit:
+    get:
+      summary: 审计日志（session，最近 50 条）
+      parameters:
+        - $ref: "#/components/parameters/ProjectID"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [entries]
+                properties:
+                  entries:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AuditEntry"
+
+  /projects/{id}/commits:
+    get:
+      summary: Commit 列表（倒序）
+      parameters:
+        - $ref: "#/components/parameters/ProjectID"
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, maximum: 100, default: 20 }
+        - name: offset
+          in: query
+          required: false
+          schema: { type: integer, default: 0 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [commits]
+                properties:
+                  commits:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Commit"
+  /projects/{id}/commits/{sha}:
+    get:
+      summary: Commit 详情
+      parameters:
+        - $ref: "#/components/parameters/ProjectID"
+        - $ref: "#/components/parameters/CommitSHA"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [commit]
+                properties:
+                  commit:
+                    $ref: "#/components/schemas/CommitDetail"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /projects/{id}/commits/{sha}/diff:
+    get:
+      summary: 机器可读 Diff（numstat/patch）
+      parameters:
+        - $ref: "#/components/parameters/ProjectID"
+        - $ref: "#/components/parameters/CommitSHA"
+        - name: format
+          in: query
+          required: false
+          schema: { type: string, enum: [numstat, patch], default: numstat }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/DiffStats"
+                  - $ref: "#/components/schemas/DiffPatch"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /projects/{id}/commits/{sha}/revert:
+    post:
+      summary: Revert 提交（新提交，原历史保留）
+      parameters:
+        - $ref: "#/components/parameters/ProjectID"
+        - $ref: "#/components/parameters/CommitSHA"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [commit]
+                properties:
+                  commit:
+                    $ref: "#/components/schemas/Commit"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "410":
+          $ref: "#/components/responses/Gone"
+
+  /projects/{id}/files/history/{path}:
+    get:
+      summary: 文件历史（含重命名追踪）
+      parameters:
+        - $ref: "#/components/parameters/ProjectID"
+        - name: path
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [path, commits]
+                properties:
+                  path:
+                    type: string
+                  commits:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Commit"
+
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: agentdocs_session
+    bearerAuth:
+      type: http
+      scheme: bearer
+  parameters:
+    ProjectID:
+      name: id
+      in: path
+      required: true
+      schema: { type: string }
+    UserID:
+      name: id
+      in: path
+      required: true
+      schema: { type: string }
+    TokenID:
+      name: id
+      in: path
+      required: true
+      schema: { type: string }
+    CommitSHA:
+      name: sha
+      in: path
+      required: true
+      schema: { type: string }
+    LockPath:
+      name: path
+      in: query
+      required: true
+      schema: { type: string }
+      description: 要锁定的文档路径
+  responses:
+    Ok:
+      description: OK
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [ok]
+            properties:
+              ok:
+                type: boolean
+    BadRequest:
+      description: 参数或校验错误
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Unauthorized:
+      description: 未认证或凭据错误
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Forbidden:
+      description: 权限不足（admin_required / agent_forbidden / account_disabled）
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    NotFound:
+      description: 资源不存在
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Conflict:
+      description: 冲突（revision_conflict / page_locked / idempotency_conflict / 名称冲突）
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Gone:
+      description: 项目已归档（project_archived）
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    TooLarge:
+      description: 文件过大（doc_too_large）
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    ProjectResult:
+      description: OK
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [project]
+            properties:
+              project:
+                $ref: "#/components/schemas/Project"
+    UserResult:
+      description: OK
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [user]
+            properties:
+              user:
+                $ref: "#/components/schemas/User"
+    DocPage:
+      description: OK
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/DocPage"
+    LockResult:
+      description: OK
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [lock]
+            properties:
+              lock:
+                $ref: "#/components/schemas/Lock"
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, request_id]
+          properties:
+            code:
+              type: string
+              description: 机器可读错误码
+            message:
+              type: string
+            request_id:
+              type: string
+    Meta:
+      type: object
+      required: [version, api_version, limits, capabilities]
+      properties:
+        version:
+          type: string
+        api_version:
+          type: string
+        limits:
+          type: object
+          required:
+            [
+              max_doc_bytes,
+              max_import_bytes,
+              max_diff_bytes,
+              max_changes_per_request,
+            ]
+          properties:
+            max_doc_bytes:
+              type: integer
+            max_import_bytes:
+              type: integer
+            max_diff_bytes:
+              type: integer
+            max_changes_per_request:
+              type: integer
+        capabilities:
+          type: array
+          items:
+            type: string
+    User:
+      type: object
+      required: [id, username, display_name, is_admin, disabled, created_at]
+      properties:
+        id:
+          type: string
+        username:
+          type: string
+        display_name:
+          type: string
+        is_admin:
+          type: boolean
+        disabled:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+    PasswordRequest:
+      type: object
+      required: [current_password, new_password]
+      properties:
+        current_password:
+          type: string
+        new_password:
+          type: string
+    UserCreateRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+        display_name:
+          type: string
+        is_admin:
+          type: boolean
+          default: false
+    Token:
+      type: object
+      required: [id, name, scope, project_ids, path_prefixes, created_at]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        scope:
+          type: string
+          enum: [read, write]
+        project_ids:
+          type: array
+          items:
+            type: string
+        path_prefixes:
+          type: array
+          items:
+            type: string
+        created_at:
+          type: string
+          format: date-time
+        last_used_at:
+          type: string
+          format: date-time
+        revoked_at:
+          type: string
+          format: date-time
+    TokenCreateRequest:
+      type: object
+      required: [name, scope, project_ids]
+      properties:
+        name:
+          type: string
+        scope:
+          type: string
+          enum: [read, write]
+        project_ids:
+          type: array
+          items:
+            type: string
+        path_prefixes:
+          type: array
+          items:
+            type: string
+    Project:
+      type: object
+      required:
+        [id, name, description, repo_dir, archived, created_at, updated_at]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        repo_dir:
+          type: string
+        archived:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    ProjectCreateRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          pattern: "^[a-z0-9][a-z0-9-]{0,63}$"
+        description:
+          type: string
+    TreeEntry:
+      type: object
+      required: [name, type, path]
+      properties:
+        name:
+          type: string
+        type:
+          type: string
+          enum: [blob, tree]
+        path:
+          type: string
+        sha:
+          type: string
+    DocPage:
+      type: object
+      required: [path, format, content]
+      properties:
+        path:
+          type: string
+        format:
+          type: string
+          enum: [raw, html, base64]
+        content:
+          type: string
+        encoding:
+          type: string
+          description: format=base64 时为 "base64"
+    Revision:
+      type: object
+      required: [revision]
+      properties:
+        revision:
+          type: string
+    Change:
+      type: object
+      required: [op, path]
+      properties:
+        op:
+          type: string
+          enum: [create, update, delete, move]
+        path:
+          type: string
+        new_path:
+          type: string
+          description: op=move 时必填
+        content:
+          type: string
+          description: create/update 的内容；支持 encoding=base64
+        encoding:
+          type: string
+          enum: [base64]
+    ChangesetRequest:
+      type: object
+      required: [base_revision, message, changes]
+      properties:
+        base_revision:
+          type: string
+        message:
+          type: string
+        changes:
+          type: array
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/Change"
+    ChangesetResult:
+      type: object
+      required: [commit, revision, preview]
+      properties:
+        commit:
+          type: string
+          description: dry_run 时为空串
+        revision:
+          type: string
+        preview:
+          nullable: true
+          type: object
+          required: [tree, changes]
+          properties:
+            tree:
+              type: string
+            changes:
+              type: array
+              items:
+                $ref: "#/components/schemas/Change"
+    Commit:
+      type: object
+      required: [sha, message, author, date]
+      properties:
+        sha:
+          type: string
+        message:
+          type: string
+        author:
+          type: string
+        date:
+          type: string
+    CommitDetail:
+      allOf:
+        - $ref: "#/components/schemas/Commit"
+        - type: object
+          required: [files]
+          properties:
+            files:
+              type: array
+              items:
+                $ref: "#/components/schemas/CommitFile"
+    CommitFile:
+      type: object
+      required: [status, path]
+      properties:
+        status:
+          type: string
+          enum: [A, M, D, R]
+        path:
+          type: string
+    DiffStats:
+      type: object
+      required: [sha, format, stats]
+      properties:
+        sha:
+          type: string
+        format:
+          type: string
+          enum: [numstat]
+        stats:
+          type: array
+          items:
+            type: object
+            required: [path, added, deleted]
+            properties:
+              path:
+                type: string
+              added:
+                type: integer
+              deleted:
+                type: integer
+    DiffPatch:
+      type: object
+      required: [sha, format, patch]
+      properties:
+        sha:
+          type: string
+        format:
+          type: string
+          enum: [patch]
+        patch:
+          type: string
+    SearchResult:
+      type: object
+      required: [path, snippet]
+      properties:
+        path:
+          type: string
+        snippet:
+          type: string
+    Backlink:
+      type: object
+      required: [source, snippet]
+      properties:
+        source:
+          type: string
+        snippet:
+          type: string
+    Lock:
+      type: object
+      required: [path, user_id, username, acquired_at, expires_at]
+      properties:
+        path:
+          type: string
+        user_id:
+          type: string
+        username:
+          type: string
+        acquired_at:
+          type: string
+        expires_at:
+          type: string
+    Share:
+      type: object
+      required: [token, url]
+      properties:
+        token:
+          type: string
+        url:
+          type: string
+    AuditEntry:
+      type: object
+      required: [id, actor_type, actor_id, action, created_at]
+      properties:
+        id:
+          type: string
+        actor_type:
+          type: string
+        actor_id:
+          type: string
+        project_id:
+          type: string
+        action:
+          type: string
+        path:
+          type: string
+        detail:
+          type: string
+        request_id:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+    ImportRequest:
+      type: object
+      required: [base_revision, message, files]
+      properties:
+        base_revision:
+          type: string
+        message:
+          type: string
+        files:
+          type: array
+          items:
+            type: object
+            required: [path, content]
+            properties:
+              path:
+                type: string
+              content:
+                type: string
+                description: base64 编码内容（单文件 ≤ 5 MiB）
+    ImportResult:
+      type: object
+      required: [commit, revision, imported]
+      properties:
+        commit:
+          type: string
+        revision:
+          type: string
+        imported:
+          type: integer
+    ImportBundleResult:
+      type: object
+      required: [project, commits]
+      properties:
+        project:
+          $ref: "#/components/schemas/Project"
+        commits:
+          type: integer

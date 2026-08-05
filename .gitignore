@@ -10,3 +10,7 @@
 /data/
 /agentdocs
 *.log
+
+# Rust (app branch build artifacts)
+/target
+/Cargo.lock
