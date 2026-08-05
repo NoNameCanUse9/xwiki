@@ -60,6 +60,34 @@ mod tests {
 
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize};
+use std::future::Future;
+use std::sync::OnceLock;
+
+/// reqwest needs a tokio reactor, but the GUI runs on gpui's own executor.
+/// Every request is therefore dispatched onto a process-wide tokio runtime
+/// (spawned from any thread; the task itself runs inside the runtime).
+static RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
+
+fn runtime() -> &'static tokio::runtime::Runtime {
+    RUNTIME.get_or_init(|| tokio::runtime::Runtime::new().expect("tokio runtime"))
+}
+
+async fn tokio_spawn<F, T>(fut: F) -> Result<T, ApiError>
+where
+    F: Future<Output = Result<T, ApiError>> + Send + 'static,
+    T: Send + 'static,
+{
+    runtime()
+        .handle()
+        .spawn(fut)
+        .await
+        .map_err(|e| ApiError {
+            code: "join_error".into(),
+            message: e.to_string(),
+            request_id: None,
+            status: 0,
+        })?
+}
 
 /// API error mapped from the server's uniform error envelope.
 #[derive(Debug, Clone)]
@@ -122,30 +150,32 @@ impl Client {
         format!("{}{}", self.base, path)
     }
 
-    async fn send<T: DeserializeOwned>(
-        &self,
+    async fn send<T: DeserializeOwned + Send + 'static>(
         req: reqwest::RequestBuilder,
     ) -> Result<T, ApiError> {
-        let resp = req.send().await.map_err(network_error)?;
-        let status = resp.status().as_u16();
-        if !resp.status().is_success() {
-            let body: Result<ErrorEnvelope, _> = resp.json().await;
-            let (code, message, request_id) = match body {
-                Ok(env) => (env.error.code, env.error.message, Some(env.error.request_id)),
-                Err(_) => ("http_error".into(), format!("HTTP {}", status), None),
-            };
-            return Err(ApiError { code, message, request_id, status });
-        }
-        resp.json().await.map_err(|e| ApiError {
-            code: "decode_error".into(),
-            message: e.to_string(),
-            request_id: None,
-            status,
+        tokio_spawn(async move {
+            let resp = req.send().await.map_err(network_error)?;
+            let status = resp.status().as_u16();
+            if !resp.status().is_success() {
+                let body: Result<ErrorEnvelope, _> = resp.json().await;
+                let (code, message, request_id) = match body {
+                    Ok(env) => (env.error.code, env.error.message, Some(env.error.request_id)),
+                    Err(_) => ("http_error".into(), format!("HTTP {}", status), None),
+                };
+                return Err(ApiError { code, message, request_id, status });
+            }
+            resp.json().await.map_err(|e| ApiError {
+                code: "decode_error".into(),
+                message: e.to_string(),
+                request_id: None,
+                status,
+            })
         })
+        .await
     }
 
     pub async fn meta(&self) -> Result<dto::Meta, ApiError> {
-        self.send(self.http.get(self.url("/api/v1/meta"))).await
+        Self::send(self.http.get(self.url("/api/v1/meta"))).await
     }
 
     pub async fn login(&self, username: &str, password: &str) -> Result<dto::User, ApiError> {
@@ -154,8 +184,7 @@ impl Client {
             username: &'a str,
             password: &'a str,
         }
-        let resp: dto::UserResponse = self
-            .send(
+        let resp: dto::UserResponse = Self::send(
                 self.http
                     .post(self.url("/api/v1/auth/login"))
                     .json(&Body { username, password }),
@@ -166,15 +195,13 @@ impl Client {
 
     #[allow(dead_code)] // used by the CLI milestone
     pub async fn me(&self) -> Result<dto::User, ApiError> {
-        let resp: dto::UserResponse = self
-            .send(self.http.get(self.url("/api/v1/auth/me")))
+        let resp: dto::UserResponse = Self::send(self.http.get(self.url("/api/v1/auth/me")))
             .await?;
         Ok(resp.user)
     }
 
     pub async fn projects(&self) -> Result<Vec<dto::Project>, ApiError> {
-        let resp: dto::ProjectsResponse = self
-            .send(self.http.get(self.url("/api/v1/projects")))
+        let resp: dto::ProjectsResponse = Self::send(self.http.get(self.url("/api/v1/projects")))
             .await?;
         Ok(resp.projects)
     }
@@ -190,8 +217,7 @@ impl Client {
             #[serde(skip_serializing_if = "str::is_empty")]
             description: &'a str,
         }
-        let resp: dto::ProjectResponse = self
-            .send(
+        let resp: dto::ProjectResponse = Self::send(
                 self.http
                     .post(self.url("/api/v1/projects"))
                     .json(&Body { name, description }),
@@ -205,8 +231,7 @@ impl Client {
         project_id: &str,
         path: &str,
     ) -> Result<Vec<dto::TreeEntry>, ApiError> {
-        let resp: dto::TreeResponse = self
-            .send(
+        let resp: dto::TreeResponse = Self::send(
                 self.http
                     .get(self.url(&format!(
                         "/api/v1/projects/{}/docs/tree",
@@ -224,7 +249,7 @@ impl Client {
         project_id: &str,
         path: &str,
     ) -> Result<dto::DocPage, ApiError> {
-        self.send(
+        Self::send(
             self.http
                 .get(self.url(&format!(
                     "/api/v1/projects/{}/docs/pages/{}",
@@ -236,8 +261,7 @@ impl Client {
     }
 
     pub async fn revision(&self, project_id: &str) -> Result<String, ApiError> {
-        let resp: dto::RevisionResponse = self
-            .send(
+        let resp: dto::RevisionResponse = Self::send(
                 self.http
                     .get(self.url(&format!(
                         "/api/v1/projects/{}/revision",
@@ -260,7 +284,7 @@ impl Client {
             message: message.to_string(),
             changes,
         };
-        self.send(
+        Self::send(
             self.http
                 .post(self.url(&format!(
                     "/api/v1/projects/{}/changesets",
@@ -272,8 +296,7 @@ impl Client {
     }
 
     pub async fn acquire_lock(&self, project_id: &str, path: &str) -> Result<dto::Lock, ApiError> {
-        let resp: dto::LockResponse = self
-            .send(
+        let resp: dto::LockResponse = Self::send(
             self.http
                 .post(self.url(&format!(
                     "/api/v1/projects/{}/locks",
@@ -290,8 +313,7 @@ impl Client {
         project_id: &str,
         path: &str,
     ) -> Result<dto::Lock, ApiError> {
-        let resp: dto::LockResponse = self
-            .send(
+        let resp: dto::LockResponse = Self::send(
             self.http
                 .post(self.url(&format!(
                     "/api/v1/projects/{}/locks/heartbeat",
@@ -304,8 +326,7 @@ impl Client {
     }
 
     pub async fn release_lock(&self, project_id: &str, path: &str) -> Result<bool, ApiError> {
-        let resp: dto::ReleasedResponse = self
-            .send(
+        let resp: dto::ReleasedResponse = Self::send(
                 self.http
                     .delete(self.url(&format!(
                         "/api/v1/projects/{}/locks",
@@ -322,8 +343,7 @@ impl Client {
         project_id: &str,
         limit: u32,
     ) -> Result<Vec<dto::Commit>, ApiError> {
-        let resp: dto::CommitListResponse = self
-            .send(
+        let resp: dto::CommitListResponse = Self::send(
                 self.http
                     .get(self.url(&format!(
                         "/api/v1/projects/{}/commits",
@@ -340,8 +360,7 @@ impl Client {
         project_id: &str,
         sha: &str,
     ) -> Result<dto::CommitDetail, ApiError> {
-        let resp: dto::CommitDetailResponse = self
-            .send(
+        let resp: dto::CommitDetailResponse = Self::send(
                 self.http
                     .get(self.url(&format!(
                         "/api/v1/projects/{}/commits/{}",
@@ -353,8 +372,7 @@ impl Client {
     }
 
     pub async fn project(&self, project_id: &str) -> Result<dto::Project, ApiError> {
-        let resp: dto::ProjectResponse = self
-            .send(
+        let resp: dto::ProjectResponse = Self::send(
                 self.http
                     .get(self.url(&format!("/api/v1/projects/{project_id}"))),
             )
@@ -368,8 +386,7 @@ impl Client {
         archived: bool,
     ) -> Result<dto::Project, ApiError> {
         let path = if archived { "archive" } else { "unarchive" };
-        let resp: dto::ProjectResponse = self
-            .send(
+        let resp: dto::ProjectResponse = Self::send(
                 self.http
                     .post(self.url(&format!(
                         "/api/v1/projects/{project_id}/{path}"
@@ -388,8 +405,7 @@ impl Client {
         new_path: Option<String>,
         message: &str,
     ) -> Result<dto::ChangesetResult, ApiError> {
-        let resp: dto::RevisionResponse = self
-            .send(
+        let resp: dto::RevisionResponse = Self::send(
                 self.http
                     .get(self.url(&format!(
                         "/api/v1/projects/{project_id}/revision"
@@ -455,8 +471,7 @@ impl Client {
         project_id: &str,
         q: &str,
     ) -> Result<Vec<dto::SearchResult>, ApiError> {
-        let resp: dto::SearchResponse = self
-            .send(
+        let resp: dto::SearchResponse = Self::send(
                 self.http
                     .get(self.url(&format!(
                         "/api/v1/projects/{project_id}/search"
@@ -468,8 +483,7 @@ impl Client {
     }
 
     pub async fn tokens(&self) -> Result<Vec<dto::Token>, ApiError> {
-        let resp: dto::TokenListResponse = self
-            .send(self.http.get(self.url("/api/v1/tokens")))
+        let resp: dto::TokenListResponse = Self::send(self.http.get(self.url("/api/v1/tokens")))
             .await?;
         Ok(resp.tokens)
     }
@@ -488,8 +502,7 @@ impl Client {
             project_ids: Vec<String>,
             path_prefixes: Vec<String>,
         }
-        let resp: dto::TokenCreateResponse = self
-            .send(
+        let resp: dto::TokenCreateResponse = Self::send(
                 self.http
                     .post(self.url("/api/v1/tokens"))
                     .json(&Body {
@@ -504,7 +517,7 @@ impl Client {
     }
 
     pub async fn revoke_token(&self, id: &str) -> Result<(), ApiError> {
-        self.send(
+        Self::send(
             self.http
                 .delete(self.url(&format!("/api/v1/tokens/{id}"))),
         )
@@ -512,8 +525,7 @@ impl Client {
     }
 
     pub async fn users(&self) -> Result<Vec<dto::User>, ApiError> {
-        let resp: dto::UsersResponse = self
-            .send(self.http.get(self.url("/api/v1/users")))
+        let resp: dto::UsersResponse = Self::send(self.http.get(self.url("/api/v1/users")))
             .await?;
         Ok(resp.users)
     }
@@ -528,8 +540,7 @@ impl Client {
             username: &'a str,
             password: &'a str,
         }
-        let resp: dto::UserResponse = self
-            .send(
+        let resp: dto::UserResponse = Self::send(
                 self.http
                     .post(self.url("/api/v1/users"))
                     .json(&Body { username, password }),
@@ -544,8 +555,7 @@ impl Client {
         enabled: bool,
     ) -> Result<dto::User, ApiError> {
         let action = if enabled { "enable" } else { "disable" };
-        let resp: dto::UserResponse = self
-            .send(
+        let resp: dto::UserResponse = Self::send(
                 self.http
                     .post(self.url(&format!("/api/v1/users/{id}/{action}"))),
             )
@@ -554,8 +564,7 @@ impl Client {
     }
 
     pub async fn audit(&self, project_id: &str) -> Result<Vec<dto::AuditEntry>, ApiError> {
-        let resp: dto::AuditResponse = self
-            .send(
+        let resp: dto::AuditResponse = Self::send(
                 self.http
                     .get(self.url(&format!(
                         "/api/v1/projects/{project_id}/audit"
@@ -570,8 +579,7 @@ impl Client {
         project_id: &str,
         sha: &str,
     ) -> Result<Vec<dto::DiffStat>, ApiError> {
-        let resp: dto::DiffStatsResponse = self
-            .send(
+        let resp: dto::DiffStatsResponse = Self::send(
                 self.http
                     .get(self.url(&format!(
                         "/api/v1/projects/{}/commits/{}/diff",
