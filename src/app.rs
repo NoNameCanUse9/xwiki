@@ -10,7 +10,6 @@ use gpui_component::{
     input::{Input, InputEvent, InputState},
     scroll::ScrollableElement as _,
     notification::Notification,
-    table::{Column, DataTable, TableDelegate, TableEvent, TableState},
     text::TextView,
     *,
 };
@@ -44,7 +43,6 @@ pub struct XWikiApp {
     password_input: Entity<InputState>,
     projects: Arc<RwLock<Vec<ProjectRow>>>,
     filter_input: Entity<InputState>,
-    table: Entity<TableState<ProjectsTable>>,
     // Document workspace state.
     selected_project: Option<String>,
     tree_entries: Vec<dto::TreeEntry>,
@@ -95,92 +93,6 @@ impl ProjectRow {
     }
 }
 
-/// Table delegate over the shared project list, with client-side filtering.
-struct ProjectsTable {
-    projects: Arc<RwLock<Vec<ProjectRow>>>,
-    filter: String,
-}
-
-impl ProjectsTable {
-    fn new(projects: Arc<RwLock<Vec<ProjectRow>>>) -> Self {
-        Self { projects, filter: String::new() }
-    }
-
-    fn visible(&self) -> Vec<ProjectRow> {
-        let q = self.filter.to_lowercase();
-        self.projects
-            .read()
-            .unwrap()
-            .iter()
-            .filter(|p| {
-                q.is_empty()
-                    || p.name.to_lowercase().contains(&q)
-                    || p.description.to_lowercase().contains(&q)
-            })
-            .cloned()
-            .collect()
-    }
-}
-
-impl TableDelegate for ProjectsTable {
-    fn columns_count(&self, _: &App) -> usize {
-        4
-    }
-
-    fn rows_count(&self, _: &App) -> usize {
-        self.visible().len()
-    }
-
-    fn column(&self, col_ix: usize, _: &App) -> Column {
-        match col_ix {
-            0 => Column::new("name", "项目").width(px(220.0)),
-            1 => Column::new("description", "描述").width(px(300.0)),
-            2 => Column::new("updated", "更新").width(px(120.0)),
-            _ => Column::new("status", "状态").width(px(110.0)),
-        }
-    }
-
-    fn render_td(
-        &mut self,
-        row_ix: usize,
-        col_ix: usize,
-        _: &mut Window,
-        cx: &mut Context<TableState<Self>>,
-    ) -> impl IntoElement {
-        let rows = self.visible();
-        let Some(p) = rows.get(row_ix) else {
-            return div().into_any_element();
-        };
-        let theme = cx.theme();
-        let cell = match col_ix {
-            0 => div()
-                .font_family("JetBrains Mono")
-                .text_sm()
-                .text_color(theme.foreground)
-                .child(p.name.clone()),
-            1 => div()
-                .text_sm()
-                .text_color(theme.muted_foreground)
-                .child(p.description.clone()),
-            2 => div()
-                .font_family("JetBrains Mono")
-                .text_xs()
-                .text_color(theme.muted_foreground)
-                .child(p.updated.clone()),
-            _ => div()
-                .font_family("JetBrains Mono")
-                .text_xs()
-                .text_color(if p.archived {
-                    theme.muted_foreground
-                } else {
-                    theme.foreground
-                })
-                .child(if p.archived { "ARCHIVED" } else { "ACTIVE" }),
-        };
-        cell.into_any_element()
-    }
-}
-
 impl XWikiApp {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let server_input = cx.new(|cx| {
@@ -207,40 +119,21 @@ impl XWikiApp {
                 .placeholder("# 用 Markdown 写作…")
         });
 
-        let table =
-            cx.new(|cx| TableState::new(ProjectsTable::new(projects.clone()), window, cx));
-
         let mut subs = Vec::new();
-        // Double-click a project row to open its document workspace.
-        {
-            let table = table.clone();
-            subs.push(cx.subscribe(&table, |this, _table, ev, cx| {
-                if let TableEvent::DoubleClickedRow(ix) = ev {
-                    let rows = this.table.read(cx).delegate().visible();
-                    if let Some(row) = rows.get(*ix) {
-                        this.open_project(&row.id, cx);
-                    }
-                }
-            }));
-        }
         for state in [&server_input, &user_input, &password_input] {
             subs.push(cx.subscribe_in(state, window, |_, _, _: &InputEvent, _, cx| {
                 cx.notify()
             }));
         }
-        // Filter keystrokes re-query the table.
+        // Filter keystrokes re-render the project cards.
         {
-            let table = table.clone();
             let filter = filter_input.clone();
             subs.push(cx.subscribe_in(
                 &filter_input,
                 window,
                 move |_, _, _: &InputEvent, _, cx| {
-                    let q = filter.read(cx).value().to_string();
-                    table.update(cx, |state, cx| {
-                        state.delegate_mut().filter = q;
-                        state.refresh(cx);
-                    });
+                    let _ = filter.read(cx);
+                    cx.notify();
                 },
             ));
         }
@@ -257,7 +150,6 @@ impl XWikiApp {
             password_input,
             projects,
             filter_input,
-            table,
             selected_project: None,
             tree_entries: Vec::new(),
             tree_path: String::new(),
@@ -1076,6 +968,121 @@ impl XWikiApp {
         list
     }
 
+    /// Project card grid (web home.tsx style): hairline panels, hover lift,
+    /// display title + mono meta + description + status row.
+    fn render_project_cards(&self, cx: &mut Context<Self>) -> Div {
+        let theme = cx.theme().clone();
+        let q = self.filter_input.read(cx).value().to_lowercase();
+        let projects: Vec<ProjectRow> = self
+            .projects
+            .read()
+            .unwrap()
+            .iter()
+            .filter(|p| {
+                q.is_empty()
+                    || p.name.to_lowercase().contains(&q)
+                    || p.description.to_lowercase().contains(&q)
+            })
+            .cloned()
+            .collect();
+        if projects.is_empty() {
+            return div()
+                .flex_1()
+                .flex()
+                .items_center()
+                .justify_center()
+                .font_family("JetBrains Mono")
+                .text_xs()
+                .text_color(theme.muted_foreground)
+                .child(if q.is_empty() {
+                    "还没有项目 · 点击右上角新建"
+                } else {
+                    "没有匹配的项目"
+                });
+        }
+        let mut grid = div().flex().flex_wrap().gap_3().w_full();
+        for p in projects {
+            let id = p.id.clone();
+            let card = div()
+                .id(format!("project-card-{}", p.name))
+                .w(px(340.0))
+                .p_5()
+                .rounded(px(6.0))
+                .border_1()
+                .border_color(theme.border)
+                .hover(|s| {
+                    s.border_color(theme.border)
+                        .bg(theme.list_hover)
+                })
+                .cursor_pointer()
+                .v_flex()
+                .gap_2_5()
+                .child(
+                    div()
+                        .flex()
+                        .items_start()
+                        .justify_between()
+                        .gap_3()
+                        .child(
+                            div()
+                                .text_lg()
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .text_color(theme.foreground)
+                                .child(p.name.clone()),
+                        )
+                        .child(
+                            div()
+                                .font_family("JetBrains Mono")
+                                .text_xs()
+                                .text_color(theme.muted_foreground)
+                                .child(p.updated.clone()),
+                        ),
+                )
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(theme.muted_foreground)
+                        .child(if p.description.is_empty() {
+                            "—".to_string()
+                        } else {
+                            p.description.clone()
+                        }),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .border_t_1()
+                        .border_color(theme.border)
+                        .pt_3()
+                        .child(
+                            div()
+                                .font_family("JetBrains Mono")
+                                .text_xs()
+                                .text_color(if p.archived {
+                                    theme.muted_foreground
+                                } else {
+                                    theme.accent
+                                })
+                                .child(if p.archived { "ARCHIVED" } else { "ACTIVE" }),
+                        )
+                        .child(
+                            div()
+                                .font_family("JetBrains Mono")
+                                .text_xs()
+                                .text_color(theme.accent)
+                                .child("打开 →"),
+                        ),
+                )
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.open_project(&id, cx);
+                }));
+            grid = grid.child(card);
+        }
+        grid
+    }
+
     fn render_doc_view(&self, cx: &mut Context<Self>) -> Div {
         let theme = cx.theme().clone();
         div()
@@ -1315,7 +1322,6 @@ impl XWikiApp {
                         if let Ok(m) = meta {
                             app.meta_version = Some(m.version);
                         }
-                        app.table.update(cx, |s, cx| s.refresh(cx));
                         cx.notify();
                     });
                 }
@@ -1337,7 +1343,6 @@ impl XWikiApp {
         self.username.clear();
         self.login_error = None;
         *self.projects.write().unwrap() = Vec::new();
-        self.table.update(cx, |s, cx| s.refresh(cx));
         cx.notify();
     }
 
@@ -1707,33 +1712,15 @@ impl XWikiApp {
                                             )),
                                     ),
                             )
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .child(
-                                        DataTable::new(&self.table)
-                                            .stripe(true)
-                                            .bordered(true),
-                                    ),
-                            )
                             .child(if self.loading {
                                 div()
                                     .font_family("JetBrains Mono")
                                     .text_xs()
                                     .text_color(theme.muted_foreground)
                                     .child("加载中…")
-                            } else if self.projects.read().unwrap().is_empty() {
-                                div()
-                                    .flex_1()
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .font_family("JetBrains Mono")
-                                    .text_xs()
-                                    .text_color(theme.muted_foreground)
-                                    .child("还没有项目 · 点击右上角新建")
+                                    .into_any_element()
                             } else {
-                                div()
+                                self.render_project_cards(cx).into_any_element()
                             }),
                     ),
             )
@@ -1842,7 +1829,6 @@ fn open_new_project_dialog_window(
                                         .write()
                                         .unwrap()
                                         .push(ProjectRow::from_dto(&p));
-                                    app.table.update(cx, |s, cx| s.refresh(cx));
                                     cx.notify();
                                 });
                             }
