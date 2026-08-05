@@ -3,6 +3,7 @@
 use gpui::*;
 use gpui_component::*;
 
+mod api;
 mod app;
 
 use app::XWikiApp;

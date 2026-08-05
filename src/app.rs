@@ -9,12 +9,18 @@ use gpui_component::{
     *,
 };
 
+use crate::api::{Client, dto};
+
 /// Application shell: login screen and the project workspace.
 /// Theme discipline (Hallmark · Cobalt): cool engineered paper, hairlines
 /// over shadows, exactly one electric-blue signal (primary button, focus,
 /// hover underlines), mono UPPERCASE labels, 6px radii.
 pub struct XWikiApp {
     screen: Screen,
+    client: Option<Client>,
+    username: String,
+    login_error: Option<String>,
+    loading: bool,
     server_input: Entity<InputState>,
     user_input: Entity<InputState>,
     password_input: Entity<InputState>,
@@ -36,6 +42,17 @@ struct ProjectRow {
     description: String,
     updated: String,
     archived: bool,
+}
+
+impl ProjectRow {
+    fn from_dto(p: &dto::Project) -> Self {
+        Self {
+            name: p.name.clone(),
+            description: p.description.clone(),
+            updated: p.updated_at.split('T').next().unwrap_or("").to_string(),
+            archived: p.archived,
+        }
+    }
 }
 
 /// Table delegate over the shared project list, with client-side filtering.
@@ -134,34 +151,9 @@ impl XWikiApp {
         let password_input =
             cx.new(|cx| InputState::new(window, cx).placeholder("密码").masked(true));
 
-        // ponytail: seed rows stand in for GET /api/v1/projects until the
-        // api layer lands.
-        let projects = Arc::new(RwLock::new(vec![
-            ProjectRow {
-                name: "docs-site".into(),
-                description: "产品与平台文档".into(),
-                updated: "2h ago".into(),
-                archived: false,
-            },
-            ProjectRow {
-                name: "handbook".into(),
-                description: "团队手册与流程".into(),
-                updated: "1d ago".into(),
-                archived: false,
-            },
-            ProjectRow {
-                name: "api-reference".into(),
-                description: "API 参考与集成指南".into(),
-                updated: "3d ago".into(),
-                archived: false,
-            },
-            ProjectRow {
-                name: "legacy-wiki".into(),
-                description: "旧版迁移中".into(),
-                updated: "30d ago".into(),
-                archived: true,
-            },
-        ]));
+        // ponytail: rows are loaded from GET /api/v1/projects on login; this
+        // starts empty.
+        let projects = Arc::new(RwLock::new(Vec::new()));
 
         let filter_input =
             cx.new(|cx| InputState::new(window, cx).placeholder("搜索项目…"));
@@ -194,6 +186,10 @@ impl XWikiApp {
 
         Self {
             screen: Screen::Login,
+            client: None,
+            username: String::new(),
+            login_error: None,
+            loading: false,
             server_input,
             user_input,
             password_input,
@@ -204,21 +200,91 @@ impl XWikiApp {
         }
     }
 
-    fn login(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
-        // ponytail: UI skeleton only — wire the real /api/v1/auth/login call
-        // when the api layer lands.
+    fn do_login(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        let server = {
+            let v = self.server_input.read(cx).value().to_string();
+            if v.trim().is_empty() {
+                "http://127.0.0.1:9090".to_string()
+            } else {
+                v.trim().to_string()
+            }
+        };
+        let username = self.user_input.read(cx).value().to_string();
+        let password = self.password_input.read(cx).value().to_string();
+        if username.trim().is_empty() || password.is_empty() {
+            self.login_error = Some("请输入用户名和密码".into());
+            cx.notify();
+            return;
+        }
+        let client = Client::new(&server);
+        self.client = Some(client.clone());
+        self.login_error = None;
+        cx.spawn(async move |this, cx| {
+            match client.login(username.trim(), &password).await {
+                Ok(user) => {
+                    let _ = this.update(cx, |app, cx| app.on_login_ok(user, cx));
+                }
+                Err(e) => {
+                    let _ = this.update(cx, |app, cx| {
+                        app.login_error = Some(e.to_string());
+                        cx.notify();
+                    });
+                }
+            }
+        })
+        .detach();
+    }
+
+    fn on_login_ok(&mut self, user: dto::User, cx: &mut Context<Self>) {
+        self.username = user.username;
         self.screen = Screen::Workspace;
-        cx.notify();
+        self.login_error = None;
+        self.load_projects(cx);
+    }
+
+    fn load_projects(&mut self, cx: &mut Context<Self>) {
+        let Some(client) = self.client.clone() else {
+            return;
+        };
+        self.loading = true;
+        cx.spawn(async move |this, cx| {
+            match client.projects().await {
+                Ok(list) => {
+                    let _ = this.update(cx, |app, cx| {
+                        *app.projects.write().unwrap() =
+                            list.iter().map(ProjectRow::from_dto).collect();
+                        app.loading = false;
+                        app.table.update(cx, |s, cx| s.refresh(cx));
+                        cx.notify();
+                    });
+                }
+                Err(e) => {
+                    let _ = this.update(cx, |app, cx| {
+                        app.loading = false;
+                        app.login_error = Some(e.to_string());
+                        cx.notify();
+                    });
+                }
+            }
+        })
+        .detach();
     }
 
     fn logout(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         self.screen = Screen::Login;
+        self.client = None;
+        self.username.clear();
+        self.login_error = None;
+        *self.projects.write().unwrap() = Vec::new();
+        self.table.update(cx, |s, cx| s.refresh(cx));
         cx.notify();
     }
 
     fn open_new_project_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let projects = self.projects.clone();
-        let table = self.table.clone();
+        let Some(client) = self.client.clone() else {
+            return;
+        };
+        let handle = cx.entity();
         window.open_dialog(cx, move |dialog, window, cx| {
             let name_state =
                 cx.new(|cx| InputState::new(window, cx).placeholder("docs-site"));
@@ -260,10 +326,10 @@ impl XWikiApp {
                 .label("取消")
                 .on_click(move |_, window, cx| window.close_dialog(cx));
 
-            let create_projects = projects.clone();
-            let create_table = table.clone();
             let create_name = name_state.clone();
             let create_desc = desc_state.clone();
+            let create_client = client.clone();
+            let app_handle = handle.clone();
             let create = Button::new("create-project")
                 .primary()
                 .rounded(px(6.0))
@@ -274,13 +340,29 @@ impl XWikiApp {
                         return;
                     }
                     let desc = create_desc.read(cx).value().to_string();
-                    create_projects.write().unwrap().push(ProjectRow {
-                        name: name.trim().to_string(),
-                        description: desc.trim().to_string(),
-                        updated: "just now".into(),
-                        archived: false,
-                    });
-                    create_table.update(cx, |state, cx| state.refresh(cx));
+                    let c = create_client.clone();
+                    let h = app_handle.clone();
+                    cx.spawn(async move |cx| {
+                        match c.create_project(name.trim(), desc.trim()).await {
+                            Ok(p) => {
+                                let _ = h.update(cx, |app, cx| {
+                                    app.projects
+                                        .write()
+                                        .unwrap()
+                                        .push(ProjectRow::from_dto(&p));
+                                    app.table.update(cx, |s, cx| s.refresh(cx));
+                                    cx.notify();
+                                });
+                            }
+                            Err(e) => {
+                                let _ = h.update(cx, |app, cx| {
+                                    app.login_error = Some(e.to_string());
+                                    cx.notify();
+                                });
+                            }
+                        }
+                    })
+                    .detach();
                     window.close_dialog(cx);
                 });
 
@@ -352,9 +434,18 @@ impl XWikiApp {
                             .rounded(px(6.0))
                             .label("登录")
                             .on_click(cx.listener(|this, _, window, cx| {
-                                this.login(window, cx)
+                                this.do_login(window, cx)
                             })),
                     )
+                    .child(if let Some(err) = &self.login_error {
+                        div()
+                            .font_family("JetBrains Mono")
+                            .text_xs()
+                            .text_color(theme.danger)
+                            .child(err.clone())
+                    } else {
+                        div()
+                    })
                     .child(
                         div()
                             .flex()
@@ -427,7 +518,7 @@ impl XWikiApp {
                                     .font_family("JetBrains Mono")
                                     .text_xs()
                                     .text_color(theme.muted_foreground)
-                                    .child("admin"),
+                                    .child(self.username.clone()),
                             )
                             .child(
                                 Button::new("logout")
@@ -519,7 +610,26 @@ impl XWikiApp {
                                             .stripe(true)
                                             .bordered(true),
                                     ),
-                            ),
+                            )
+                            .child(if self.loading {
+                                div()
+                                    .font_family("JetBrains Mono")
+                                    .text_xs()
+                                    .text_color(theme.muted_foreground)
+                                    .child("加载中…")
+                            } else if self.projects.read().unwrap().is_empty() {
+                                div()
+                                    .flex_1()
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .font_family("JetBrains Mono")
+                                    .text_xs()
+                                    .text_color(theme.muted_foreground)
+                                    .child("还没有项目 · 点击右上角新建")
+                            } else {
+                                div()
+                            }),
                     ),
             )
     }
