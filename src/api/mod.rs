@@ -248,6 +248,59 @@ impl Client {
             .await?;
         Ok(resp.released)
     }
+
+    pub async fn commits(
+        &self,
+        project_id: &str,
+        limit: u32,
+    ) -> Result<Vec<dto::Commit>, ApiError> {
+        let resp: dto::CommitListResponse = self
+            .send(
+                self.http
+                    .get(self.url(&format!(
+                        "/api/v1/projects/{}/commits",
+                        project_id
+                    )))
+                    .query(&[("limit", limit.to_string())]),
+            )
+            .await?;
+        Ok(resp.commits)
+    }
+
+    pub async fn commit_detail(
+        &self,
+        project_id: &str,
+        sha: &str,
+    ) -> Result<dto::CommitDetail, ApiError> {
+        let resp: dto::CommitDetailResponse = self
+            .send(
+                self.http
+                    .get(self.url(&format!(
+                        "/api/v1/projects/{}/commits/{}",
+                        project_id, sha
+                    ))),
+            )
+            .await?;
+        Ok(resp.commit)
+    }
+
+    pub async fn diff_stats(
+        &self,
+        project_id: &str,
+        sha: &str,
+    ) -> Result<Vec<dto::DiffStat>, ApiError> {
+        let resp: dto::DiffStatsResponse = self
+            .send(
+                self.http
+                    .get(self.url(&format!(
+                        "/api/v1/projects/{}/commits/{}/diff",
+                        project_id, sha
+                    )))
+                    .query(&[("format", "numstat")]),
+            )
+            .await?;
+        Ok(resp.stats)
+    }
 }
 
 fn network_error(e: reqwest::Error) -> ApiError {
@@ -394,6 +447,56 @@ pub mod dto {
     #[derive(Debug, Deserialize)]
     pub struct ReleasedResponse {
         pub released: bool,
+    }
+
+    #[derive(Debug, Deserialize)]
+    pub struct Commit {
+        pub sha: String,
+        pub message: String,
+        pub author: String,
+        pub date: String,
+    }
+
+    #[derive(Debug, Deserialize)]
+    pub struct CommitListResponse {
+        #[serde(default, deserialize_with = "crate::api::de_null_default")]
+        pub commits: Vec<Commit>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    pub struct CommitFile {
+        pub status: String,
+        pub path: String,
+    }
+
+    #[derive(Debug, Deserialize)]
+    pub struct CommitDetail {
+        pub sha: String,
+        pub message: String,
+        pub author: String,
+        pub date: String,
+        #[serde(default, deserialize_with = "crate::api::de_null_default")]
+        pub files: Vec<CommitFile>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    pub struct CommitDetailResponse {
+        pub commit: CommitDetail,
+    }
+
+    #[derive(Debug, Deserialize)]
+    pub struct DiffStat {
+        pub path: String,
+        pub added: u32,
+        pub deleted: u32,
+    }
+
+    #[derive(Debug, Deserialize)]
+    pub struct DiffStatsResponse {
+        pub sha: String,
+        pub format: String,
+        #[serde(default, deserialize_with = "crate::api::de_null_default")]
+        pub stats: Vec<DiffStat>,
     }
 
     #[derive(Debug, Deserialize)]

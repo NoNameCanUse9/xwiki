@@ -48,6 +48,11 @@ pub struct XWikiApp {
     status_msg: Option<String>,
     commit_msg: Entity<InputState>,
     editor_input: Entity<InputState>,
+    // History view state.
+    history_open: bool,
+    commits: Vec<dto::Commit>,
+    commit_detail: Option<dto::CommitDetail>,
+    diff_stats: Vec<dto::DiffStat>,
     /// Keep input subscriptions alive with the app entity.
     _subscriptions: Vec<Subscription>,
 }
@@ -254,6 +259,10 @@ impl XWikiApp {
             status_msg: None,
             commit_msg,
             editor_input,
+            history_open: false,
+            commits: Vec::new(),
+            commit_detail: None,
+            diff_stats: Vec::new(),
             _subscriptions: subs,
         }
     }
@@ -507,6 +516,285 @@ impl XWikiApp {
         self.open_doc(&path, cx);
     }
 
+    // ----- History: commit list + per-commit diff stats -----
+
+    fn open_history(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        self.history_open = true;
+        self.commit_detail = None;
+        self.diff_stats.clear();
+        self.load_commits(cx);
+    }
+
+    fn close_history(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        self.history_open = false;
+        cx.notify();
+    }
+
+    fn load_commits(&mut self, cx: &mut Context<Self>) {
+        let (Some(client), Some(project)) =
+            (self.client.clone(), self.selected_project.clone())
+        else {
+            return;
+        };
+        cx.spawn(async move |this, cx| {
+            match client.commits(&project, 50).await {
+                Ok(list) => {
+                    let _ = this.update(cx, |app, cx| {
+                        app.commits = list;
+                        cx.notify();
+                    });
+                }
+                Err(e) => {
+                    let _ = this.update(cx, |app, cx| {
+                        app.status_msg = Some(format!("加载历史失败: {e}"));
+                        cx.notify();
+                    });
+                }
+            }
+        })
+        .detach();
+    }
+
+    fn select_commit(&mut self, sha: &str, cx: &mut Context<Self>) {
+        let (Some(client), Some(project)) =
+            (self.client.clone(), self.selected_project.clone())
+        else {
+            return;
+        };
+        let sha = sha.to_string();
+        self.commit_detail = None;
+        self.diff_stats.clear();
+        cx.spawn(async move |this, cx| {
+            let detail = client.commit_detail(&project, &sha).await;
+            let stats = client.diff_stats(&project, &sha).await;
+            let _ = this.update(cx, |app, cx| {
+                if let Ok(d) = detail {
+                    app.commit_detail = Some(d);
+                }
+                if let Ok(s) = stats {
+                    app.diff_stats = s;
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn render_history_view(&self, cx: &mut Context<Self>) -> Div {
+        let theme = cx.theme().clone();
+        div()
+            .flex_1()
+            .h_full()
+            .flex()
+            .flex_col()
+            .child(
+                // History toolbar.
+                div()
+                    .h(px(44.0))
+                    .px_4()
+                    .flex()
+                    .items_center()
+                    .gap_3()
+                    .border_b_1()
+                    .border_color(theme.border)
+                    .bg(theme.sidebar)
+                    .child(
+                        div()
+                            .font_family("JetBrains Mono")
+                            .text_xs()
+                            .text_color(theme.muted_foreground)
+                            .child("HISTORY"),
+                    )
+                    .child(div().flex_1())
+                    .child(
+                        Button::new("close-history")
+                            .rounded(px(6.0))
+                            .label("← 返回文档")
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.close_history(window, cx)
+                            })),
+                    ),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_1()
+                    .h_full()
+                    .child(
+                        // Commit list.
+                        div()
+                            .w(px(340.0))
+                            .h_full()
+                            .flex()
+                            .flex_col()
+                            .border_r_1()
+                            .border_color(theme.border)
+                            .overflow_y_scrollbar()
+                            .children(self.commits.iter().map(|c| {
+                                let sha = c.sha.clone();
+                                let short: String = c.sha.chars().take(7).collect();
+                                div()
+                                    .id(format!("commit-{short}"))
+                                    .px_3()
+                                    .py_2()
+                                    .border_b_1()
+                                    .border_color(theme.border)
+                                    .hover(|s| s.bg(theme.list_hover))
+                                    .cursor_pointer()
+                                    .v_flex()
+                                    .gap_1()
+                                    .child(
+                                        div()
+                                            .font_family("JetBrains Mono")
+                                            .text_xs()
+                                            .text_color(theme.foreground)
+                                            .child(short),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_sm()
+                                            .text_color(theme.muted_foreground)
+                                            .child(c.message.clone()),
+                                    )
+                                    .child(
+                                        div()
+                                            .font_family("JetBrains Mono")
+                                            .text_xs()
+                                            .text_color(theme.muted_foreground)
+                                            .child(format!("{} · {}", c.author, c.date)),
+                                    )
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.select_commit(&sha, cx);
+                                    }))
+                            })),
+                    )
+                    .child(
+                        // Commit detail: message, files, numstat.
+                        div()
+                            .flex_1()
+                            .h_full()
+                            .flex()
+                            .flex_col()
+                            .overflow_y_scrollbar()
+                            .p_6()
+                            .child(if let Some(d) = &self.commit_detail {
+                                div()
+                                    .v_flex()
+                                    .gap_3()
+                                    .w_full()
+                                    .child(
+                                        div()
+                                            .text_lg()
+                                            .font_weight(FontWeight::SEMIBOLD)
+                                            .child(d.message.clone()),
+                                    )
+                                    .child(
+                                        div()
+                                            .font_family("JetBrains Mono")
+                                            .text_xs()
+                                            .text_color(theme.muted_foreground)
+                                            .child(format!(
+                                                "{} · {} · {}",
+                                                d.sha, d.author, d.date
+                                            )),
+                                    )
+                                    .child(
+                                        div()
+                                            .w_full()
+                                            .h(px(1.0))
+                                            .bg(theme.border),
+                                    )
+                                    .child(
+                                        div()
+                                            .font_family("JetBrains Mono")
+                                            .text_xs()
+                                            .text_color(theme.muted_foreground)
+                                            .child("FILES"),
+                                    )
+                                    .children(d.files.iter().map(|f| {
+                                        let color = if f.status.as_str() == "D" {
+                                            theme.danger
+                                        } else {
+                                            theme.foreground
+                                        };
+                                        div()
+                                            .flex()
+                                            .gap_2()
+                                            .items_center()
+                                            .child(
+                                                div()
+                                                    .font_family("JetBrains Mono")
+                                                    .text_xs()
+                                                    .text_color(theme.foreground)
+                                                    .child(f.status.clone()),
+                                            )
+                                            .child(
+                                                div()
+                                                    .font_family("JetBrains Mono")
+                                                    .text_xs()
+                                                    .text_color(color)
+                                                    .child(f.path.clone()),
+                                            )
+                                    }))
+                                    .child(
+                                        div()
+                                            .w_full()
+                                            .h(px(1.0))
+                                            .bg(theme.border),
+                                    )
+                                    .child(
+                                        div()
+                                            .font_family("JetBrains Mono")
+                                            .text_xs()
+                                            .text_color(theme.muted_foreground)
+                                            .child("NUMSTAT"),
+                                    )
+                                    .children(self.diff_stats.iter().map(|s| {
+                                        div()
+                                            .flex()
+                                            .gap_3()
+                                            .items_center()
+                                            .child(
+                                                div()
+                                                    .w(px(56.0))
+                                                    .text_right()
+                                                    .font_family("JetBrains Mono")
+                                                    .text_xs()
+                                                    .text_color(theme.foreground)
+                                                    .child(format!("+{}", s.added)),
+                                            )
+                                            .child(
+                                                div()
+                                                    .w(px(56.0))
+                                                    .text_right()
+                                                    .font_family("JetBrains Mono")
+                                                    .text_xs()
+                                                    .text_color(theme.danger)
+                                                    .child(format!("-{}", s.deleted)),
+                                            )
+                                            .child(
+                                                div()
+                                                    .font_family("JetBrains Mono")
+                                                    .text_xs()
+                                                    .text_color(theme.muted_foreground)
+                                                    .child(s.path.clone()),
+                                            )
+                                    }))
+                            } else {
+                                div()
+                                    .flex_1()
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .font_family("JetBrains Mono")
+                                    .text_xs()
+                                    .text_color(theme.muted_foreground)
+                                    .child("选择左侧提交查看详情")
+                            }),
+                    ),
+            )
+    }
+
     fn render_editor_view(&self, cx: &mut Context<Self>) -> Div {
         let theme = cx.theme().clone();
         div()
@@ -713,7 +1001,9 @@ impl XWikiApp {
                     .h_full()
                     .flex()
                     .flex_col()
-                    .child(if self.editing {
+                    .child(if self.history_open {
+                        self.render_history_view(cx).into_any_element()
+                    } else if self.editing {
                         self.render_editor_view(cx).into_any_element()
                     } else {
                         div()
@@ -750,14 +1040,33 @@ impl XWikiApp {
                                                     .child(path.clone()),
                                             )
                                             .child(
-                                                Button::new("start-edit")
-                                                    .rounded(px(6.0))
-                                                    .label("编辑")
-                                                    .on_click(cx.listener(
-                                                        |this, _, window, cx| {
-                                                            this.start_edit(window, cx)
-                                                        },
-                                                    )),
+                                                div()
+                                                    .flex()
+                                                    .gap_2()
+                                                    .child(
+                                                        Button::new("open-history")
+                                                            .rounded(px(6.0))
+                                                            .label("历史")
+                                                            .on_click(cx.listener(
+                                                                |this, _, window, cx| {
+                                                                    this.open_history(
+                                                                        window, cx,
+                                                                    )
+                                                                },
+                                                            )),
+                                                    )
+                                                    .child(
+                                                        Button::new("start-edit")
+                                                            .rounded(px(6.0))
+                                                            .label("编辑")
+                                                            .on_click(cx.listener(
+                                                                |this, _, window, cx| {
+                                                                    this.start_edit(
+                                                                        window, cx,
+                                                                    )
+                                                                },
+                                                            )),
+                                                    ),
                                             ),
                                     )
                                     .child(
