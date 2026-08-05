@@ -9,12 +9,24 @@ use gpui_component::{
     dialog::DialogContent,
     input::{Input, InputEvent, InputState},
     scroll::ScrollableElement as _,
+    notification::Notification,
     table::{Column, DataTable, TableDelegate, TableEvent, TableState},
     text::TextView,
     *,
 };
 
 use crate::api::{Client, dto};
+use crate::config;
+use crate::{TogglePalette, ToggleTheme};
+
+/// Command palette entries: (id, label, hint). Availability is decided by
+/// the current screen state in `palette_commands`.
+#[derive(Clone)]
+struct PaletteCmd {
+    id: &'static str,
+    label: &'static str,
+    hint: &'static str,
+}
 
 /// Application shell: login screen and the project workspace.
 /// Theme discipline (Hallmark · Cobalt): cool engineered paper, hairlines
@@ -337,7 +349,7 @@ impl XWikiApp {
         .detach();
     }
 
-    fn back_to_projects(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+    fn back_to_projects(&mut self, cx: &mut Context<Self>) {
         self.selected_project = None;
         self.tree_entries.clear();
         self.tree_path.clear();
@@ -348,7 +360,7 @@ impl XWikiApp {
 
     // ----- Edit flow: acquire lock -> edit -> changeset commit -----
 
-    fn start_edit(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+    fn start_edit(&mut self, cx: &mut Context<Self>) {
         let (Some(client), Some(project)) =
             (self.client.clone(), self.selected_project.clone())
         else {
@@ -426,7 +438,7 @@ impl XWikiApp {
         self.heartbeat_stop.store(true, Ordering::Relaxed);
     }
 
-    fn cancel_edit(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+    fn cancel_edit(&mut self, cx: &mut Context<Self>) {
         self.stop_heartbeat();
         self.editing = false;
         self.lock_held = false;
@@ -445,7 +457,7 @@ impl XWikiApp {
         cx.notify();
     }
 
-    fn save_edit(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+    fn save_edit(&mut self, cx: &mut Context<Self>) {
         let (Some(client), Some(project)) =
             (self.client.clone(), self.selected_project.clone())
         else {
@@ -498,6 +510,7 @@ impl XWikiApp {
     }
 
     fn after_save(&mut self, cx: &mut Context<Self>) {
+        self.notify("已提交".into(), cx);
         self.stop_heartbeat();
         self.editing = false;
         self.lock_held = false;
@@ -518,14 +531,14 @@ impl XWikiApp {
 
     // ----- History: commit list + per-commit diff stats -----
 
-    fn open_history(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+    fn open_history(&mut self, cx: &mut Context<Self>) {
         self.history_open = true;
         self.commit_detail = None;
         self.diff_stats.clear();
         self.load_commits(cx);
     }
 
-    fn close_history(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+    fn close_history(&mut self, cx: &mut Context<Self>) {
         self.history_open = false;
         cx.notify();
     }
@@ -610,8 +623,8 @@ impl XWikiApp {
                         Button::new("close-history")
                             .rounded(px(6.0))
                             .label("← 返回文档")
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.close_history(window, cx)
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.close_history(cx)
                             })),
                     ),
             )
@@ -795,6 +808,161 @@ impl XWikiApp {
             )
     }
 
+    // ----- Command palette (⌘K), theme toggle, notifications -----
+
+    fn palette_commands(&self) -> Vec<PaletteCmd> {
+        let mut cmds = Vec::new();
+        if self.selected_project.is_some() {
+            cmds.push(PaletteCmd {
+                id: "back",
+                label: "返回项目列表",
+                hint: "esc",
+            });
+            if !self.history_open {
+                cmds.push(PaletteCmd {
+                    id: "history",
+                    label: "查看历史",
+                    hint: "commits",
+                });
+            }
+            if !self.editing && self.doc_path.is_some() {
+                cmds.push(PaletteCmd {
+                    id: "edit",
+                    label: "编辑当前文档",
+                    hint: "lock + changeset",
+                });
+            }
+        } else if self.client.is_some() {
+            cmds.push(PaletteCmd {
+                id: "new-project",
+                label: "新建项目",
+                hint: "dialog",
+            });
+        }
+        cmds.push(PaletteCmd {
+            id: "theme",
+            label: "切换主题",
+            hint: "⌘⇧T",
+        });
+        cmds.push(PaletteCmd {
+            id: "logout",
+            label: "退出登录",
+            hint: "session",
+        });
+        cmds
+    }
+
+    fn toggle_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let handle = cx.entity();
+        let cmds = self.palette_commands();
+        let content_cmds = cmds.clone();
+        let content_handle = handle.clone();
+        window.open_dialog(cx, move |dialog, _window, cx| {
+            let theme = cx.theme();
+            dialog
+                .title(
+                    div()
+                        .font_family("JetBrains Mono")
+                        .text_xs()
+                        .text_color(theme.muted_foreground)
+                        .child("命令面板 · ⌘K"),
+                )
+                .content({
+                    let cc = content_cmds.clone();
+                    let ch = content_handle.clone();
+                    move |content, _window, cx| {
+                    let theme = cx.theme();
+                    let mut list = div().v_flex().gap_1().w_full();
+                    for c in &cc {
+                        let handle = ch.clone();
+                        let id = c.id;
+                        let label = c.label;
+                        let hint = c.hint;
+                        list = list.child(
+                            div()
+                                .id(format!("cmd-{id}"))
+                                .flex()
+                                .items_center()
+                                .justify_between()
+                                .px_2()
+                                .py_1_5()
+                                .rounded(px(4.0))
+                                .hover(|s| s.bg(theme.list_hover))
+                                .cursor_pointer()
+                                .child(
+                                    div()
+                                        .text_sm()
+                                        .text_color(theme.foreground)
+                                        .child(label),
+                                )
+                                .child(
+                                    div()
+                                        .font_family("JetBrains Mono")
+                                        .text_xs()
+                                        .text_color(theme.muted_foreground)
+                                        .child(hint),
+                                )
+                                .on_click(move |_, window, cx| {
+                                    window.close_dialog(cx);
+                                    let h = handle.clone();
+                                    let _ = h.update(cx, |app, cx| {
+                                        app.run_command(id, cx)
+                                    });
+                                }),
+                        );
+                    }
+                    content.child(list)
+                    }
+                })
+        });
+    }
+
+    fn run_command(&mut self, id: &str, cx: &mut Context<Self>) {
+        match id {
+            "back" => self.back_to_projects(cx),
+            "history" => self.open_history(cx),
+            "edit" => self.start_edit(cx),
+            "new-project" => {
+                let handle = cx.entity();
+                cx.defer(move |cx| {
+                    let inner = handle.clone();
+                    let _ = handle.update(cx, |app, cx| {
+                        let client = app.client.clone();
+                        if let Some(h) = cx.active_window() {
+                            let inner = inner.clone();
+                            let _ = cx.update_window(h, move |_v, window, cx| {
+                                open_new_project_dialog_window(window, cx, client, inner);
+                            });
+                        }
+                    });
+                });
+            }
+            "theme" => self.toggle_theme(cx),
+            "logout" => self.logout(cx),
+            _ => {}
+        }
+        cx.notify();
+    }
+
+    fn toggle_theme(&mut self, cx: &mut Context<Self>) {
+        let next = if cx.theme().is_dark() {
+            ThemeMode::Light
+        } else {
+            ThemeMode::Dark
+        };
+        config::save_theme(next.clone());
+        Theme::change(next, None, cx);
+        cx.notify();
+    }
+
+    fn notify(&mut self, message: String, cx: &mut Context<Self>) {
+        if let Some(h) = cx.active_window() {
+            let _ = cx.update_window(h, move |_view, window, cx| {
+                window.push_notification(Notification::success(message), cx);
+            });
+        }
+    }
+
     fn render_editor_view(&self, cx: &mut Context<Self>) -> Div {
         let theme = cx.theme().clone();
         div()
@@ -831,16 +999,16 @@ impl XWikiApp {
                             .primary()
                             .rounded(px(6.0))
                             .label("保存")
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.save_edit(window, cx)
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.save_edit(cx)
                             })),
                     )
                     .child(
                         Button::new("cancel-edit")
                             .rounded(px(6.0))
                             .label("取消")
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.cancel_edit(window, cx)
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.cancel_edit(cx)
                             })),
                     ),
             )
@@ -941,8 +1109,8 @@ impl XWikiApp {
                                 Button::new("back-projects")
                                     .rounded(px(6.0))
                                     .label("← 项目")
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.back_to_projects(window, cx)
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.back_to_projects(cx)
                                     })),
                             ),
                     )
@@ -1048,10 +1216,8 @@ impl XWikiApp {
                                                             .rounded(px(6.0))
                                                             .label("历史")
                                                             .on_click(cx.listener(
-                                                                |this, _, window, cx| {
-                                                                    this.open_history(
-                                                                        window, cx,
-                                                                    )
+                                                                |this, _, _, cx| {
+                                                                    this.open_history(cx)
                                                                 },
                                                             )),
                                                     )
@@ -1060,10 +1226,8 @@ impl XWikiApp {
                                                             .rounded(px(6.0))
                                                             .label("编辑")
                                                             .on_click(cx.listener(
-                                                                |this, _, window, cx| {
-                                                                    this.start_edit(
-                                                                        window, cx,
-                                                                    )
+                                                                |this, _, _, cx| {
+                                                                    this.start_edit(cx)
                                                                 },
                                                             )),
                                                     ),
@@ -1167,7 +1331,7 @@ impl XWikiApp {
         .detach();
     }
 
-    fn logout(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+    fn logout(&mut self, cx: &mut Context<Self>) {
         self.screen = Screen::Login;
         self.client = None;
         self.username.clear();
@@ -1182,104 +1346,7 @@ impl XWikiApp {
             return;
         };
         let handle = cx.entity();
-        window.open_dialog(cx, move |dialog, window, cx| {
-            let name_state =
-                cx.new(|cx| InputState::new(window, cx).placeholder("docs-site"));
-            let desc_state = cx
-                .new(|cx| InputState::new(window, cx).placeholder("项目描述（可选）"));
-
-            let content_name = name_state.clone();
-            let content_desc = desc_state.clone();
-            let content_builder =
-                move |content: DialogContent, _: &mut Window, cx: &mut App| {
-                let theme = cx.theme();
-                content
-                    .child(
-                        div()
-                            .v_flex()
-                            .gap_2()
-                            .w_full()
-                            .child(
-                                div()
-                                    .font_family("JetBrains Mono")
-                                    .text_xs()
-                                    .text_color(theme.muted_foreground)
-                                    .child("名称"),
-                            )
-                            .child(Input::new(&content_name).w_full())
-                            .child(
-                                div()
-                                    .font_family("JetBrains Mono")
-                                    .text_xs()
-                                    .text_color(theme.muted_foreground)
-                                    .child("描述"),
-                            )
-                            .child(Input::new(&content_desc).w_full()),
-                    )
-            };
-
-            let cancel = Button::new("cancel-project")
-                .rounded(px(6.0))
-                .label("取消")
-                .on_click(move |_, window, cx| window.close_dialog(cx));
-
-            let create_name = name_state.clone();
-            let create_desc = desc_state.clone();
-            let create_client = client.clone();
-            let app_handle = handle.clone();
-            let create = Button::new("create-project")
-                .primary()
-                .rounded(px(6.0))
-                .label("创建")
-                .on_click(move |_, window, cx| {
-                    let name = create_name.read(cx).value().to_string();
-                    if name.trim().is_empty() {
-                        return;
-                    }
-                    let desc = create_desc.read(cx).value().to_string();
-                    let c = create_client.clone();
-                    let h = app_handle.clone();
-                    cx.spawn(async move |cx| {
-                        match c.create_project(name.trim(), desc.trim()).await {
-                            Ok(p) => {
-                                let _ = h.update(cx, |app, cx| {
-                                    app.projects
-                                        .write()
-                                        .unwrap()
-                                        .push(ProjectRow::from_dto(&p));
-                                    app.table.update(cx, |s, cx| s.refresh(cx));
-                                    cx.notify();
-                                });
-                            }
-                            Err(e) => {
-                                let _ = h.update(cx, |app, cx| {
-                                    app.login_error = Some(e.to_string());
-                                    cx.notify();
-                                });
-                            }
-                        }
-                    })
-                    .detach();
-                    window.close_dialog(cx);
-                });
-
-            dialog
-                .title(
-                    div()
-                        .text_lg()
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .child("新建项目"),
-                )
-                .content(content_builder)
-                .footer(
-                    h_flex()
-                        .gap_2()
-                        .justify_end()
-                        .w_full()
-                        .child(cancel)
-                        .child(create),
-                )
-        });
+        open_new_project_dialog_window(window, cx, Some(client), handle);
     }
 
     fn eyebrow(&self, label: &'static str, cx: &Context<Self>) -> Div {
@@ -1430,8 +1497,8 @@ impl XWikiApp {
                                 Button::new("logout")
                                     .rounded(px(6.0))
                                     .label("退出")
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.logout(window, cx)
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.logout(cx)
                                     })),
                             ),
                     ),
@@ -1543,15 +1610,137 @@ impl XWikiApp {
 
 impl Render for XWikiApp {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        match self.screen {
-            Screen::Login => self.render_login(cx),
-            Screen::Workspace => {
-                if self.selected_project.is_some() {
-                    self.render_doc_view(cx)
-                } else {
-                    self.render_workspace(cx)
+        // ⌘K / ⌘⇧T dispatch here; bindings live on the root element so they
+        // register during paint (Window::on_action requires it).
+        let palette_weak = cx.weak_entity();
+        let theme_weak = cx.weak_entity();
+        div()
+            .id("app-root")
+            .size_full()
+            .on_action(move |_: &TogglePalette, window, cx| {
+                let _ = palette_weak.update(cx, |app, cx| app.toggle_palette(window, cx));
+            })
+            .on_action(move |_: &ToggleTheme, _window, cx| {
+                let _ = theme_weak.update(cx, |app, cx| app.toggle_theme(cx));
+            })
+            .child(match self.screen {
+                Screen::Login => self.render_login(cx).into_any_element(),
+                Screen::Workspace => {
+                    if self.selected_project.is_some() {
+                        self.render_doc_view(cx).into_any_element()
+                    } else {
+                        self.render_workspace(cx).into_any_element()
+                    }
                 }
-            }
-        }
+            })
     }
 }
+
+fn open_new_project_dialog_window(
+    window: &mut Window,
+    cx: &mut App,
+    client: Option<Client>,
+    handle: Entity<XWikiApp>,
+) {
+    let Some(client) = client else {
+        return;
+    };
+    window.open_dialog(cx, move |dialog, window, cx| {
+            let name_state =
+                cx.new(|cx| InputState::new(window, cx).placeholder("docs-site"));
+            let desc_state = cx
+                .new(|cx| InputState::new(window, cx).placeholder("项目描述（可选）"));
+
+            let content_name = name_state.clone();
+            let content_desc = desc_state.clone();
+            let content_builder =
+                move |content: DialogContent, _: &mut Window, cx: &mut App| {
+                let theme = cx.theme();
+                content
+                    .child(
+                        div()
+                            .v_flex()
+                            .gap_2()
+                            .w_full()
+                            .child(
+                                div()
+                                    .font_family("JetBrains Mono")
+                                    .text_xs()
+                                    .text_color(theme.muted_foreground)
+                                    .child("名称"),
+                            )
+                            .child(Input::new(&content_name).w_full())
+                            .child(
+                                div()
+                                    .font_family("JetBrains Mono")
+                                    .text_xs()
+                                    .text_color(theme.muted_foreground)
+                                    .child("描述"),
+                            )
+                            .child(Input::new(&content_desc).w_full()),
+                    )
+            };
+
+            let cancel = Button::new("cancel-project")
+                .rounded(px(6.0))
+                .label("取消")
+                .on_click(move |_, window, cx| window.close_dialog(cx));
+
+            let create_name = name_state.clone();
+            let create_desc = desc_state.clone();
+            let create_client = client.clone();
+            let app_handle = handle.clone();
+            let create = Button::new("create-project")
+                .primary()
+                .rounded(px(6.0))
+                .label("创建")
+                .on_click(move |_, window, cx| {
+                    let name = create_name.read(cx).value().to_string();
+                    if name.trim().is_empty() {
+                        return;
+                    }
+                    let desc = create_desc.read(cx).value().to_string();
+                    let c = create_client.clone();
+                    let h = app_handle.clone();
+                    cx.spawn(async move |cx| {
+                        match c.create_project(name.trim(), desc.trim()).await {
+                            Ok(p) => {
+                                let _ = h.update(cx, |app, cx| {
+                                    app.projects
+                                        .write()
+                                        .unwrap()
+                                        .push(ProjectRow::from_dto(&p));
+                                    app.table.update(cx, |s, cx| s.refresh(cx));
+                                    cx.notify();
+                                });
+                            }
+                            Err(e) => {
+                                let _ = h.update(cx, |app, cx| {
+                                    app.login_error = Some(e.to_string());
+                                    cx.notify();
+                                });
+                            }
+                        }
+                    })
+                    .detach();
+                    window.close_dialog(cx);
+                });
+
+            dialog
+                .title(
+                    div()
+                        .text_lg()
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .child("新建项目"),
+                )
+                .content(content_builder)
+                .footer(
+                    h_flex()
+                        .gap_2()
+                        .justify_end()
+                        .w_full()
+                        .child(cancel)
+                        .child(create),
+                )
+        });
+    }

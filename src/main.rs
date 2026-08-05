@@ -5,8 +5,11 @@ use gpui_component::*;
 
 mod api;
 mod app;
+mod config;
 
 use app::XWikiApp;
+
+actions!(app_actions, [TogglePalette, ToggleTheme]);
 
 fn main() {
     gpui_platform::application().run(move |cx| {
@@ -14,7 +17,7 @@ fn main() {
         gpui_component::init(cx);
 
         // Load the Cobalt theme (cool engineered paper, one electric-blue
-        // signal accent, hairlines over shadows) as the active light theme.
+        // signal accent, hairlines over shadows) as the light theme.
         let registry = ThemeRegistry::global_mut(cx);
         if let Err(err) = registry.load_themes_from_str(include_str!("themes/cobalt.json")) {
             eprintln!("cobalt theme failed to load: {err}");
@@ -22,7 +25,14 @@ fn main() {
         if let Some(cobalt) = registry.themes().get("Cobalt Light").cloned() {
             Theme::global_mut(cx).light_theme = cobalt;
         }
-        Theme::change(ThemeMode::Light, None, cx);
+        Theme::change(config::load_theme(), None, cx);
+
+        cx.bind_keys([
+            KeyBinding::new("cmd-k", TogglePalette, None),
+            KeyBinding::new("ctrl-k", TogglePalette, None),
+            KeyBinding::new("cmd-shift-t", ToggleTheme, None),
+            KeyBinding::new("ctrl-shift-t", ToggleTheme, None),
+        ]);
 
         cx.spawn(async move |cx| {
             cx.open_window(WindowOptions::default(), |window, cx| {
