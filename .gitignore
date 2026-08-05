@@ -1,2 +1,20 @@
+# Rust (app branch)
 /target
 Cargo.lock
+
+# Local Pi runtime state
+.atl/
+.pi-subagents/
+.review-input/
+
+# Editor
+.vscode/
+
+# AgentDocs runtime (Go branch)
+/data/
+/agentdocs
+*.log
+
+# Web build output (Go branch)
+web/node_modules/
+web/dist/
