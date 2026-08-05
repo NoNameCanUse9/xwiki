@@ -10,6 +10,19 @@ fn config_path() -> PathBuf {
     PathBuf::from(home).join(".config/agentdocs-client")
 }
 
+/// Saved server address (CLI + GUI login prefill).
+pub fn load_server() -> String {
+    std::fs::read_to_string(config_path().join("server"))
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|_| "http://127.0.0.1:9090".into())
+}
+
+pub fn save_server(url: &str) {
+    let dir = config_path();
+    let _ = std::fs::create_dir_all(&dir);
+    let _ = std::fs::write(dir.join("server"), url);
+}
+
 /// Returns the persisted theme mode, defaulting to System.
 pub fn load_theme() -> ThemeMode {
     match std::fs::read_to_string(config_path().join("theme"))

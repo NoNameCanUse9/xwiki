@@ -44,13 +44,26 @@ pub struct Client {
 
 impl Client {
     pub fn new(server: &str) -> Self {
+        Self::with_token(server, None)
+    }
+
+    pub fn with_token(server: &str, token: Option<String>) -> Self {
         let base = server.trim_end_matches('/').to_string();
+        let mut builder = reqwest::Client::builder().cookie_store(true);
+        if let Some(t) = token {
+            builder = builder.default_headers({
+                let mut h = reqwest::header::HeaderMap::new();
+                h.insert(
+                    reqwest::header::AUTHORIZATION,
+                    reqwest::header::HeaderValue::from_str(&format!("Bearer {t}"))
+                        .expect("bearer header"),
+                );
+                h
+            });
+        }
         Self {
             base,
-            http: reqwest::Client::builder()
-                .cookie_store(true)
-                .build()
-                .expect("reqwest client"),
+            http: builder.build().expect("reqwest client"),
         }
     }
 
@@ -208,7 +221,8 @@ impl Client {
     }
 
     pub async fn acquire_lock(&self, project_id: &str, path: &str) -> Result<dto::Lock, ApiError> {
-        self.send(
+        let resp: dto::LockResponse = self
+            .send(
             self.http
                 .post(self.url(&format!(
                     "/api/v1/projects/{}/locks",
@@ -216,7 +230,8 @@ impl Client {
                 )))
                 .query(&[("path", path)]),
         )
-        .await
+        .await?;
+        Ok(resp.lock)
     }
 
     pub async fn heartbeat_lock(
@@ -224,7 +239,8 @@ impl Client {
         project_id: &str,
         path: &str,
     ) -> Result<dto::Lock, ApiError> {
-        self.send(
+        let resp: dto::LockResponse = self
+            .send(
             self.http
                 .post(self.url(&format!(
                     "/api/v1/projects/{}/locks/heartbeat",
@@ -232,7 +248,8 @@ impl Client {
                 )))
                 .query(&[("path", path)]),
         )
-        .await
+        .await?;
+        Ok(resp.lock)
     }
 
     pub async fn release_lock(&self, project_id: &str, path: &str) -> Result<bool, ApiError> {
@@ -282,6 +299,219 @@ impl Client {
             )
             .await?;
         Ok(resp.commit)
+    }
+
+    pub async fn project(&self, project_id: &str) -> Result<dto::Project, ApiError> {
+        let resp: dto::ProjectResponse = self
+            .send(
+                self.http
+                    .get(self.url(&format!("/api/v1/projects/{project_id}"))),
+            )
+            .await?;
+        Ok(resp.project)
+    }
+
+    pub async fn set_archived(
+        &self,
+        project_id: &str,
+        archived: bool,
+    ) -> Result<dto::Project, ApiError> {
+        let path = if archived { "archive" } else { "unarchive" };
+        let resp: dto::ProjectResponse = self
+            .send(
+                self.http
+                    .post(self.url(&format!(
+                        "/api/v1/projects/{project_id}/{path}"
+                    ))),
+            )
+            .await?;
+        Ok(resp.project)
+    }
+
+    async fn changeset_one(
+        &self,
+        project_id: &str,
+        path: &str,
+        op: &str,
+        content: Option<String>,
+        new_path: Option<String>,
+        message: &str,
+    ) -> Result<dto::ChangesetResult, ApiError> {
+        let resp: dto::RevisionResponse = self
+            .send(
+                self.http
+                    .get(self.url(&format!(
+                        "/api/v1/projects/{project_id}/revision"
+                    ))),
+            )
+            .await?;
+        self.apply_changeset(
+            project_id,
+            &resp.revision,
+            message,
+            vec![dto::Change {
+                op: op.into(),
+                path: path.into(),
+                new_path,
+                content,
+            }],
+        )
+        .await
+    }
+
+    pub async fn edit_doc(
+        &self,
+        project_id: &str,
+        path: &str,
+        op: &str,
+        content: &str,
+        message: &str,
+    ) -> Result<dto::ChangesetResult, ApiError> {
+        self.changeset_one(
+            project_id,
+            path,
+            op,
+            Some(content.to_string()),
+            None,
+            message,
+        )
+        .await
+    }
+
+    pub async fn delete_doc(
+        &self,
+        project_id: &str,
+        path: &str,
+        message: &str,
+    ) -> Result<dto::ChangesetResult, ApiError> {
+        self.changeset_one(project_id, path, "delete", None, None, message)
+            .await
+    }
+
+    pub async fn move_doc(
+        &self,
+        project_id: &str,
+        from: &str,
+        to: &str,
+        message: &str,
+    ) -> Result<dto::ChangesetResult, ApiError> {
+        self.changeset_one(project_id, from, "move", None, Some(to.to_string()), message)
+            .await
+    }
+
+    pub async fn search(
+        &self,
+        project_id: &str,
+        q: &str,
+    ) -> Result<Vec<dto::SearchResult>, ApiError> {
+        let resp: dto::SearchResponse = self
+            .send(
+                self.http
+                    .get(self.url(&format!(
+                        "/api/v1/projects/{project_id}/search"
+                    )))
+                    .query(&[("q", q)]),
+            )
+            .await?;
+        Ok(resp.results)
+    }
+
+    pub async fn tokens(&self) -> Result<Vec<dto::Token>, ApiError> {
+        let resp: dto::TokenListResponse = self
+            .send(self.http.get(self.url("/api/v1/tokens")))
+            .await?;
+        Ok(resp.tokens)
+    }
+
+    pub async fn create_token(
+        &self,
+        name: &str,
+        scope: &str,
+        project_ids: Vec<String>,
+        path_prefixes: Vec<String>,
+    ) -> Result<(dto::Token, String), ApiError> {
+        #[derive(Serialize)]
+        struct Body<'a> {
+            name: &'a str,
+            scope: &'a str,
+            project_ids: Vec<String>,
+            path_prefixes: Vec<String>,
+        }
+        let resp: dto::TokenCreateResponse = self
+            .send(
+                self.http
+                    .post(self.url("/api/v1/tokens"))
+                    .json(&Body {
+                        name,
+                        scope,
+                        project_ids,
+                        path_prefixes,
+                    }),
+            )
+            .await?;
+        Ok((resp.token, resp.secret))
+    }
+
+    pub async fn revoke_token(&self, id: &str) -> Result<(), ApiError> {
+        self.send(
+            self.http
+                .delete(self.url(&format!("/api/v1/tokens/{id}"))),
+        )
+        .await
+    }
+
+    pub async fn users(&self) -> Result<Vec<dto::User>, ApiError> {
+        let resp: dto::UsersResponse = self
+            .send(self.http.get(self.url("/api/v1/users")))
+            .await?;
+        Ok(resp.users)
+    }
+
+    pub async fn create_user(
+        &self,
+        username: &str,
+        password: &str,
+    ) -> Result<dto::User, ApiError> {
+        #[derive(Serialize)]
+        struct Body<'a> {
+            username: &'a str,
+            password: &'a str,
+        }
+        let resp: dto::UserResponse = self
+            .send(
+                self.http
+                    .post(self.url("/api/v1/users"))
+                    .json(&Body { username, password }),
+            )
+            .await?;
+        Ok(resp.user)
+    }
+
+    pub async fn set_user_enabled(
+        &self,
+        id: &str,
+        enabled: bool,
+    ) -> Result<dto::User, ApiError> {
+        let action = if enabled { "enable" } else { "disable" };
+        let resp: dto::UserResponse = self
+            .send(
+                self.http
+                    .post(self.url(&format!("/api/v1/users/{id}/{action}"))),
+            )
+            .await?;
+        Ok(resp.user)
+    }
+
+    pub async fn audit(&self, project_id: &str) -> Result<Vec<dto::AuditEntry>, ApiError> {
+        let resp: dto::AuditResponse = self
+            .send(
+                self.http
+                    .get(self.url(&format!(
+                        "/api/v1/projects/{project_id}/audit"
+                    ))),
+            )
+            .await?;
+        Ok(resp.entries)
     }
 
     pub async fn diff_stats(
@@ -353,7 +583,7 @@ pub mod dto {
         pub user: User,
     }
 
-    #[derive(Debug, Deserialize)]
+    #[derive(Debug, Deserialize, Serialize)]
     pub struct Project {
         pub id: String,
         pub name: String,
@@ -379,7 +609,7 @@ pub mod dto {
         pub project: Project,
     }
 
-    #[derive(Debug, Deserialize)]
+    #[derive(Debug, Deserialize, Serialize)]
     pub struct TreeEntry {
         pub name: String,
         pub r#type: String,
@@ -445,6 +675,11 @@ pub mod dto {
     }
 
     #[derive(Debug, Deserialize)]
+    pub struct LockResponse {
+        pub lock: Lock,
+    }
+
+    #[derive(Debug, Deserialize)]
     pub struct ReleasedResponse {
         pub released: bool,
     }
@@ -497,6 +732,68 @@ pub mod dto {
         pub format: String,
         #[serde(default, deserialize_with = "crate::api::de_null_default")]
         pub stats: Vec<DiffStat>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    pub struct SearchResult {
+        pub path: String,
+        pub snippet: String,
+    }
+
+    #[derive(Debug, Deserialize)]
+    pub struct SearchResponse {
+        #[serde(default, deserialize_with = "crate::api::de_null_default")]
+        pub results: Vec<SearchResult>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    pub struct Token {
+        pub id: String,
+        pub name: String,
+        pub scope: String,
+        #[serde(default, deserialize_with = "crate::api::de_null_default")]
+        pub project_ids: Vec<String>,
+        #[serde(default)]
+        pub created_at: String,
+        #[serde(default)]
+        pub revoked_at: String,
+    }
+
+    #[derive(Debug, Deserialize)]
+    pub struct TokenListResponse {
+        #[serde(default, deserialize_with = "crate::api::de_null_default")]
+        pub tokens: Vec<Token>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    pub struct TokenCreateResponse {
+        pub token: Token,
+        pub secret: String,
+    }
+
+    #[derive(Debug, Deserialize)]
+    pub struct UsersResponse {
+        #[serde(default, deserialize_with = "crate::api::de_null_default")]
+        pub users: Vec<User>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    pub struct AuditEntry {
+        pub id: String,
+        pub actor_type: String,
+        pub actor_id: String,
+        #[serde(default)]
+        pub action: String,
+        #[serde(default)]
+        pub path: String,
+        #[serde(default)]
+        pub created_at: String,
+    }
+
+    #[derive(Debug, Deserialize)]
+    pub struct AuditResponse {
+        #[serde(default, deserialize_with = "crate::api::de_null_default")]
+        pub entries: Vec<AuditEntry>,
     }
 
     #[derive(Debug, Deserialize)]

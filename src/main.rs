@@ -5,6 +5,7 @@ use gpui_component::*;
 
 mod api;
 mod app;
+mod cli;
 mod config;
 
 use app::XWikiApp;
@@ -12,6 +13,14 @@ use app::XWikiApp;
 actions!(app_actions, [TogglePalette, ToggleTheme]);
 
 fn main() {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if !args.is_empty() {
+        // With subcommands the binary acts as the agentdocs-client CLI;
+        // `gui` forces the desktop app, bare invocation starts the GUI.
+        if args[0] != "gui" {
+            std::process::exit(cli::run(args));
+        }
+    }
     gpui_platform::application().run(move |cx| {
         // Must be called before any GPUI Component features are used.
         gpui_component::init(cx);
