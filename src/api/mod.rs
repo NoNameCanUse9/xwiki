@@ -170,6 +170,84 @@ impl Client {
         )
         .await
     }
+
+    pub async fn revision(&self, project_id: &str) -> Result<String, ApiError> {
+        let resp: dto::RevisionResponse = self
+            .send(
+                self.http
+                    .get(self.url(&format!(
+                        "/api/v1/projects/{}/revision",
+                        project_id
+                    ))),
+            )
+            .await?;
+        Ok(resp.revision)
+    }
+
+    pub async fn apply_changeset(
+        &self,
+        project_id: &str,
+        base_revision: &str,
+        message: &str,
+        changes: Vec<dto::Change>,
+    ) -> Result<dto::ChangesetResult, ApiError> {
+        let body = dto::ChangesetRequest {
+            base_revision: base_revision.to_string(),
+            message: message.to_string(),
+            changes,
+        };
+        self.send(
+            self.http
+                .post(self.url(&format!(
+                    "/api/v1/projects/{}/changesets",
+                    project_id
+                )))
+                .json(&body),
+        )
+        .await
+    }
+
+    pub async fn acquire_lock(&self, project_id: &str, path: &str) -> Result<dto::Lock, ApiError> {
+        self.send(
+            self.http
+                .post(self.url(&format!(
+                    "/api/v1/projects/{}/locks",
+                    project_id
+                )))
+                .query(&[("path", path)]),
+        )
+        .await
+    }
+
+    pub async fn heartbeat_lock(
+        &self,
+        project_id: &str,
+        path: &str,
+    ) -> Result<dto::Lock, ApiError> {
+        self.send(
+            self.http
+                .post(self.url(&format!(
+                    "/api/v1/projects/{}/locks/heartbeat",
+                    project_id
+                )))
+                .query(&[("path", path)]),
+        )
+        .await
+    }
+
+    pub async fn release_lock(&self, project_id: &str, path: &str) -> Result<bool, ApiError> {
+        let resp: dto::ReleasedResponse = self
+            .send(
+                self.http
+                    .delete(self.url(&format!(
+                        "/api/v1/projects/{}/locks",
+                        project_id
+                    )))
+                    .query(&[("path", path)]),
+            )
+            .await?;
+        Ok(resp.released)
+    }
 }
 
 fn network_error(e: reqwest::Error) -> ApiError {
@@ -196,7 +274,7 @@ where
 /// rest, so field-level dead-code warnings are silenced.
 #[allow(dead_code)]
 pub mod dto {
-    use serde::Deserialize;
+    use serde::{Deserialize, Serialize};
 
     #[derive(Debug, Deserialize)]
     pub struct ApiErrorBody {
@@ -272,6 +350,50 @@ pub mod dto {
         pub content: String,
         #[serde(default)]
         pub encoding: String,
+    }
+
+    #[derive(Debug, Deserialize)]
+    pub struct RevisionResponse {
+        pub revision: String,
+    }
+
+    #[derive(Debug, Clone, Serialize)]
+    pub struct Change {
+        pub op: String,
+        pub path: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub new_path: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub content: Option<String>,
+    }
+
+    #[derive(Debug, Serialize)]
+    pub struct ChangesetRequest {
+        pub base_revision: String,
+        pub message: String,
+        pub changes: Vec<Change>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    pub struct ChangesetResult {
+        pub commit: String,
+        pub revision: String,
+        #[serde(default)]
+        pub preview: Option<serde_json::Value>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    pub struct Lock {
+        pub path: String,
+        pub user_id: String,
+        pub username: String,
+        pub acquired_at: String,
+        pub expires_at: String,
+    }
+
+    #[derive(Debug, Deserialize)]
+    pub struct ReleasedResponse {
+        pub released: bool,
     }
 
     #[derive(Debug, Deserialize)]

@@ -1,4 +1,6 @@
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
+use std::time::Duration;
 
 use gpui::*;
 use gpui::StatefulInteractiveElement;
@@ -38,6 +40,14 @@ pub struct XWikiApp {
     doc_path: Option<String>,
     doc_content: String,
     doc_loading: bool,
+    // Edit state: page lock + markdown editor + commit message.
+    editing: bool,
+    edit_path: Option<String>,
+    lock_held: bool,
+    heartbeat_stop: Arc<AtomicBool>,
+    status_msg: Option<String>,
+    commit_msg: Entity<InputState>,
+    editor_input: Entity<InputState>,
     /// Keep input subscriptions alive with the app entity.
     _subscriptions: Vec<Subscription>,
 }
@@ -171,6 +181,15 @@ impl XWikiApp {
         let filter_input =
             cx.new(|cx| InputState::new(window, cx).placeholder("搜索项目…"));
 
+        let commit_msg = cx.new(|cx| {
+            InputState::new(window, cx).placeholder("提交消息…")
+        });
+        let editor_input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .multi_line(true)
+                .placeholder("# 用 Markdown 写作…")
+        });
+
         let table =
             cx.new(|cx| TableState::new(ProjectsTable::new(projects.clone()), window, cx));
 
@@ -228,6 +247,13 @@ impl XWikiApp {
             doc_path: None,
             doc_content: String::new(),
             doc_loading: false,
+            editing: false,
+            edit_path: None,
+            lock_held: false,
+            heartbeat_stop: Arc::new(AtomicBool::new(true)),
+            status_msg: None,
+            commit_msg,
+            editor_input,
             _subscriptions: subs,
         }
     }
@@ -309,6 +335,244 @@ impl XWikiApp {
         self.doc_path = None;
         self.doc_content.clear();
         cx.notify();
+    }
+
+    // ----- Edit flow: acquire lock -> edit -> changeset commit -----
+
+    fn start_edit(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        let (Some(client), Some(project)) =
+            (self.client.clone(), self.selected_project.clone())
+        else {
+            return;
+        };
+        let Some(path) = self.doc_path.clone() else {
+            return;
+        };
+        self.status_msg = None;
+        cx.spawn(async move |this, cx| {
+            match client.acquire_lock(&project, &path).await {
+                Ok(_) => {
+                    let _ = this.update(cx, |app, cx| app.begin_editing(&path, cx));
+                }
+                Err(e) => {
+                    let _ = this.update(cx, |app, cx| {
+                        app.status_msg = Some(format!("无法编辑: {e}"));
+                        cx.notify();
+                    });
+                }
+            }
+        })
+        .detach();
+    }
+
+    fn begin_editing(&mut self, path: &str, cx: &mut Context<Self>) {
+        let content = self.doc_content.clone();
+        let editor = self.editor_input.clone();
+        let commit = self.commit_msg.clone();
+        if let Some(handle) = cx.active_window() {
+            let _ = cx.update_window(handle, |_view, window, cx| {
+                editor.update(cx, |s, cx| s.set_value(content, window, cx));
+                commit.update(cx, |s, cx| s.set_value(String::new(), window, cx));
+            });
+        }
+        self.edit_path = Some(path.to_string());
+        self.editing = true;
+        self.lock_held = true;
+        self.start_heartbeat(cx);
+        cx.notify();
+    }
+
+    fn start_heartbeat(&mut self, cx: &mut Context<Self>) {
+        let (Some(client), Some(project), Some(path)) = (
+            self.client.clone(),
+            self.selected_project.clone(),
+            self.edit_path.clone(),
+        ) else {
+            return;
+        };
+        let stop = self.heartbeat_stop.clone();
+        stop.store(false, Ordering::Relaxed);
+        cx.spawn(async move |this, cx| {
+            loop {
+                if stop.load(Ordering::Relaxed) {
+                    break;
+                }
+                cx.background_executor().timer(Duration::from_secs(25)).await;
+                if stop.load(Ordering::Relaxed) {
+                    break;
+                }
+                if client.heartbeat_lock(&project, &path).await.is_err() {
+                    let _ = this.update(cx, |app, cx| {
+                        app.status_msg = Some("锁续租失败".into());
+                        cx.notify();
+                    });
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
+    fn stop_heartbeat(&self) {
+        self.heartbeat_stop.store(true, Ordering::Relaxed);
+    }
+
+    fn cancel_edit(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        self.stop_heartbeat();
+        self.editing = false;
+        self.lock_held = false;
+        let (client, project, path) = (
+            self.client.clone(),
+            self.selected_project.clone(),
+            self.edit_path.take(),
+        );
+        if let (Some(client), Some(project), Some(path)) = (client, project, path) {
+            cx.spawn(async move |_this, _cx| {
+                let _ = client.release_lock(&project, &path).await;
+            })
+            .detach();
+        }
+        self.status_msg = None;
+        cx.notify();
+    }
+
+    fn save_edit(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        let (Some(client), Some(project)) =
+            (self.client.clone(), self.selected_project.clone())
+        else {
+            return;
+        };
+        let Some(path) = self.edit_path.clone() else {
+            return;
+        };
+        let content = self.editor_input.read(cx).value().to_string();
+        let msg = self.commit_msg.read(cx).value().to_string();
+        if msg.trim().is_empty() {
+            self.status_msg = Some("需要提交消息".into());
+            cx.notify();
+            return;
+        }
+        self.status_msg = None;
+        cx.spawn(async move |this, cx| {
+            let base = match client.revision(&project).await {
+                Ok(rev) => rev,
+                Err(e) => {
+                    let _ = this.update(cx, |app, cx| {
+                        app.status_msg = Some(format!("读取 revision 失败: {e}"));
+                        cx.notify();
+                    });
+                    return;
+                }
+            };
+            let change = dto::Change {
+                op: "update".into(),
+                path: path.clone(),
+                new_path: None,
+                content: Some(content),
+            };
+            match client
+                .apply_changeset(&project, &base, msg.trim(), vec![change])
+                .await
+            {
+                Ok(_) => {
+                    let _ = this.update(cx, |app, cx| app.after_save(cx));
+                }
+                Err(e) => {
+                    let _ = this.update(cx, |app, cx| {
+                        app.status_msg = Some(format!("提交失败: {e}"));
+                        cx.notify();
+                    });
+                }
+            }
+        })
+        .detach();
+    }
+
+    fn after_save(&mut self, cx: &mut Context<Self>) {
+        self.stop_heartbeat();
+        self.editing = false;
+        self.lock_held = false;
+        let (client, project, path) = (
+            self.client.clone(),
+            self.selected_project.clone(),
+            self.edit_path.take(),
+        );
+        if let (Some(client), Some(project), Some(path)) = (client, project, path) {
+            cx.spawn(async move |_this, _cx| {
+                let _ = client.release_lock(&project, &path).await;
+            })
+            .detach();
+        }
+        let path = self.doc_path.clone().unwrap_or_default();
+        self.open_doc(&path, cx);
+    }
+
+    fn render_editor_view(&self, cx: &mut Context<Self>) -> Div {
+        let theme = cx.theme().clone();
+        div()
+            .flex_1()
+            .h_full()
+            .flex()
+            .flex_col()
+            .child(
+                // Edit toolbar: path, commit message, save/cancel.
+                div()
+                    .h(px(44.0))
+                    .px_4()
+                    .flex()
+                    .items_center()
+                    .gap_3()
+                    .border_b_1()
+                    .border_color(theme.border)
+                    .bg(theme.sidebar)
+                    .child(
+                        div()
+                            .font_family("JetBrains Mono")
+                            .text_xs()
+                            .text_color(theme.muted_foreground)
+                            .child(self.edit_path.clone().unwrap_or_default()),
+                    )
+                    .child(div().flex_1())
+                    .child(
+                        div()
+                            .w(px(320.0))
+                            .child(Input::new(&self.commit_msg)),
+                    )
+                    .child(
+                        Button::new("save-edit")
+                            .primary()
+                            .rounded(px(6.0))
+                            .label("保存")
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.save_edit(window, cx)
+                            })),
+                    )
+                    .child(
+                        Button::new("cancel-edit")
+                            .rounded(px(6.0))
+                            .label("取消")
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.cancel_edit(window, cx)
+                            })),
+                    ),
+            )
+            .child(if let Some(msg) = &self.status_msg {
+                div()
+                    .px_4()
+                    .py_1()
+                    .font_family("JetBrains Mono")
+                    .text_xs()
+                    .text_color(theme.danger)
+                    .child(msg.clone())
+            } else {
+                div()
+            })
+            .child(
+                div()
+                    .flex_1()
+                    .p_4()
+                    .child(Input::new(&self.editor_input).h_full().w_full()),
+            )
     }
 
     /// Breadcrumb trail for the current tree directory; clicking a crumb
@@ -443,49 +707,78 @@ impl XWikiApp {
                     .child(div().flex_1().overflow_y_scrollbar().child(self.render_tree(cx))),
             )
             .child(
-                // Content pane: markdown rendering.
+                // Content pane: markdown rendering (or the editor).
                 div()
                     .flex_1()
                     .h_full()
                     .flex()
                     .flex_col()
-                    .overflow_y_scrollbar()
-                    .child(if self.doc_loading {
-                        div()
-                            .p_6()
-                            .font_family("JetBrains Mono")
-                            .text_xs()
-                            .text_color(theme.muted_foreground)
-                            .child("加载中…")
-                    } else if let Some(path) = &self.doc_path {
-                        div()
-                            .p_6()
-                            .flex_1()
-                            .child(
-                                div()
-                                    .pb_4()
-                                    .mb_4()
-                                    .border_b_1()
-                                    .border_color(theme.border)
-                                    .font_family("JetBrains Mono")
-                                    .text_xs()
-                                    .text_color(theme.muted_foreground)
-                                    .child(path.clone()),
-                            )
-                            .child(
-                                TextView::markdown("doc-content", self.doc_content.clone())
-                                    .w_full(),
-                            )
+                    .child(if self.editing {
+                        self.render_editor_view(cx).into_any_element()
                     } else {
                         div()
                             .flex_1()
+                            .h_full()
                             .flex()
-                            .items_center()
-                            .justify_center()
-                            .font_family("JetBrains Mono")
-                            .text_xs()
-                            .text_color(theme.muted_foreground)
-                            .child("选择左侧文档")
+                            .flex_col()
+                            .overflow_y_scrollbar()
+                            .child(if self.doc_loading {
+                                div()
+                                    .p_6()
+                                    .font_family("JetBrains Mono")
+                                    .text_xs()
+                                    .text_color(theme.muted_foreground)
+                                    .child("加载中…")
+                            } else if let Some(path) = &self.doc_path {
+                                div()
+                                    .p_6()
+                                    .flex_1()
+                                    .child(
+                                        div()
+                                            .pb_4()
+                                            .mb_4()
+                                            .border_b_1()
+                                            .border_color(theme.border)
+                                            .flex()
+                                            .items_center()
+                                            .justify_between()
+                                            .child(
+                                                div()
+                                                    .font_family("JetBrains Mono")
+                                                    .text_xs()
+                                                    .text_color(theme.muted_foreground)
+                                                    .child(path.clone()),
+                                            )
+                                            .child(
+                                                Button::new("start-edit")
+                                                    .rounded(px(6.0))
+                                                    .label("编辑")
+                                                    .on_click(cx.listener(
+                                                        |this, _, window, cx| {
+                                                            this.start_edit(window, cx)
+                                                        },
+                                                    )),
+                                            ),
+                                    )
+                                    .child(
+                                        TextView::markdown(
+                                            "doc-content",
+                                            self.doc_content.clone(),
+                                        )
+                                        .w_full(),
+                                    )
+                            } else {
+                                div()
+                                    .flex_1()
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .font_family("JetBrains Mono")
+                                    .text_xs()
+                                    .text_color(theme.muted_foreground)
+                                    .child("选择左侧文档")
+                            })
+                            .into_any_element()
                     }),
             )
     }
