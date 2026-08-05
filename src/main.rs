@@ -57,7 +57,13 @@ fn main() {
         ]);
 
         cx.spawn(async move |cx| {
-            cx.open_window(WindowOptions::default(), |window, cx| {
+            cx.open_window(WindowOptions {
+                titlebar: Some(TitlebarOptions {
+                    title: Some("AgentDocs".into()),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }, |window, cx| {
                 let view = cx.new(|cx| XWikiApp::new(window, cx));
                 // The first level on the window must be a Root.
                 cx.new(|cx| Root::new(view, window, cx).bg(cx.theme().background))
