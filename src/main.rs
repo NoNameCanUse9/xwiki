@@ -13,6 +13,19 @@ use app::XWikiApp;
 actions!(app_actions, [TogglePalette, ToggleTheme]);
 
 fn main() {
+    // Crash visibility: a panic in the UI thread would otherwise vanish with
+    // the window; log it to a file too.
+    std::panic::set_hook(Box::new(|info| {
+        let log = std::env::var("HOME")
+            .map(|h| format!("{h}/.config/agentdocs-client/panic.log"))
+            .unwrap_or_else(|_| "/tmp/agentdocs-client-panic.log".into());
+        let _ = std::fs::create_dir_all(
+            log.rsplit_once('/').map(|(d, _)| d.to_string()).unwrap_or_default(),
+        );
+        let _ = std::fs::write(&log, format!("panic: {info}\n"));
+        eprintln!("PANIC: {info}");
+    }));
+
     let args: Vec<String> = std::env::args().skip(1).collect();
     if !args.is_empty() {
         // With subcommands the binary acts as the agentdocs-client CLI;
