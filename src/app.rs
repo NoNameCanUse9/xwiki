@@ -926,35 +926,48 @@ impl XWikiApp {
     /// Breadcrumb trail for the current tree directory; clicking a crumb
     /// navigates back up.
     fn render_tree(&self, cx: &mut Context<Self>) -> Div {
-        let theme = cx.theme();
-        let mut list = div().v_flex().gap_1().w_full();
-        for e in &self.tree_entries {
+        let theme = cx.theme().clone();
+        let mut list = div().v_flex().w_full();
+        let count = self.tree_entries.len();
+        list = list.child(
+            div()
+                .px_3()
+                .py_2()
+                .font_family("JetBrains Mono")
+                .text_xs()
+                .text_color(theme.muted_foreground)
+                .child(format!("root · {count} {}", if count == 1 { "item" } else { "items" })),
+        );
+        for e in self.tree_entries.iter().filter(|e| e.path != "_sidebar.md") {
             let is_dir = e.r#type == "tree";
             let path = e.path.clone();
             let row = div()
                 .id(path.clone())
                 .flex()
                 .items_center()
-                .gap_2()
-                .px_2()
-                .py_1()
-                .rounded(px(4.0))
+                .gap_2_5()
+                .px_3()
+                .py_2()
+                .border_b_1()
+                .border_color(theme.border)
                 .hover(|s| s.bg(theme.list_hover))
                 .cursor_pointer()
                 .child(
                     div()
+                        .w(px(16.0))
+                        .text_center()
                         .font_family("JetBrains Mono")
                         .text_xs()
-                        .text_color(if is_dir {
-                            theme.foreground
-                        } else {
-                            theme.muted_foreground
-                        })
-                        .child(if is_dir {
-                            format!("{}/", e.name)
-                        } else {
-                            e.name.clone()
-                        }),
+                        .text_color(if is_dir { theme.accent } else { theme.muted_foreground })
+                        .child(if is_dir { "▸" } else { "·" }),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .font_family("JetBrains Mono")
+                        .text_xs()
+                        .text_color(if is_dir { theme.foreground } else { theme.muted_foreground })
+                        .child(e.name.clone()),
                 )
                 .on_click(cx.listener(move |this, _, _, cx| {
                     if is_dir {
@@ -1122,22 +1135,30 @@ impl XWikiApp {
                             ),
                     )
                     .child(
-                        // Breadcrumb: root → dir1 → dir2
+                        // Breadcrumb: docs › dir1 › dir2 (web style).
                         div()
                             .px_3()
                             .pb_2()
                             .flex()
                             .flex_wrap()
+                            .items_center()
                             .gap_1()
-                            .child(if self.tree_path.is_empty() {
+                            .child(
                                 div()
+                                    .id("crumb-root")
                                     .font_family("JetBrains Mono")
                                     .text_xs()
-                                    .text_color(theme.foreground)
-                                    .child("/")
-                            } else {
-                                let mut crumbs = div().flex().flex_wrap().gap_1();
+                                    .text_color(theme.muted_foreground)
+                                    .hover(|s| s.text_color(theme.accent))
+                                    .cursor_pointer()
+                                    .child("docs")
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.load_tree("", cx);
+                                    })),
+                            )
+                            .children({
                                 let mut acc = String::new();
+                                let mut parts: Vec<String> = Vec::new();
                                 for part in self.tree_path.split('/') {
                                     if part.is_empty() {
                                         continue;
@@ -1147,24 +1168,54 @@ impl XWikiApp {
                                     } else {
                                         format!("{acc}/{part}")
                                     };
-                                    let target = acc.clone();
-                                    crumbs = crumbs.child(
+                                    parts.push(acc.clone());
+                                }
+                                let mut out: Vec<AnyElement> = Vec::new();
+                                for (i, full) in parts.iter().enumerate() {
+                                    let is_last = i == parts.len() - 1;
+                                    let target = full.clone();
+                                    let name: String = full
+                                        .split('/')
+                                        .next_back()
+                                        .unwrap_or("")
+                                        .to_string();
+                                    out.push(
                                         div()
-                                            .id(format!("crumb-{target}"))
                                             .font_family("JetBrains Mono")
                                             .text_xs()
                                             .text_color(theme.muted_foreground)
-                                            .hover(|s| s.text_color(theme.foreground))
-                                            .cursor_pointer()
-                                            .child(format!("{part}/"))
-                                            .on_click(cx.listener(
-                                                move |this, _, _, cx| {
-                                                    this.load_tree(&target, cx);
-                                                },
-                                            )),
+                                            .child("›")
+                                            .into_any_element(),
                                     );
+                                    if is_last {
+                                        out.push(
+                                            div()
+                                                .font_family("JetBrains Mono")
+                                                .text_xs()
+                                                .text_color(theme.foreground)
+                                                .child(name)
+                                                .into_any_element(),
+                                        );
+                                    } else {
+                                        out.push(
+                                            div()
+                                                .id(format!("crumb-{target}"))
+                                                .font_family("JetBrains Mono")
+                                                .text_xs()
+                                                .text_color(theme.muted_foreground)
+                                                .hover(|s| s.text_color(theme.accent))
+                                                .cursor_pointer()
+                                                .child(name)
+                                                .on_click(cx.listener(
+                                                    move |this, _, _, cx| {
+                                                        this.load_tree(&target, cx);
+                                                    },
+                                                ))
+                                                .into_any_element(),
+                                        );
+                                    }
                                 }
-                                crumbs
+                                out
                             }),
                     )
                     .child(div().flex_1().overflow_y_scrollbar().child(self.render_tree(cx))),
