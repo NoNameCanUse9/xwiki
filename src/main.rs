@@ -1,42 +1,25 @@
 #![cfg_attr(target_family = "wasm", no_main)]
 
-use gpui::{App, Bounds, Menu, WindowBounds, WindowOptions, prelude::*, px, size};
+use gpui::*;
+use gpui_component::*;
 
 mod app;
-mod components;
 
 use app::XWikiApp;
 
 fn main() {
-    gpui_platform::application().run(|cx: &mut App| {
-        cx.set_menus(vec![Menu {
-            name: "XWiki".into(),
-            disabled: false,
-            items: vec![],
-        }]);
+    gpui_platform::application().run(move |cx| {
+        // Must be called before any GPUI Component features are used.
+        gpui_component::init(cx);
 
-        cx.init_colors();
-
-        let bounds = Bounds::centered(None, size(px(800.0), px(600.0)), cx);
-
-        let window = cx
-            .open_window(
-                WindowOptions {
-                    titlebar: Some(gpui::TitlebarOptions {
-                        title: Some("XWiki GPUI App".into()),
-                        ..Default::default()
-                    }),
-                    window_bounds: Some(WindowBounds::Windowed(bounds)),
-                    ..Default::default()
-                },
-                |_window, cx| cx.new(|_cx| XWikiApp {}),
-            )
-            .unwrap();
-
-        window
-            .update(cx, |_view, _window, cx| {
-                cx.activate(true);
+        cx.spawn(async move |cx| {
+            cx.open_window(WindowOptions::default(), |window, cx| {
+                let view = cx.new(|cx| XWikiApp::new(window, cx));
+                // The first level on the window must be a Root.
+                cx.new(|cx| Root::new(view, window, cx).bg(cx.theme().background))
             })
-            .unwrap();
+            .expect("Failed to open window");
+        })
+        .detach();
     });
 }
