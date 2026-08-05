@@ -1292,11 +1292,21 @@ impl XWikiApp {
                                             ),
                                     )
                                     .child(
-                                        TextView::markdown(
-                                            "doc-content",
-                                            self.doc_content.clone(),
-                                        )
-                                        .w_full(),
+                                        div()
+                                            .w_full()
+                                            .flex()
+                                            .justify_center()
+                                            .child(
+                                                div()
+                                                    .w(px(720.0))
+                                                    .child(
+                                                        TextView::markdown(
+                                                            "doc-content",
+                                                            self.doc_content.clone(),
+                                                        )
+                                                        .w_full(),
+                                                    ),
+                                            ),
                                     )
                             } else {
                                 div()
@@ -1649,7 +1659,15 @@ impl XWikiApp {
                                     .font_family("JetBrains Mono")
                                     .text_xs()
                                     .text_color(theme.muted_foreground)
-                                    .child("docs-site"),
+                                    .child(
+                                        self.projects
+                                            .read()
+                                            .unwrap()
+                                            .iter()
+                                            .find(|p| Some(&p.id) == self.selected_project.as_ref())
+                                            .map(|p| p.name.clone())
+                                            .unwrap_or_else(|| "workspace".into()),
+                                    ),
                             ),
                     )
                     .child(
@@ -1690,6 +1708,14 @@ impl XWikiApp {
                             } else {
                                 div()
                             })
+                            .child(
+                                Button::new("toggle-theme")
+                                    .rounded(px(6.0))
+                                    .label(if cx.theme().is_dark() { "浅色" } else { "深色" })
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.toggle_theme(cx)
+                                    })),
+                            )
                             .child(
                                 Button::new("logout")
                                     .rounded(px(6.0))
