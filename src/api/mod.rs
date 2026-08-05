@@ -7,6 +7,57 @@
 #[cfg(test)]
 mod e2e_test;
 
+#[cfg(test)]
+mod tests {
+    use super::dto;
+    use super::de_null_default;
+    use serde::Deserialize;
+
+    #[derive(Deserialize)]
+    struct Wrap {
+        #[serde(default, deserialize_with = "de_null_default")]
+        items: Vec<String>,
+    }
+
+    #[test]
+    fn null_slices_become_empty() {
+        let w: Wrap = serde_json::from_str(r#"{"items": null}"#).unwrap();
+        assert!(w.items.is_empty());
+        let w: Wrap = serde_json::from_str(r#"{"items": ["a"]}"#).unwrap();
+        assert_eq!(w.items, vec!["a"]);
+    }
+
+    #[test]
+    fn error_envelope_decodes() {
+        let e: dto::ApiErrorBody = serde_json::from_str(
+            r#"{"code":"revision_conflict","message":"stale","request_id":"req_x"}"#,
+        )
+        .unwrap();
+        assert_eq!(e.code, "revision_conflict");
+        assert_eq!(e.request_id, "req_x");
+    }
+
+    #[test]
+    fn project_dto_decodes_go_null_fields() {
+        let p: dto::Project = serde_json::from_str(
+            r#"{"id":"prj_1","name":"docs","repo_dir":"r","archived":false,"created_at":"2026-08-05T00:00:00Z","updated_at":"2026-08-05T00:00:00Z"}"#,
+        )
+        .unwrap();
+        assert_eq!(p.name, "docs");
+        assert_eq!(p.description, "");
+    }
+
+    #[test]
+    fn commit_dto_roundtrip() {
+        let c: dto::CommitDetail = serde_json::from_str(
+            r#"{"sha":"abc","message":"m","author":"a","date":"d","files":[{"status":"A","path":"docs/x.md"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(c.files.len(), 1);
+        assert_eq!(c.files[0].status, "A");
+    }
+}
+
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize};
 

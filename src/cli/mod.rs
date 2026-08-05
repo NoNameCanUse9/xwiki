@@ -7,6 +7,9 @@
 use crate::api::{ApiError, Client};
 use crate::config;
 
+#[cfg(test)]
+mod tests;
+
 fn server_from_args(args: &[String]) -> String {
     for (i, a) in args.iter().enumerate() {
         if a == "--server" && i + 1 < args.len() {
