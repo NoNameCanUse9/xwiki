@@ -528,7 +528,7 @@ impl XWikiApp {
                     .child(
                         // Commit list.
                         div()
-                            .w(px(340.0))
+                            .w(px(320.0))
                             .h_full()
                             .flex()
                             .flex_col()
@@ -1033,7 +1033,7 @@ impl XWikiApp {
             let card = div()
                 .id(format!("project-card-{}", p.name))
                 .w(px(340.0))
-                .p_5()
+                .p_4()
                 .rounded(px(6.0))
                 .border_1()
                 .border_color(theme.border)
@@ -1763,21 +1763,40 @@ impl XWikiApp {
                                     .text_color(theme.muted_foreground)
                                     .child("PROJECTS"),
                             )
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .px_3()
-                                    .py_1_5()
-                                    .hover(|s| s.bg(theme.list_hover))
-                                    .child(
+                            .child({
+                                let projects = self.projects.read().unwrap();
+                                let items: Vec<AnyElement> = projects
+                                    .iter()
+                                    .map(|p| {
+                                        let id = p.id.clone();
+                                        let theme2 = theme.clone();
                                         div()
-                                            .font_family("JetBrains Mono")
-                                            .text_xs()
-                                            .text_color(theme.foreground)
-                                            .child("全部"),
-                                    ),
-                            ),
+                                            .id(format!("nav-{}", p.name))
+                                            .flex()
+                                            .items_center()
+                                            .px_3()
+                                            .py_1_5()
+                                            .hover(|s| s.bg(theme2.list_hover))
+                                            .cursor_pointer()
+                                            .child(
+                                                div()
+                                                    .font_family("JetBrains Mono")
+                                                    .text_xs()
+                                                    .text_color(if p.archived {
+                                                        theme2.muted_foreground
+                                                    } else {
+                                                        theme2.foreground
+                                                    })
+                                                    .child(p.name.clone()),
+                                            )
+                                            .on_click(cx.listener(move |this, _, _, cx| {
+                                                this.open_project(&id, cx);
+                                            }))
+                                            .into_any_element()
+                                    })
+                                    .collect();
+                                div().children(items)
+                            }),
                     )
                     .child(
                         // Content: filter row + project table.
