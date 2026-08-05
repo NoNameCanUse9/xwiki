@@ -158,17 +158,20 @@ type Backlink struct {
 }
 
 // Query searches for documents matching the query.
-// For 3+ character queries, uses FTS5 trigram; for shorter queries, falls back to LIKE.
+// Uses FTS5 trigram unless any query term is shorter than 3 runes, in which
+// case it falls back to LIKE (trigram can't match short terms).
 func (s *Store) Query(ctx context.Context, projectID, matchExpr, rawQuery string, limit int) ([]Result, error) {
 	if limit <= 0 || limit > 50 {
 		limit = 20
 	}
 
-	// FTS5 trigram requires at least 3 characters to form a trigram.
-	// For shorter queries, fall back to LIKE.
-	trimmed := strings.TrimSpace(rawQuery)
-	if len([]rune(trimmed)) < 3 {
-		return s.queryLike(ctx, projectID, trimmed, limit)
+	// FTS5 trigram requires at least 3 characters to form a trigram; a short
+	// term silently matches nothing, so fall back to LIKE (AND across terms).
+	terms := strings.Fields(strings.TrimSpace(rawQuery))
+	for _, t := range terms {
+		if len([]rune(t)) < 3 {
+			return s.queryLike(ctx, projectID, terms, limit)
+		}
 	}
 
 	rows, err := s.db.QueryContext(ctx, `
@@ -176,7 +179,6 @@ func (s *Store) Query(ctx context.Context, projectID, matchExpr, rawQuery string
 		FROM doc_search
 		JOIN doc_index_state d ON d.id = doc_search.rowid
 		WHERE doc_search MATCH ? AND d.project_id = ?
-		GROUP BY d.path
 		ORDER BY rank
 		LIMIT ?`, matchExpr, projectID, limit)
 	if err != nil {
@@ -196,13 +198,19 @@ func (s *Store) Query(ctx context.Context, projectID, matchExpr, rawQuery string
 	return out, rows.Err()
 }
 
-// queryLike performs a LIKE-based search for short queries that can't use FTS trigram.
-func (s *Store) queryLike(ctx context.Context, projectID, query string, limit int) ([]Result, error) {
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT path, content
-		FROM doc_index_state
-		WHERE project_id = ? AND content LIKE '%' || ? || '%'
-		LIMIT ?`, projectID, query, limit)
+// queryLike performs a LIKE-based search for queries whose short terms can't
+// be matched by FTS trigram. Terms are ANDed; LIKE wildcards are escaped so
+// user input matches literally.
+func (s *Store) queryLike(ctx context.Context, projectID string, terms []string, limit int) ([]Result, error) {
+	q := `SELECT path, content FROM doc_index_state WHERE project_id = ?`
+	args := []any{projectID}
+	for _, t := range terms {
+		q += ` AND content LIKE '%' || ? || '%' ESCAPE '\'`
+		args = append(args, escapeLike(t))
+	}
+	q += ` ORDER BY rowid LIMIT ?`
+	args = append(args, limit)
+	rows, err := s.db.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("like query: %w", err)
 	}
@@ -214,76 +222,67 @@ func (s *Store) queryLike(ctx context.Context, projectID, query string, limit in
 		if err := rows.Scan(&r.Path, &content); err != nil {
 			return nil, err
 		}
-		r.Snippet = contentSnippet(content, query)
+		r.Snippet = contentSnippet(content, strings.Join(terms, " "))
 		out = append(out, r)
 	}
 	return out, rows.Err()
 }
 
-// contentSnippet extracts a short window around the first match in content.
-// The content may have CJK spaces from SpaceCJK; we clean them for display.
+// escapeLike neutralizes LIKE wildcards so user input matches literally.
+func escapeLike(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, `%`, `\%`)
+	s = strings.ReplaceAll(s, `_`, `\_`)
+	return s
+}
+
+// HasSHA reports whether the indexed snapshot for path already matches sha.
+func (s *Store) HasSHA(ctx context.Context, projectID, path, sha string) (bool, error) {
+	var one int
+	err := s.db.QueryRowContext(ctx,
+		`SELECT 1 FROM doc_index_state WHERE project_id = ? AND path = ? AND blob_sha = ?`,
+		projectID, path, sha).Scan(&one)
+	if err == nil {
+		return true, nil
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return false, err
+}
+
+// contentSnippet extracts a short window around the first matching term.
 func contentSnippet(content, query string) string {
-	clean := UnspaceCJK(content)
-	lower := strings.ToLower(clean)
-	q := strings.ToLower(strings.Trim(query, `"`))
-	// Also try the spaced version for matching.
-	spacedQ := strings.ToLower(SpaceCJK(query))
+	lower := strings.ToLower(content)
+	terms := strings.Fields(query)
+	if len(terms) == 0 {
+		if len(content) > 120 {
+			return content[:120] + "…"
+		}
+		return content
+	}
+	q := strings.ToLower(strings.Trim(terms[0], `"`))
 	idx := strings.Index(lower, q)
 	if idx < 0 {
-		idx = strings.Index(lower, spacedQ)
-	}
-	if idx < 0 {
-		if len(clean) > 120 {
-			return clean[:120] + "…"
+		if len(content) > 120 {
+			return content[:120] + "…"
 		}
-		return clean
+		return content
 	}
 	start := idx - 40
 	if start < 0 {
 		start = 0
 	}
 	end := idx + len(q) + 80
-	if end > len(clean) {
-		end = len(clean)
+	if end > len(content) {
+		end = len(content)
 	}
-	snip := strings.ReplaceAll(clean[start:end], "\n", " ")
+	snip := strings.ReplaceAll(content[start:end], "\n", " ")
 	return "…" + strings.TrimSpace(snip) + "…"
 }
 
-// UnspaceCJK removes the extra spaces inserted by SpaceCJK around CJK characters.
-func UnspaceCJK(s string) string {
-	var out []rune
-	runes := []rune(s)
-	for i, r := range runes {
-		if r == ' ' {
-			// Check if this space is between two CJK chars or around a CJK char
-			prevIsCJK := i > 0 && isCJK(runes[i-1])
-			nextIsCJK := i+1 < len(runes) && isCJK(runes[i+1])
-			if prevIsCJK || nextIsCJK {
-				continue // skip the space
-			}
-		}
-		out = append(out, r)
-	}
-	return string(out)
-}
-
-func isCJK(r rune) bool {
-	return r >= 0x4E00 && r <= 0x9FFF ||
-		r >= 0x3040 && r <= 0x309F ||
-		r >= 0x30A0 && r <= 0x30FF ||
-		r >= 0x3400 && r <= 0x4DBF ||
-		r >= 0xF900 && r <= 0xFAFF
-}
-
-// BuildMatchExpr converts user words into a safe FTS5 query with CJK spacing.
-func BuildMatchExpr(q string) string {
-	q = SpaceCJK(q)
-	return buildMatchExpr(q)
-}
-
-// BuildMatchExprRaw converts user words into a safe FTS5 query without CJK spacing.
-// Used for FTS trigram queries where raw character sequences matter.
+// BuildMatchExprRaw converts user words into a safe FTS5 query: every term is
+// quoted so user input can't inject FTS syntax.
 func BuildMatchExprRaw(q string) string {
 	return buildMatchExpr(q)
 }
@@ -297,24 +296,3 @@ func buildMatchExpr(q string) string {
 	}
 	return strings.Join(quoted, " ")
 }
-
-// SpaceCJK inserts spaces around CJK characters so FTS5 unicode61 tokenizer
-// treats each character as a separate token. This enables Chinese/Japanese
-// search in SQLite FTS5.
-func SpaceCJK(s string) string {
-	var out []rune
-	for _, r := range s {
-		if r >= 0x4E00 && r <= 0x9FFF || // CJK Unified Ideographs
-			r >= 0x3040 && r <= 0x309F || // Hiragana
-			r >= 0x30A0 && r <= 0x30FF || // Katakana
-			r >= 0x3400 && r <= 0x4DBF || // CJK Extension A
-			r >= 0xF900 && r <= 0xFAFF {  // CJK Compatibility Ideographs
-			out = append(out, ' ', r, ' ')
-		} else {
-			out = append(out, r)
-		}
-	}
-	return string(out)
-}
-
-

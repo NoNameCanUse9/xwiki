@@ -57,7 +57,7 @@ func (s *Service) Search(ctx context.Context, projectID, query string, limit int
 		return nil, fmt.Errorf("invalid query")
 	}
 	// For FTS, use the raw query (no spacing) so trigram can match substrings.
-	// For LIKE fallback, the store applies SpaceCJK internally.
+	// Queries with any short (<3 rune) word fall back to LIKE inside the store.
 	return s.store.Query(ctx, projectID, BuildMatchExprRaw(q), q, limit)
 }
 
@@ -89,6 +89,17 @@ func (s *Service) ReindexProject(ctx context.Context, projectID string) (*Reinde
 				continue
 			}
 			seen[e.Path] = true
+			// The tree already carries the blob sha: unchanged files are
+			// skipped without reading or hashing anything.
+			if e.SHA != "" {
+				ok, err := s.store.HasSHA(ctx, projectID, e.Path, e.SHA)
+				if err != nil {
+					return err
+				}
+				if ok {
+					continue
+				}
+			}
 			blob, err := repo.ReadBlob(ctx, branch, e.Path)
 			if err != nil {
 				continue // unreadable blobs are skipped
@@ -96,13 +107,9 @@ func (s *Service) ReindexProject(ctx context.Context, projectID string) (*Reinde
 			if len(blob) > s.maxBlob || strings.ContainsRune(string(blob), '\x00') {
 				continue // binary or oversized: not indexed
 			}
-			sha, err := blobSHA(repo, e.Path, blob)
-			if err != nil {
-				return err
-			}
 			content := string(blob)
 			changed, err := s.store.Upsert(ctx, &StateEntry{
-				ProjectID: projectID, Path: e.Path, BlobSHA: sha,
+				ProjectID: projectID, Path: e.Path, BlobSHA: e.SHA,
 				Title: ExtractTitle(content), Content: content,
 			})
 			if err != nil {
@@ -217,14 +224,4 @@ func (s *Service) indexedPaths(ctx context.Context, projectID string) ([]string,
 		out = append(out, p)
 	}
 	return out, rows.Err()
-}
-
-func blobSHA(repo *project.Repo, path string, content []byte) (string, error) {
-	// Reuse the repo's object store: write the blob and read its id.
-	sha, err := repo.HashBlob(context.Background(), content)
-	if err != nil {
-		return "", err
-	}
-	_ = path
-	return sha, nil
 }

@@ -2,7 +2,6 @@ package search
 
 import (
 	"context"
-	"strings"
 	"testing"
 	"time"
 
@@ -57,10 +56,60 @@ func TestUpsertQueryDelete(t *testing.T) {
 	}
 }
 
-func TestBuildMatchExpr(t *testing.T) {
+func TestBuildMatchExprRaw(t *testing.T) {
 	// Trigram tokenizer: quoted phrases, no prefix wildcard.
-	if got := BuildMatchExpr(`say "hello" world`); got != `"say" """hello""" "world"` {
+	if got := BuildMatchExprRaw(`say "hello" world`); got != `"say" """hello""" "world"` {
 		t.Fatalf("match expr wrong: %q", got)
+	}
+}
+
+func TestEscapeLike(t *testing.T) {
+	if got := escapeLike(`a_b%c\d`); got != `a\_b\%c\\d` {
+		t.Fatalf("escapeLike: %q", got)
+	}
+}
+
+func TestQueryLikeEscapesWildcards(t *testing.T) {
+	svc, _ := newService(t)
+	if _, err := svc.store.Upsert(context.Background(), &StateEntry{
+		ProjectID: "prj_pct", Path: "a.md", BlobSHA: "1", Content: "price is 50% off",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.store.Upsert(context.Background(), &StateEntry{
+		ProjectID: "prj_pct", Path: "b.md", BlobSHA: "2", Content: "fifty 50 percent",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// "%" is a 1-char query, so it hits the LIKE path; the wildcard must be
+	// escaped or b.md (contains "50" but no literal %) would match too.
+	res, err := svc.Search(context.Background(), "prj_pct", "%", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res) != 1 || res[0].Path != "a.md" {
+		t.Fatalf("query '%%': %+v", res)
+	}
+}
+
+func TestCJKShortTermCombined(t *testing.T) {
+	// Two 2-char CJK words must not kill the query: any short term falls
+	// back to LIKE with AND across all terms.
+	svc, _ := newService(t)
+	if _, err := svc.store.Upsert(context.Background(), &StateEntry{
+		ProjectID: "prj_cjk", Path: "docs/install.md", BlobSHA: "s1",
+		Content: "安装指南 installation guide",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []string{"安装", "安装指南", "安装 指南", "指南 安装"} {
+		res, err := svc.Search(context.Background(), "prj_cjk", q, 10)
+		if err != nil {
+			t.Fatalf("%q: %v", q, err)
+		}
+		if len(res) != 1 || res[0].Path != "docs/install.md" {
+			t.Fatalf("query %q: got %+v, want docs/install.md", q, res)
+		}
 	}
 }
 
@@ -125,6 +174,4 @@ func TestReindexProjectIncremental(t *testing.T) {
 	if len(res) != 0 {
 		t.Fatalf("deleted doc still searchable: %+v", res)
 	}
-	// README content searchable too (no match for zanzibar in README).
-	_ = strings.Contains
 }
