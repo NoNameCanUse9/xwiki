@@ -4,6 +4,7 @@
 use std::path::PathBuf;
 
 use gpui_component::ThemeMode;
+use serde::{Deserialize, Serialize};
 
 fn config_path() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
@@ -43,4 +44,69 @@ pub fn save_theme(mode: ThemeMode) {
         ThemeMode::Dark => "dark",
     };
     let _ = std::fs::write(dir.join("theme"), value);
+}
+
+/// Persisted panel layout (plan §0.3: widths + collapse state survive
+/// restarts). Defaults match the plan's suggested values.
+#[derive(Serialize, Deserialize, Clone, Copy)]
+pub struct Layout {
+    pub projects_rail: f32,
+    pub doc_rail: f32,
+    pub history: f32,
+    pub history_open: bool,
+}
+
+impl Default for Layout {
+    fn default() -> Self {
+        Self {
+            projects_rail: crate::ui::tokens::PROJECTS_RAIL,
+            doc_rail: crate::ui::tokens::DOC_RAIL,
+            history: crate::ui::tokens::HISTORY_W,
+            history_open: false,
+        }
+    }
+}
+
+pub fn load_layout() -> Layout {
+    std::fs::read_to_string(config_path().join("layout.json"))
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+pub fn save_layout(layout: &Layout) {
+    let dir = config_path();
+    let _ = std::fs::create_dir_all(&dir);
+    if let Ok(json) = serde_json::to_string(layout) {
+        let _ = std::fs::write(dir.join("layout.json"), json);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn layout_roundtrip_and_corrupt_defaults() {
+        let home = tempfile::tempdir().unwrap();
+        std::env::set_var("HOME", home.path());
+        let l = Layout {
+            projects_rail: 300.0,
+            doc_rail: 340.0,
+            history: 480.0,
+            history_open: true,
+        };
+        save_layout(&l);
+        let back = load_layout();
+        assert_eq!(back.projects_rail, 300.0);
+        assert_eq!(back.doc_rail, 340.0);
+        assert_eq!(back.history, 480.0);
+        assert!(back.history_open);
+
+        // A corrupt file must fall back to plan defaults, not panic.
+        std::fs::write(config_path().join("layout.json"), "not json").unwrap();
+        let d = load_layout();
+        assert_eq!(d.doc_rail, crate::ui::tokens::DOC_RAIL);
+        assert!(!d.history_open);
+    }
 }

@@ -15,7 +15,7 @@ use gpui_component::{
 
 use crate::api::{Client, dto};
 use crate::config;
-use crate::ui::{mono_label, tokens};
+use crate::ui::{mono_label, split_pane, tokens};
 use crate::{TogglePalette, ToggleTheme};
 
 /// Command palette entries: (id, label, hint). Availability is decided by
@@ -63,6 +63,12 @@ pub struct XWikiApp {
     commits: Vec<dto::Commit>,
     commit_detail: Option<dto::CommitDetail>,
     diff_stats: Vec<dto::DiffStat>,
+    /// Selected commit sha (highlight in the history list).
+    selected_sha: Option<String>,
+    /// Panel layout (widths + history visibility), persisted via config.
+    layout: config::Layout,
+    /// Server URL as resolved at login (status bar).
+    server_url: String,
     /// Keep input subscriptions alive with the app entity.
     _subscriptions: Vec<Subscription>,
 }
@@ -167,12 +173,16 @@ impl XWikiApp {
             commits: Vec::new(),
             commit_detail: None,
             diff_stats: Vec::new(),
+            selected_sha: None,
+            layout: config::load_layout(),
+            server_url: config::load_server(),
             _subscriptions: subs,
         }
     }
 
     fn open_project(&mut self, project_id: &str, cx: &mut Context<Self>) {
         self.selected_project = Some(project_id.to_string());
+        self.selected_sha = None;
         self.tree_path.clear();
         self.doc_path = None;
         self.doc_content.clear();
@@ -427,11 +437,13 @@ impl XWikiApp {
         self.history_open = true;
         self.commit_detail = None;
         self.diff_stats.clear();
+        config::save_layout(&self.layout);
         self.load_commits(cx);
     }
 
     fn close_history(&mut self, cx: &mut Context<Self>) {
         self.history_open = false;
+        config::save_layout(&self.layout);
         cx.notify();
     }
 
@@ -467,6 +479,7 @@ impl XWikiApp {
             return;
         };
         let sha = sha.to_string();
+        self.selected_sha = Some(sha.clone());
         self.commit_detail = None;
         self.diff_stats.clear();
         cx.spawn(async move |this, cx| {
@@ -488,194 +501,178 @@ impl XWikiApp {
     fn render_history_view(&self, cx: &mut Context<Self>) -> Div {
         let theme = cx.theme().clone();
         div()
-            .flex_1()
             .h_full()
             .flex()
             .flex_col()
+            .bg(theme.sidebar)
             .child(
-                // History toolbar.
+                // Panel header: mono label + close (context panel, not a screen).
                 div()
                     .h(px(tokens::TOOLBAR_H))
-                    .px_4()
+                    .px_3()
                     .flex()
                     .items_center()
                     .gap_3()
                     .border_b_1()
                     .border_color(theme.border)
-                    .bg(theme.sidebar)
                     .child(mono_label("HISTORY").text_color(theme.muted_foreground))
                     .child(div().flex_1())
                     .child(
                         Button::new("close-history")
                             .rounded(px(tokens::RADIUS))
-                            .label("← 返回文档")
+                            .label("关闭")
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.close_history(cx)
                             })),
                     ),
             )
             .child(
+                // Commit list (top): message first, sha/author/date meta.
                 div()
-                    .flex()
                     .flex_1()
-                    .h_full()
-                    .child(
-                        // Commit list.
-                        div()
-                            .w(px(tokens::PANEL_HISTORY))
-                            .h_full()
-                            .flex()
-                            .flex_col()
-                            .border_r_1()
+                    .min_h(px(120.0))
+                    .overflow_y_scrollbar()
+                    .children(self.commits.iter().map(|c| {
+                        let sha = c.sha.clone();
+                        let short: String = c.sha.chars().take(7).collect();
+                        let selected = self.selected_sha.as_deref() == Some(c.sha.as_str());
+                        let row = div()
+                            .id(format!("commit-{short}"))
+                            .px_3()
+                            .py_2_5()
+                            .border_b_1()
                             .border_color(theme.border)
-                            .overflow_y_scrollbar()
-                            .children(self.commits.iter().map(|c| {
-                                let sha = c.sha.clone();
-                                let short: String = c.sha.chars().take(7).collect();
+                            .cursor_pointer()
+                            .v_flex()
+                            .gap_1()
+                            .child(
                                 div()
-                                    .id(format!("commit-{short}"))
-                                    .px_3()
-                                    .py_2_5()
-                                    .border_b_1()
-                                    .border_color(theme.border)
-                                    .hover(|s| s.bg(theme.list_hover))
-                                    .cursor_pointer()
-                                    .v_flex()
-                                    .gap_1()
-                                    .child(
-                                        div()
-                                            .text_sm()
-                                            .text_color(theme.foreground)
-                                            .child(c.message.clone()),
-                                    )
-                                    .child(
-                                        div()
-                                            .flex()
-                                            .items_center()
-                                            .gap_2()
-                                            .font_family(tokens::FONT_MONO)
-                                            .text_xs()
-                                            .text_color(theme.muted_foreground)
-                                            .child(short)
-                                            .child(format!("{} · {}", c.author, c.date)),
-                                    )
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        this.select_commit(&sha, cx);
-                                    }))
-                            })),
-                    )
-                    .child(
-                        // Commit detail: message, files, numstat.
-                        div()
-                            .flex_1()
-                            .h_full()
-                            .flex()
-                            .flex_col()
-                            .overflow_y_scrollbar()
-                            .p_6()
-                            .child(if let Some(d) = &self.commit_detail {
+                                    .text_sm()
+                                    .text_color(theme.foreground)
+                                    .child(c.message.clone()),
+                            )
+                            .child(
                                 div()
-                                    .v_flex()
-                                    .gap_3()
-                                    .w_full()
-                                    .child(
-                                        div()
-                                            .text_lg()
-                                            .font_weight(FontWeight::SEMIBOLD)
-                                            .child(d.message.clone()),
-                                    )
-                                    .child(
-                                        div()
-                                            .font_family(tokens::FONT_MONO)
-                                            .text_xs()
-                                            .text_color(theme.muted_foreground)
-                                            .child(format!(
-                                                "{} · {} · {}",
-                                                d.sha, d.author, d.date
-                                            )),
-                                    )
-                                    .child(
-                                        div()
-                                            .w_full()
-                                            .h(px(1.0))
-                                            .bg(theme.border),
-                                    )
-                                    .child(mono_label("FILES").text_color(theme.muted_foreground))
-                                    .children(d.files.iter().map(|f| {
-                                        let color = if f.status.as_str() == "D" {
-                                            theme.danger
-                                        } else {
-                                            theme.foreground
-                                        };
-                                        div()
-                                            .flex()
-                                            .gap_2()
-                                            .items_center()
-                                            .child(
-                                                div()
-                                                    .font_family(tokens::FONT_MONO)
-                                                    .text_xs()
-                                                    .text_color(theme.foreground)
-                                                    .child(f.status.clone()),
-                                            )
-                                            .child(
-                                                div()
-                                                    .font_family(tokens::FONT_MONO)
-                                                    .text_xs()
-                                                    .text_color(color)
-                                                    .child(f.path.clone()),
-                                            )
-                                    }))
-                                    .child(
-                                        div()
-                                            .w_full()
-                                            .h(px(1.0))
-                                            .bg(theme.border),
-                                    )
-                                    .child(mono_label("NUMSTAT").text_color(theme.muted_foreground))
-                                    .children(self.diff_stats.iter().map(|s| {
-                                        div()
-                                            .flex()
-                                            .gap_3()
-                                            .items_center()
-                                            .child(
-                                                div()
-                                                    .w(px(tokens::NUMSTAT_W))
-                                                    .text_right()
-                                                    .font_family(tokens::FONT_MONO)
-                                                    .text_xs()
-                                                    .text_color(theme.foreground)
-                                                    .child(format!("+{}", s.added)),
-                                            )
-                                            .child(
-                                                div()
-                                                    .w(px(tokens::NUMSTAT_W))
-                                                    .text_right()
-                                                    .font_family(tokens::FONT_MONO)
-                                                    .text_xs()
-                                                    .text_color(theme.danger)
-                                                    .child(format!("-{}", s.deleted)),
-                                            )
-                                            .child(
-                                                div()
-                                                    .font_family(tokens::FONT_MONO)
-                                                    .text_xs()
-                                                    .text_color(theme.muted_foreground)
-                                                    .child(s.path.clone()),
-                                            )
-                                    }))
-                            } else {
-                                div()
-                                    .flex_1()
                                     .flex()
                                     .items_center()
-                                    .justify_center()
+                                    .gap_2()
                                     .font_family(tokens::FONT_MONO)
                                     .text_xs()
                                     .text_color(theme.muted_foreground)
-                                    .child("选择左侧提交查看详情")
-                            }),
-                    ),
+                                    .child(short)
+                                    .child(format!("{} · {}", c.author, c.date)),
+                            )
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.select_commit(&sha, cx);
+                            }));
+                        if selected {
+                            row.bg(theme.list_active)
+                        } else {
+                            row.hover(|s| s.bg(theme.list_hover))
+                        }
+                    })),
+            )
+            .child(
+                // Commit detail (bottom): message, files, numstat — stays in
+                // sync with the selected commit above.
+                div()
+                    .flex_1()
+                    .overflow_y_scrollbar()
+                    .p_4()
+                    .border_t_1()
+                    .border_color(theme.border)
+                    .child(if let Some(d) = &self.commit_detail {
+                        div()
+                            .v_flex()
+                            .gap_3()
+                            .w_full()
+                            .child(
+                                div()
+                                    .text_lg()
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .child(d.message.clone()),
+                            )
+                            .child(
+                                div()
+                                    .font_family(tokens::FONT_MONO)
+                                    .text_xs()
+                                    .text_color(theme.muted_foreground)
+                                    .child(format!(
+                                        "{} · {} · {}",
+                                        d.sha, d.author, d.date
+                                    )),
+                            )
+                            .child(div().w_full().h(px(1.0)).bg(theme.border))
+                            .child(mono_label("FILES").text_color(theme.muted_foreground))
+                            .children(d.files.iter().map(|f| {
+                                let color = if f.status.as_str() == "D" {
+                                    theme.danger
+                                } else {
+                                    theme.foreground
+                                };
+                                div()
+                                    .flex()
+                                    .gap_2()
+                                    .items_center()
+                                    .child(
+                                        div()
+                                            .font_family(tokens::FONT_MONO)
+                                            .text_xs()
+                                            .text_color(theme.foreground)
+                                            .child(f.status.clone()),
+                                    )
+                                    .child(
+                                        div()
+                                            .font_family(tokens::FONT_MONO)
+                                            .text_xs()
+                                            .text_color(color)
+                                            .child(f.path.clone()),
+                                    )
+                            }))
+                            .child(div().w_full().h(px(1.0)).bg(theme.border))
+                            .child(mono_label("NUMSTAT").text_color(theme.muted_foreground))
+                            .children(self.diff_stats.iter().map(|s| {
+                                div()
+                                    .flex()
+                                    .gap_3()
+                                    .items_center()
+                                    .child(
+                                        div()
+                                            .w(px(tokens::NUMSTAT_W))
+                                            .text_right()
+                                            .font_family(tokens::FONT_MONO)
+                                            .text_xs()
+                                            .text_color(theme.foreground)
+                                            .child(format!("+{}", s.added)),
+                                    )
+                                    .child(
+                                        div()
+                                            .w(px(tokens::NUMSTAT_W))
+                                            .text_right()
+                                            .font_family(tokens::FONT_MONO)
+                                            .text_xs()
+                                            .text_color(theme.danger)
+                                            .child(format!("-{}", s.deleted)),
+                                    )
+                                    .child(
+                                        div()
+                                            .font_family(tokens::FONT_MONO)
+                                            .text_xs()
+                                            .text_color(theme.muted_foreground)
+                                            .child(s.path.clone()),
+                                    )
+                            }))
+                    } else {
+                        div()
+                            .flex_1()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .font_family(tokens::FONT_MONO)
+                            .text_xs()
+                            .text_color(theme.muted_foreground)
+                            .child("选择上方提交查看详情")
+                    }),
             )
     }
 
@@ -1091,25 +1088,225 @@ impl XWikiApp {
         grid
     }
 
-    fn render_doc_view(&self, cx: &mut Context<Self>) -> Div {
+    fn render_doc_view(&self, window: &mut Window, cx: &mut Context<Self>) -> Div {
         let theme = cx.theme().clone();
+        let app_handle = cx.entity();
+        // Build the content side first so `window` isn't borrowed twice in the
+        // splitter call (it may itself open the history split).
+        let content = self.render_doc_content(window, cx);
         div()
             .flex()
+            .flex_col()
             .size_full()
             .child(
-                // Doc rail: tree navigation + breadcrumb.
+                split_pane::horizontal(
+                    "doc-rail-split",
+                    self.layout.doc_rail,
+                    tokens::DOC_RAIL_MIN,
+                    tokens::DOC_RAIL_MAX,
+                    tokens::DOC_RAIL,
+                    window,
+                    theme.border,
+                    theme.list_hover,
+                    self.render_doc_rail(cx),
+                    content,
+                    move |w, _window, cx| {
+                        app_handle.update(cx, |app, cx| {
+                            app.layout.doc_rail = w;
+                            config::save_layout(&app.layout);
+                            cx.notify();
+                        });
+                    },
+                ),
+            )
+            .child(self.render_status_bar(cx))
+    }
+
+    /// Doc rail: tree navigation + breadcrumb (left of the rail split).
+    fn render_doc_rail(&self, cx: &mut Context<Self>) -> Div {
+        let theme = cx.theme().clone();
+        div()
+            .h_full()
+            .flex()
+            .flex_col()
+            .bg(theme.sidebar)
+            .child(
                 div()
-                    .w(px(tokens::PANEL_DOC_RAIL))
-                    .h_full()
+                    .px_3()
+                    .py_3()
                     .flex()
-                    .flex_col()
-                    .border_r_1()
-                    .border_color(theme.border)
-                    .bg(theme.sidebar)
+                    .items_center()
+                    .justify_between()
                     .child(
                         div()
-                            .px_3()
-                            .py_3()
+                            .font_family(tokens::FONT_MONO)
+                            .text_xs()
+                            .text_color(theme.muted_foreground)
+                            .child("DOCS"),
+                    )
+                    .child(
+                        Button::new("back-projects")
+                            .rounded(px(tokens::RADIUS))
+                            .label("← 项目")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.back_to_projects(cx)
+                            })),
+                    ),
+            )
+            .child(
+                // Breadcrumb: docs › dir1 › dir2 (web style).
+                div()
+                    .px_3()
+                    .pb_2()
+                    .flex()
+                    .flex_wrap()
+                    .items_center()
+                    .gap_1()
+                    .child(
+                        div()
+                            .id("crumb-root")
+                            .font_family(tokens::FONT_MONO)
+                            .text_xs()
+                            .text_color(theme.muted_foreground)
+                            .hover(|s| s.text_color(theme.accent))
+                            .cursor_pointer()
+                            .child("docs")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.load_tree("", cx);
+                            })),
+                    )
+                    .children({
+                        let mut acc = String::new();
+                        let mut parts: Vec<String> = Vec::new();
+                        for part in self.tree_path.split('/') {
+                            if part.is_empty() {
+                                continue;
+                            }
+                            acc = if acc.is_empty() {
+                                part.to_string()
+                            } else {
+                                format!("{acc}/{part}")
+                            };
+                            parts.push(acc.clone());
+                        }
+                        let mut out: Vec<AnyElement> = Vec::new();
+                        for (i, full) in parts.iter().enumerate() {
+                            let is_last = i == parts.len() - 1;
+                            let target = full.clone();
+                            let name: String = full
+                                .split('/')
+                                .next_back()
+                                .unwrap_or("")
+                                .to_string();
+                            out.push(
+                                div()
+                                    .font_family(tokens::FONT_MONO)
+                                    .text_xs()
+                                    .text_color(theme.muted_foreground)
+                                    .child("›")
+                                    .into_any_element(),
+                            );
+                            if is_last {
+                                out.push(
+                                    div()
+                                        .font_family(tokens::FONT_MONO)
+                                        .text_xs()
+                                        .text_color(theme.foreground)
+                                        .child(name)
+                                        .into_any_element(),
+                                );
+                            } else {
+                                out.push(
+                                    div()
+                                        .id(format!("crumb-{target}"))
+                                        .font_family(tokens::FONT_MONO)
+                                        .text_xs()
+                                        .text_color(theme.muted_foreground)
+                                        .hover(|s| s.text_color(theme.accent))
+                                        .cursor_pointer()
+                                        .child(name)
+                                        .on_click(cx.listener(
+                                            move |this, _, _, cx| {
+                                                this.load_tree(&target, cx);
+                                            },
+                                        ))
+                                        .into_any_element(),
+                                );
+                            }
+                        }
+                        out
+                    }),
+            )
+            .child(div().flex_1().overflow_y_scrollbar().child(self.render_tree(cx)))
+    }
+
+    /// Content area: reading/editor, plus the history context panel on the
+    /// right when open.
+    fn render_doc_content(
+        &self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let theme = cx.theme().clone();
+        let main = div()
+            .flex_1()
+            .min_w(px(0.0))
+            .h_full()
+            .child(self.render_main_pane(cx));
+        if !self.history_open {
+            return main;
+        }
+        let app_handle = cx.entity();
+        split_pane::horizontal_right(
+            "history-split",
+            self.layout.history,
+            tokens::HISTORY_W_MIN,
+            tokens::HISTORY_W_MAX,
+            tokens::HISTORY_W,
+            window,
+            theme.border,
+            theme.list_hover,
+            main,
+            self.render_history_view(cx),
+            move |w, _window, cx| {
+                app_handle.update(cx, |app, cx| {
+                    app.layout.history = w;
+                    config::save_layout(&app.layout);
+                    cx.notify();
+                });
+            },
+        )
+    }
+
+    /// Main pane: the editor, or the reading view, or a select-a-doc hint.
+    fn render_main_pane(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = cx.theme().clone();
+        if self.editing {
+            return self.render_editor_view(cx).into_any_element();
+        }
+        div()
+            .flex_1()
+            .h_full()
+            .flex()
+            .flex_col()
+            .overflow_y_scrollbar()
+            .child(if self.doc_loading {
+                div()
+                    .p_6()
+                    .font_family(tokens::FONT_MONO)
+                    .text_xs()
+                    .text_color(theme.muted_foreground)
+                    .child("加载中…")
+            } else if let Some(path) = &self.doc_path {
+                div()
+                    .p_6()
+                    .flex_1()
+                    .child(
+                        div()
+                            .pb_4()
+                            .mb_4()
+                            .border_b_1()
+                            .border_color(theme.border)
                             .flex()
                             .items_center()
                             .justify_between()
@@ -1118,204 +1315,62 @@ impl XWikiApp {
                                     .font_family(tokens::FONT_MONO)
                                     .text_xs()
                                     .text_color(theme.muted_foreground)
-                                    .child("DOCS"),
+                                    .child(path.clone()),
                             )
                             .child(
-                                Button::new("back-projects")
-                                    .rounded(px(tokens::RADIUS))
-                                    .label("← 项目")
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.back_to_projects(cx)
-                                    })),
+                                div()
+                                    .flex()
+                                    .gap_2()
+                                    .child(
+                                        Button::new("open-history")
+                                            .rounded(px(tokens::RADIUS))
+                                            .label("历史")
+                                            .on_click(cx.listener(
+                                                |this, _, _, cx| {
+                                                    this.open_history(cx)
+                                                },
+                                            )),
+                                    )
+                                    .child(
+                                        Button::new("start-edit")
+                                            .rounded(px(tokens::RADIUS))
+                                            .label("编辑")
+                                            .on_click(cx.listener(
+                                                |this, _, _, cx| {
+                                                    this.start_edit(cx)
+                                                },
+                                            )),
+                                    ),
                             ),
                     )
                     .child(
-                        // Breadcrumb: docs › dir1 › dir2 (web style).
                         div()
-                            .px_3()
-                            .pb_2()
+                            .w_full()
                             .flex()
-                            .flex_wrap()
-                            .items_center()
-                            .gap_1()
+                            .justify_center()
                             .child(
                                 div()
-                                    .id("crumb-root")
-                                    .font_family(tokens::FONT_MONO)
-                                    .text_xs()
-                                    .text_color(theme.muted_foreground)
-                                    .hover(|s| s.text_color(theme.accent))
-                                    .cursor_pointer()
-                                    .child("docs")
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.load_tree("", cx);
-                                    })),
-                            )
-                            .children({
-                                let mut acc = String::new();
-                                let mut parts: Vec<String> = Vec::new();
-                                for part in self.tree_path.split('/') {
-                                    if part.is_empty() {
-                                        continue;
-                                    }
-                                    acc = if acc.is_empty() {
-                                        part.to_string()
-                                    } else {
-                                        format!("{acc}/{part}")
-                                    };
-                                    parts.push(acc.clone());
-                                }
-                                let mut out: Vec<AnyElement> = Vec::new();
-                                for (i, full) in parts.iter().enumerate() {
-                                    let is_last = i == parts.len() - 1;
-                                    let target = full.clone();
-                                    let name: String = full
-                                        .split('/')
-                                        .next_back()
-                                        .unwrap_or("")
-                                        .to_string();
-                                    out.push(
-                                        div()
-                                            .font_family(tokens::FONT_MONO)
-                                            .text_xs()
-                                            .text_color(theme.muted_foreground)
-                                            .child("›")
-                                            .into_any_element(),
-                                    );
-                                    if is_last {
-                                        out.push(
-                                            div()
-                                                .font_family(tokens::FONT_MONO)
-                                                .text_xs()
-                                                .text_color(theme.foreground)
-                                                .child(name)
-                                                .into_any_element(),
-                                        );
-                                    } else {
-                                        out.push(
-                                            div()
-                                                .id(format!("crumb-{target}"))
-                                                .font_family(tokens::FONT_MONO)
-                                                .text_xs()
-                                                .text_color(theme.muted_foreground)
-                                                .hover(|s| s.text_color(theme.accent))
-                                                .cursor_pointer()
-                                                .child(name)
-                                                .on_click(cx.listener(
-                                                    move |this, _, _, cx| {
-                                                        this.load_tree(&target, cx);
-                                                    },
-                                                ))
-                                                .into_any_element(),
-                                        );
-                                    }
-                                }
-                                out
-                            }),
+                                    .w(px(tokens::MEASURE))
+                                    .child(
+                                        crate::ui::markdown(
+                                            "doc-content",
+                                            self.doc_content.clone(),
+                                        ),
+                                    ),
+                            ),
                     )
-                    .child(div().flex_1().overflow_y_scrollbar().child(self.render_tree(cx))),
-            )
-            .child(
-                // Content pane: markdown rendering (or the editor).
+            } else {
                 div()
                     .flex_1()
-                    .h_full()
                     .flex()
-                    .flex_col()
-                    .child(if self.history_open {
-                        self.render_history_view(cx).into_any_element()
-                    } else if self.editing {
-                        self.render_editor_view(cx).into_any_element()
-                    } else {
-                        div()
-                            .flex_1()
-                            .h_full()
-                            .flex()
-                            .flex_col()
-                            .overflow_y_scrollbar()
-                            .child(if self.doc_loading {
-                                div()
-                                    .p_6()
-                                    .font_family(tokens::FONT_MONO)
-                                    .text_xs()
-                                    .text_color(theme.muted_foreground)
-                                    .child("加载中…")
-                            } else if let Some(path) = &self.doc_path {
-                                div()
-                                    .p_6()
-                                    .flex_1()
-                                    .child(
-                                        div()
-                                            .pb_4()
-                                            .mb_4()
-                                            .border_b_1()
-                                            .border_color(theme.border)
-                                            .flex()
-                                            .items_center()
-                                            .justify_between()
-                                            .child(
-                                                div()
-                                                    .font_family(tokens::FONT_MONO)
-                                                    .text_xs()
-                                                    .text_color(theme.muted_foreground)
-                                                    .child(path.clone()),
-                                            )
-                                            .child(
-                                                div()
-                                                    .flex()
-                                                    .gap_2()
-                                                    .child(
-                                                        Button::new("open-history")
-                                                            .rounded(px(tokens::RADIUS))
-                                                            .label("历史")
-                                                            .on_click(cx.listener(
-                                                                |this, _, _, cx| {
-                                                                    this.open_history(cx)
-                                                                },
-                                                            )),
-                                                    )
-                                                    .child(
-                                                        Button::new("start-edit")
-                                                            .rounded(px(tokens::RADIUS))
-                                                            .label("编辑")
-                                                            .on_click(cx.listener(
-                                                                |this, _, _, cx| {
-                                                                    this.start_edit(cx)
-                                                                },
-                                                            )),
-                                                    ),
-                                            ),
-                                    )
-                                    .child(
-                                        div()
-                                            .w_full()
-                                            .flex()
-                                            .justify_center()
-                                            .child(
-                                                div()
-                                                    .w(px(tokens::MEASURE))
-                                                    .child(
-                                                        crate::ui::markdown(
-                                                            "doc-content",
-                                                            self.doc_content.clone(),
-                                                        ),
-                                                    ),
-                                            ),
-                                    )
-                            } else {
-                                div()
-                                    .flex_1()
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .font_family(tokens::FONT_MONO)
-                                    .text_xs()
-                                    .text_color(theme.muted_foreground)
-                                    .child("选择左侧文档")
-                            })
-                            .into_any_element()
-                    }),
-            )
+                    .items_center()
+                    .justify_center()
+                    .font_family(tokens::FONT_MONO)
+                    .text_xs()
+                    .text_color(theme.muted_foreground)
+                    .child("选择左侧文档")
+            })
+            .into_any_element()
     }
 
     fn do_login(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
@@ -1336,6 +1391,7 @@ impl XWikiApp {
         }
         let client = Client::new(&server);
         self.client = Some(client.clone());
+        self.server_url = server.clone();
         self.login_error = None;
         cx.spawn(async move |this, cx| {
             match client.login(username.trim(), &password).await {
@@ -1628,12 +1684,13 @@ impl XWikiApp {
             )
     }
 
-    fn render_workspace(&self, cx: &mut Context<Self>) -> Div {
-        let theme = cx.theme();
+    fn render_workspace(&self, window: &mut Window, cx: &mut Context<Self>) -> Div {
+        let theme = cx.theme().clone();
+        let app_handle = cx.entity();
         div()
-            .size_full()
             .flex()
             .flex_col()
+            .size_full()
             .child(
                 // Top bar: flush, hairline bottom border, mono labels.
                 div()
@@ -1725,113 +1782,198 @@ impl XWikiApp {
                     ),
             )
             .child(
-                div()
-                    .flex()
-                    .size_full()
-                    .child(
-                        // Project rail: mono section label, hairline divider.
-                        div()
-                            .w(px(tokens::PANEL_RAIL))
-                            .h_full()
-                            .flex()
-                            .flex_col()
-                            .border_r_1()
-                            .border_color(theme.border)
-                            .bg(theme.sidebar)
-                            .child(
-                                div()
-                                    .px_3()
-                                    .py_3()
-                                    .font_family(tokens::FONT_MONO)
-                                    .text_xs()
-                                    .text_color(theme.muted_foreground)
-                                    .child("PROJECTS"),
-                            )
-                            .child({
-                                let projects = self.projects.read().unwrap();
-                                let items: Vec<AnyElement> = projects
-                                    .iter()
-                                    .map(|p| {
-                                        let id = p.id.clone();
-                                        let theme2 = theme.clone();
-                                        div()
-                                            .id(format!("nav-{}", p.name))
-                                            .flex()
-                                            .items_center()
-                                            .px_3()
-                                            .py_1_5()
-                                            .hover(|s| s.bg(theme2.list_hover))
-                                            .cursor_pointer()
-                                            .child(
-                                                div()
-                                                    .font_family(tokens::FONT_MONO)
-                                                    .text_xs()
-                                                    .text_color(if p.archived {
-                                                        theme2.muted_foreground
-                                                    } else {
-                                                        theme2.foreground
-                                                    })
-                                                    .child(p.name.clone()),
-                                            )
-                                            .on_click(cx.listener(move |this, _, _, cx| {
-                                                this.open_project(&id, cx);
-                                            }))
-                                            .into_any_element()
-                                    })
-                                    .collect();
-                                div().children(items)
-                            }),
-                    )
-                    .child(
-                        // Content: filter row + project table.
-                        div()
-                            .flex_1()
-                            .h_full()
-                            .flex()
-                            .flex_col()
-                            .gap_3()
-                            .p_4()
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .justify_between()
-                                    .child(
-                                        div()
-                                            .w(px(280.0))
-                                            .child(Input::new(&self.filter_input).w_full()),
-                                    )
-                                    .child(
-                                        Button::new("new-project")
-                                            .primary()
-                                            .rounded(px(tokens::RADIUS))
-                                            .label("新建项目")
-                                            .on_click(cx.listener(
-                                                |this, _, window, cx| {
-                                                    this.open_new_project_dialog(
-                                                        window, cx,
-                                                    )
-                                                },
-                                            )),
-                                    ),
-                            )
-                            .child(if self.loading {
-                                div()
-                                    .font_family(tokens::FONT_MONO)
-                                    .text_xs()
-                                    .text_color(theme.muted_foreground)
-                                    .child("加载中…")
-                                    .into_any_element()
-                            } else {
-                                self.render_project_cards(cx).into_any_element()
-                            }),
-                    ),
+                // Project rail (resizable) + project content.
+                split_pane::horizontal(
+                    "projects-rail-split",
+                    self.layout.projects_rail,
+                    tokens::PROJECTS_RAIL_MIN,
+                    tokens::PROJECTS_RAIL_MAX,
+                    tokens::PROJECTS_RAIL,
+                    window,
+                    theme.border,
+                    theme.list_hover,
+                    div()
+                        .h_full()
+                        .flex()
+                        .flex_col()
+                        .bg(theme.sidebar)
+                        .child(
+                            div()
+                                .px_3()
+                                .py_3()
+                                .font_family(tokens::FONT_MONO)
+                                .text_xs()
+                                .text_color(theme.muted_foreground)
+                                .child("PROJECTS"),
+                        )
+                        .child({
+                            let projects = self.projects.read().unwrap();
+                            let items: Vec<AnyElement> = projects
+                                .iter()
+                                .map(|p| {
+                                    let id = p.id.clone();
+                                    let theme2 = theme.clone();
+                                    div()
+                                        .id(format!("nav-{}", p.name))
+                                        .flex()
+                                        .items_center()
+                                        .px_3()
+                                        .py_1_5()
+                                        .hover(|s| s.bg(theme2.list_hover))
+                                        .cursor_pointer()
+                                        .child(
+                                            div()
+                                                .font_family(tokens::FONT_MONO)
+                                                .text_xs()
+                                                .text_color(if p.archived {
+                                                    theme2.muted_foreground
+                                                } else {
+                                                    theme2.foreground
+                                                })
+                                                .child(p.name.clone()),
+                                        )
+                                        .on_click(cx.listener(move |this, _, _, cx| {
+                                            this.open_project(&id, cx);
+                                        }))
+                                        .into_any_element()
+                                })
+                                .collect();
+                            div().children(items)
+                        }),
+                    div()
+                        .flex_1()
+                        .min_w(px(0.0))
+                        .h_full()
+                        .flex()
+                        .flex_col()
+                        .gap_3()
+                        .p_4()
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .justify_between()
+                                .child(
+                                    div()
+                                        .w(px(280.0))
+                                        .child(Input::new(&self.filter_input).w_full()),
+                                )
+                                .child(
+                                    Button::new("new-project")
+                                        .primary()
+                                        .rounded(px(tokens::RADIUS))
+                                        .label("新建项目")
+                                        .on_click(cx.listener(
+                                            |this, _, window, cx| {
+                                                this.open_new_project_dialog(
+                                                    window, cx,
+                                                )
+                                            },
+                                        )),
+                                ),
+                        )
+                        .child(if self.loading {
+                            div()
+                                .font_family(tokens::FONT_MONO)
+                                .text_xs()
+                                .text_color(theme.muted_foreground)
+                                .child("加载中…")
+                                .into_any_element()
+                        } else {
+                            self.render_project_cards(cx).into_any_element()
+                        }),
+                    move |w, _window, cx| {
+                        app_handle.update(cx, |app, cx| {
+                            app.layout.projects_rail = w;
+                            config::save_layout(&app.layout);
+                            cx.notify();
+                        });
+                    },
+                ),
             )
+            .child(self.render_status_bar(cx))
+    }
+
+    /// Status area (plan §2.1): connection, server, lock/save state, and
+    /// transient operation feedback. Hairline-topped, mono readouts.
+    fn render_status_bar(&self, cx: &Context<Self>) -> Div {
+        let theme = cx.theme().clone();
+        let connected = self.client.is_some();
+        div()
+            .h(px(tokens::STATUS_H))
+            .px_3()
+            .flex()
+            .items_center()
+            .gap_3()
+            .border_t_1()
+            .border_color(theme.border)
+            .bg(theme.sidebar)
+            .child(
+                div()
+                    .w(px(8.0))
+                    .h(px(8.0))
+                    .rounded_full()
+                    .bg(if connected {
+                        theme.success_foreground
+                    } else {
+                        theme.danger
+                    }),
+            )
+            .child(
+                div()
+                    .font_family(tokens::FONT_MONO)
+                    .text_xs()
+                    .text_color(theme.muted_foreground)
+                    .child(if connected { "已连接" } else { "未连接" }),
+            )
+            .child(
+                div()
+                    .font_family(tokens::FONT_MONO)
+                    .text_xs()
+                    .text_color(theme.muted_foreground)
+                    .child(self.server_url.clone()),
+            )
+            .child(div().flex_1())
+            .child(if let Some(msg) = &self.status_msg {
+                div()
+                    .font_family(tokens::FONT_MONO)
+                    .text_xs()
+                    .text_color(theme.danger)
+                    .child(msg.clone())
+            } else {
+                div()
+            })
+            .child(if self.editing {
+                div()
+                    .font_family(tokens::FONT_MONO)
+                    .text_xs()
+                    .text_color(if self.lock_held {
+                        theme.success_foreground
+                    } else {
+                        theme.danger
+                    })
+                    .child(if self.lock_held {
+                        "编辑中 · 锁已持有"
+                    } else {
+                        "编辑中 · 锁丢失"
+                    })
+            } else {
+                div()
+            })
+            .child(if let Some(v) = &self.meta_version {
+                div()
+                    .font_family(tokens::FONT_MONO)
+                    .text_xs()
+                    .text_color(theme.muted_foreground)
+                    .child(format!("v{v}"))
+            } else {
+                div()
+            })
     }
 }
 
 impl Render for XWikiApp {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // ⌘K / ⌘⇧T dispatch here; bindings live on the root element so they
         // register during paint (Window::on_action requires it).
         let palette_weak = cx.weak_entity();
@@ -1849,9 +1991,9 @@ impl Render for XWikiApp {
                 Screen::Login => self.render_login(cx).into_any_element(),
                 Screen::Workspace => {
                     if self.selected_project.is_some() {
-                        self.render_doc_view(cx).into_any_element()
+                        self.render_doc_view(window, cx).into_any_element()
                     } else {
-                        self.render_workspace(cx).into_any_element()
+                        self.render_workspace(window, cx).into_any_element()
                     }
                 }
             })

@@ -356,3 +356,25 @@ src/
 - ✅ 字体:系统字体优先 + 跨平台/CJK 回退,不打包字体。
 - ✅ 交互:键盘、鼠标、触控板优先;排除移动端专属规则。
 - ✅ 方法:设计令牌 → Desktop Shell → 交互模型 → 组件状态 → 业务视图 → 桌面验证。
+
+---
+
+## 实施进度(初版)
+
+| 交付项 | 状态 | 说明 |
+| --- | --- | --- |
+| 1. 平台契约 + tokens/font | ✅ 2026-08-06 | `src/ui/tokens.rs`、`themes/cobalt.json`(Light/Dark 从 web oklch 精确映射),视图已消费 tokens |
+| 2. Cobalt Light/Dark + 组件状态 | ✅ 同上 | 主题双模式注册,按钮/输入/树/卡片状态色来自主题槽位 |
+| 3. SplitPane + Desktop Shell | ✅ 本次 | `src/ui/split_pane.rs`(拖动、min/max、双击重置、hover affordance);workspace 项目 rail、doc 树 rail、History context panel 三个分栏可调并持久化(`config::Layout`);History 改为右侧 context panel(可关闭、选中高亮);底部状态栏(连接、服务器、锁/编辑、status_msg、版本);`cargo test` 8 通过 |
+| 4. 键盘/focus/command 模型 | ⏳ 未开始 | Esc 关闭顺序、树方向键、focus return、⌘P 快速打开、⌘S 保存 |
+| 5. Workspace / Document Workspace 细化 | ⏳ 部分已有 | 项目卡片网格、搜索过滤、空状态已有;窄窗降级(≤1280 自动关 History 等)未做 |
+| 6. Editor / History / Settings 深化 | ⏳ 部分已有 | 锁 heartbeat、提交冲突恢复已有;Settings 页、revert 确认未做 |
+| 7. 完整验证矩阵 + 回归 | ⏳ 未开始 | Phase 7 全部条目;Windows 原生 + DPI 验证未做 |
+
+### 本次变更文件
+
+- `src/ui/split_pane.rs`(新增):水平分栏,左侧固定(`horizontal`)/右侧固定(`horizontal_right`)两种模式。
+- `src/ui/tokens.rs`:面板默认宽度与拖动范围(projects 220–360/260、doc rail 240–400/280、history 300–520/360)、`SPLITTER_HIT`、`STATUS_H`。
+- `src/config.rs`:`Layout`(serde JSON `layout.json`,损坏回退默认)与 `load_layout/save_layout`。
+- `src/app.rs`:三个分栏接入 + 宽度/History 开合持久化;History 改为右侧 context panel(列表在上、详情在下,选中行高亮 `list.active`);底部状态栏;`status_msg` 收敛到状态栏。
+- 未实现且留待后续:窄窗自动降级(ponytail: 有 min/max 钳制,无窗口缩放监听)。

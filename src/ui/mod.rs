@@ -3,6 +3,7 @@
 //! Views should consume `tokens::*` and the helpers here instead of raw
 //! literals, so the desktop app stays aligned with the web Cobalt language.
 
+pub mod split_pane;
 pub mod tokens;
 
 use gpui::{div, px, Div, IntoElement, ParentElement as _, Styled as _};

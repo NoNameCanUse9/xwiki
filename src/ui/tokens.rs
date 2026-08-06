@@ -58,14 +58,27 @@ pub const FONT_DISPLAY: &str = "Space Grotesk";
 /// Mono register: JetBrains Mono preferred, GPUI falls back otherwise.
 pub const FONT_MONO: &str = "JetBrains Mono";
 
-// ---- Panel geometry ----
+// ---- Panel geometry (plan §0.3: defaults + drag ranges) ----
 pub const TOOLBAR_H: f32 = 44.0;
-/// Workspace project rail.
-pub const PANEL_RAIL: f32 = 200.0;
-/// Document tree rail.
-pub const PANEL_DOC_RAIL: f32 = 280.0;
-/// History panel.
-pub const PANEL_HISTORY: f32 = 320.0;
+pub const STATUS_H: f32 = 26.0;
+
+/// Workspace project rail: default 260, drag 220–360.
+pub const PROJECTS_RAIL: f32 = 260.0;
+pub const PROJECTS_RAIL_MIN: f32 = 220.0;
+pub const PROJECTS_RAIL_MAX: f32 = 360.0;
+
+/// Document tree rail: default 280, drag 240–400.
+pub const DOC_RAIL: f32 = 280.0;
+pub const DOC_RAIL_MIN: f32 = 240.0;
+pub const DOC_RAIL_MAX: f32 = 400.0;
+
+/// History context panel: default 360, drag 300–520.
+pub const HISTORY_W: f32 = 360.0;
+pub const HISTORY_W_MIN: f32 = 300.0;
+pub const HISTORY_W_MAX: f32 = 520.0;
+
+/// Draggable divider: 7px hit area around a 1px hairline.
+pub const SPLITTER_HIT: f32 = 7.0;
 /// Project card width.
 pub const CARD_WIDTH: f32 = 340.0;
 /// Reading measure (web `max-w` for prose).
