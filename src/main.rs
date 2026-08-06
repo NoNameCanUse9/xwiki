@@ -14,6 +14,16 @@ use app::XWikiApp;
 actions!(app_actions, [TogglePalette, ToggleTheme]);
 
 fn main() {
+    // WSLg: the native-Wayland + swiftshader Vulkan path renders a blank
+    // window for this app, while the X11 (Xwayland) path is verified to
+    // paint correctly. Prefer X11 whenever a DISPLAY exists; on Wayland-
+    // only desktops (no DISPLAY) nothing changes. ponytail: heuristic, not
+    // a config knob — flip it if a real Wayland desktop regresses.
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("DISPLAY").is_some_and(|d| !d.is_empty()) {
+        std::env::remove_var("WAYLAND_DISPLAY");
+    }
+
     // Crash visibility: a panic in the UI thread would otherwise vanish with
     // the window; log it to a file too.
     std::panic::set_hook(Box::new(|info| {
