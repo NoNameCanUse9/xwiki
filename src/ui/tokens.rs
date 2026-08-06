@@ -58,6 +58,11 @@ pub const FONT_DISPLAY: &str = "Space Grotesk";
 /// Mono register: JetBrains Mono preferred, GPUI falls back otherwise.
 pub const FONT_MONO: &str = "JetBrains Mono";
 
+#[cfg(target_os = "macos")]
+pub const MOD_KEY: &str = "⌘";
+#[cfg(not(target_os = "macos"))]
+pub const MOD_KEY: &str = "Ctrl";
+
 // ---- Panel geometry (plan §0.3: defaults + drag ranges) ----
 pub const TOOLBAR_H: f32 = 44.0;
 pub const STATUS_H: f32 = 26.0;
@@ -79,8 +84,13 @@ pub const HISTORY_W_MAX: f32 = 520.0;
 
 /// Draggable divider: 7px hit area around a 1px hairline.
 pub const SPLITTER_HIT: f32 = 7.0;
-/// Project card width.
-pub const CARD_WIDTH: f32 = 340.0;
+/// Uniform project card height keeps metadata and actions aligned.
+pub const CARD_HEIGHT: f32 = 176.0;
+pub const CARD_MIN_WIDTH: f32 = 280.0;
+pub const CARD_MAX_WIDTH: f32 = 380.0;
+pub const PROJECT_GRID_MAX: f32 = 1560.0;
+/// Compact project rail used below the desktop workspace breakpoint.
+pub const PROJECTS_RAIL_COMPACT: f32 = 72.0;
 /// Reading measure (web `max-w` for prose).
 pub const MEASURE: f32 = 720.0;
 /// Mono meta column (numstat).
