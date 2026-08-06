@@ -11,7 +11,7 @@ mod ui;
 
 use app::XWikiApp;
 
-actions!(app_actions, [TogglePalette, ToggleTheme]);
+actions!(app_actions, [TogglePalette, ToggleTheme, QuickOpen]);
 
 fn main() {
     // WSLg: the native-Wayland + swiftshader Vulkan path renders a blank
@@ -72,6 +72,8 @@ fn main() {
         cx.bind_keys([
             KeyBinding::new("cmd-k", TogglePalette, None),
             KeyBinding::new("ctrl-k", TogglePalette, None),
+            KeyBinding::new("cmd-p", QuickOpen, None),
+            KeyBinding::new("ctrl-p", QuickOpen, None),
             KeyBinding::new("cmd-shift-t", ToggleTheme, None),
             KeyBinding::new("ctrl-shift-t", ToggleTheme, None),
         ]);
@@ -82,6 +84,9 @@ fn main() {
                     title: Some("AgentDocs".into()),
                     ..Default::default()
                 }),
+                // Plan §0.3: desktop window contract — never smaller than
+                // 960×640 so panels + main content stay usable.
+                window_min_size: Some(size(px(960.0), px(640.0))),
                 ..Default::default()
             }, |window, cx| {
                 let view = cx.new(|cx| XWikiApp::new(window, cx));

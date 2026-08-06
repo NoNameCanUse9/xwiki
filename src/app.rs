@@ -8,6 +8,7 @@ use gpui_component::{
     button::*,
     dialog::DialogContent,
     input::{Input, InputEvent, InputState},
+    menu::ContextMenuExt,
     scroll::ScrollableElement as _,
     notification::Notification,
     *,
@@ -16,7 +17,7 @@ use gpui_component::{
 use crate::api::{Client, dto};
 use crate::config;
 use crate::ui::{mono_label, split_pane, tokens};
-use crate::{TogglePalette, ToggleTheme};
+use crate::{QuickOpen, TogglePalette, ToggleTheme};
 
 /// Command palette entries: (id, label, hint). Availability is decided by
 /// the current screen state in `palette_commands`.
@@ -25,6 +26,53 @@ struct PaletteCmd {
     id: &'static str,
     label: &'static str,
     hint: &'static str,
+}
+
+/// A save-time revision conflict (409): the doc changed on the server since
+/// we started editing. The panel offers reload / force retry / abandon.
+#[derive(Clone)]
+pub(crate) struct ConflictInfo {
+    pub message: String,
+    pub path: String,
+}
+
+/// Destination of a ⌘P quick-open entry.
+#[derive(Clone)]
+pub(crate) enum QuickTarget {
+    OpenProject(String),
+    OpenDoc(String),
+    EnterDir(String),
+    BackToProjects,
+}
+
+/// Right-click menu action for a doc-tree row.
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = app_actions, no_json)]
+pub(crate) struct TreeContextAction {
+    pub path: String,
+    pub is_dir: bool,
+}
+
+/// Right-click menu action for a project card / rail row.
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = app_actions, no_json)]
+pub(crate) struct ProjectContextAction {
+    pub project_id: String,
+}
+
+/// Right-click "edit" action: loads the doc, then acquires the lock.
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = app_actions, no_json)]
+pub(crate) struct EditDocAction {
+    pub path: String,
+}
+
+/// A filterable ⌘P entry.
+#[derive(Clone)]
+pub(crate) struct QuickItem {
+    pub label: String,
+    pub hint: String,
+    pub target: QuickTarget,
 }
 
 /// Application shell: login screen and the project workspace.
@@ -69,6 +117,24 @@ pub struct XWikiApp {
     layout: config::Layout,
     /// Server URL as resolved at login (status bar).
     server_url: String,
+    /// Tree keyboard-navigation cursor (index into visible entries).
+    tree_focus: Option<usize>,
+    /// Save-time revision conflict (render_main_pane shows the recovery panel).
+    conflict: Option<ConflictInfo>,
+    /// Transient load errors with retry (per-area, not the login banner).
+    tree_error: Option<String>,
+    doc_error: Option<String>,
+    projects_error: Option<String>,
+    /// Settings view: server URL input + connection-test result.
+    settings_server_input: Entity<InputState>,
+    settings_test: Option<(bool, String)>,
+    /// ⌘P quick-open overlay state.
+    quick_open: bool,
+    quick_input: Entity<InputState>,
+    /// Edit requested from a context menu while the doc is still loading.
+    pending_edit: Option<String>,
+    /// Cached window title; `set_window_title` only on change.
+    last_title: String,
     /// Keep input subscriptions alive with the app entity.
     _subscriptions: Vec<Subscription>,
 }
@@ -76,6 +142,7 @@ pub struct XWikiApp {
 enum Screen {
     Login,
     Workspace,
+    Settings,
 }
 
 #[derive(Clone)]
@@ -125,6 +192,13 @@ impl XWikiApp {
                 .placeholder("# 用 Markdown 写作…")
         });
 
+        let settings_server_input = cx.new(|cx| {
+            let mut state = InputState::new(window, cx);
+            state.set_value(config::load_server(), window, cx);
+            state
+        });
+        let quick_input = cx
+            .new(|cx| InputState::new(window, cx).placeholder("项目 / 文档…"));
         let mut subs = Vec::new();
         for state in [&server_input, &user_input, &password_input] {
             subs.push(cx.subscribe_in(state, window, |_, _, _: &InputEvent, _, cx| {
@@ -139,6 +213,18 @@ impl XWikiApp {
                 window,
                 move |_, _, _: &InputEvent, _, cx| {
                     let _ = filter.read(cx);
+                    cx.notify();
+                },
+            ));
+        }
+        // ⌘P quick-open keystrokes re-render the overlay list.
+        {
+            let quick = quick_input.clone();
+            subs.push(cx.subscribe_in(
+                &quick_input,
+                window,
+                move |_, _, _: &InputEvent, _, cx| {
+                    let _ = quick.read(cx);
                     cx.notify();
                 },
             ));
@@ -176,6 +262,17 @@ impl XWikiApp {
             selected_sha: None,
             layout: config::load_layout(),
             server_url: config::load_server(),
+            tree_focus: None,
+            conflict: None,
+            tree_error: None,
+            doc_error: None,
+            projects_error: None,
+            settings_server_input,
+            settings_test: None,
+            quick_open: false,
+            quick_input,
+            pending_edit: None,
+            last_title: String::new(),
             _subscriptions: subs,
         }
     }
@@ -200,6 +297,7 @@ impl XWikiApp {
         self.doc_path = None;
         self.doc_content.clear();
         self.doc_loading = false;
+        self.tree_error = None;
         let path = path.to_string();
         cx.spawn(async move |this, cx| {
             match client.tree(&project, &path).await {
@@ -211,7 +309,7 @@ impl XWikiApp {
                 }
                 Err(e) => {
                     let _ = this.update(cx, |app, cx| {
-                        app.login_error = Some(e.to_string());
+                        app.tree_error = Some(e.to_string());
                         cx.notify();
                     });
                 }
@@ -229,6 +327,7 @@ impl XWikiApp {
         };
         self.doc_path = Some(path.to_string());
         self.doc_loading = true;
+        self.doc_error = None;
         let path = path.to_string();
         cx.spawn(async move |this, cx| {
             match client.page(&project, &path).await {
@@ -236,13 +335,18 @@ impl XWikiApp {
                     let _ = this.update(cx, |app, cx| {
                         app.doc_content = page.content;
                         app.doc_loading = false;
+                        // Context-menu edit: acquire the lock now that the
+                        // content is loaded.
+                        if app.pending_edit.take().as_deref() == Some(path.as_str()) {
+                            app.start_edit(cx);
+                        }
                         cx.notify();
                     });
                 }
                 Err(e) => {
                     let _ = this.update(cx, |app, cx| {
                         app.doc_loading = false;
-                        app.login_error = Some(e.to_string());
+                        app.doc_error = Some(e.to_string());
                         cx.notify();
                     });
                 }
@@ -401,8 +505,17 @@ impl XWikiApp {
                     let _ = this.update(cx, |app, cx| app.after_save(cx));
                 }
                 Err(e) => {
+                    let is_conflict = e.code == "revision_conflict";
+                    let message = e.message.clone();
                     let _ = this.update(cx, |app, cx| {
-                        app.status_msg = Some(format!("提交失败: {e}"));
+                        if is_conflict {
+                            app.conflict = Some(ConflictInfo {
+                                message,
+                                path: path.clone(),
+                            });
+                        } else {
+                            app.status_msg = Some(format!("提交失败: {e}"));
+                        }
                         cx.notify();
                     });
                 }
@@ -521,6 +634,7 @@ impl XWikiApp {
                         Button::new("close-history")
                             .rounded(px(tokens::RADIUS))
                             .label("关闭")
+                            .tooltip("关闭历史面板 (Esc)")
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.close_history(cx)
                             })),
@@ -712,6 +826,13 @@ impl XWikiApp {
             label: "切换主题",
             hint: "⌘⇧T",
         });
+        if self.client.is_some() {
+            cmds.push(PaletteCmd {
+                id: "settings",
+                label: "设置",
+                hint: "server · 连接",
+            });
+        }
         cmds.push(PaletteCmd {
             id: "logout",
             label: "退出登录",
@@ -806,6 +927,10 @@ impl XWikiApp {
                 });
             }
             "theme" => self.toggle_theme(cx),
+            "settings" => {
+                self.quick_open = false;
+                self.screen = Screen::Settings;
+            }
             "logout" => self.logout(cx),
             _ => {}
         }
@@ -867,6 +992,8 @@ impl XWikiApp {
                             .primary()
                             .rounded(px(tokens::RADIUS))
                             .label("保存")
+                            .tooltip("提交修改 (⌘S)")
+                            .disabled(!self.lock_held)
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.save_edit(cx)
                             })),
@@ -875,6 +1002,7 @@ impl XWikiApp {
                         Button::new("cancel-edit")
                             .rounded(px(tokens::RADIUS))
                             .label("取消")
+                            .tooltip("放弃修改并释放锁 (Esc)")
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.cancel_edit(cx)
                             })),
@@ -900,11 +1028,20 @@ impl XWikiApp {
     }
 
     /// Breadcrumb trail for the current tree directory; clicking a crumb
-    /// navigates back up.
-    fn render_tree(&self, cx: &mut Context<Self>) -> Div {
+    /// navigates back up. Keyboard: ↑/↓ move the focus cursor, → enters a
+    /// directory, ← goes up a level, Enter opens (plan §3.1).
+    fn render_tree(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = cx.theme().clone();
+        // Owned (path, is_dir) pairs: the keyboard listener below is 'static
+        // and must not borrow from `self`.
+        let items: Vec<(String, bool)> = self
+            .tree_entries
+            .iter()
+            .filter(|e| e.path != "_sidebar.md")
+            .map(|e| (e.path.clone(), e.r#type == "tree"))
+            .collect();
         let mut list = div().v_flex().w_full();
-        let count = self.tree_entries.len();
+        let count = items.len();
         list = list.child(
             div()
                 .px_3()
@@ -914,7 +1051,7 @@ impl XWikiApp {
                 .text_color(theme.muted_foreground)
                 .child(format!("root · {count} {}", if count == 1 { "item" } else { "items" })),
         );
-        if self.tree_entries.iter().filter(|e| e.path != "_sidebar.md").count() == 0 {
+        if items.is_empty() {
             list = list.child(
                 div()
                     .mx_3()
@@ -929,13 +1066,15 @@ impl XWikiApp {
                     .text_color(theme.muted_foreground)
                     .child(mono_label("空目录")),
             );
-            return list;
+            return list.into_any_element();
         }
-        for e in self.tree_entries.iter().filter(|e| e.path != "_sidebar.md") {
-            let is_dir = e.r#type == "tree";
-            let path = e.path.clone();
+        let focus_bar = theme.accent;
+        for (i, (path, is_dir)) in items.iter().enumerate() {
             let is_selected =
                 !is_dir && self.doc_path.as_deref() == Some(path.as_str());
+            let is_focused = self.tree_focus == Some(i);
+            let path_owned = path.clone();
+            let is_dir_owned = *is_dir;
             let row = div()
                 .id(path.clone())
                 .flex()
@@ -947,12 +1086,12 @@ impl XWikiApp {
                 .border_color(theme.border)
                 .cursor_pointer()
                 .child(
-                    // Selection bar: the cobalt signal on the active row.
+                    // Selection bar: cobalt signal on the focused/active row.
                     div()
                         .w(px(2.0))
                         .self_stretch()
-                        .bg(if is_selected {
-                            theme.accent
+                        .bg(if is_selected || is_focused {
+                            focus_bar
                         } else {
                             gpui::transparent_black()
                         }),
@@ -963,36 +1102,113 @@ impl XWikiApp {
                         .text_center()
                         .font_family(tokens::FONT_MONO)
                         .text_xs()
-                        .text_color(if is_dir { theme.accent } else { theme.muted_foreground })
-                        .child(if is_dir { "▸" } else { "·" }),
+                        .text_color(if is_dir_owned {
+                            theme.accent
+                        } else {
+                            theme.muted_foreground
+                        })
+                        .child(if is_dir_owned { "▸" } else { "·" }),
                 )
                 .child(
                     div()
                         .flex_1()
                         .font_family(tokens::FONT_MONO)
                         .text_xs()
-                        .text_color(if is_selected || is_dir {
+                        .text_color(if is_selected || is_focused || is_dir_owned {
                             theme.foreground
                         } else {
                             theme.muted_foreground
                         })
-                        .child(e.name.clone()),
+                        .child(path_owned.split('/').next_back().unwrap_or("").to_string()),
                 )
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    if is_dir {
-                        this.load_tree(&path, cx);
-                    } else {
-                        this.open_doc(&path, cx);
-                    }
-                }));
-            let row = if is_selected {
+                .on_click({
+                    let click_path = path_owned.clone();
+                    cx.listener(move |this, _, _, cx| {
+                        this.tree_focus = Some(i);
+                        if is_dir_owned {
+                            this.load_tree(&click_path, cx);
+                        } else {
+                            this.open_doc(&click_path, cx);
+                        }
+                    })
+                });
+            let row = if is_selected || is_focused {
                 row.bg(theme.list_active)
             } else {
                 row.hover(|s| s.bg(theme.list_hover))
             };
+            // Plan §3.2: right-click on a tree row.
+            let ctx_path = path_owned.clone();
+            let ctx_dir = is_dir_owned;
+            let row = row.context_menu(move |menu, _window, _cx| {
+                let mut m = menu.menu(
+                    if ctx_dir { "进入目录" } else { "打开" },
+                    Box::new(TreeContextAction {
+                        path: ctx_path.clone(),
+                        is_dir: ctx_dir,
+                    }),
+                );
+                if !ctx_dir {
+                    m = m.menu(
+                        "编辑",
+                        Box::new(EditDocAction { path: ctx_path.clone() }),
+                    );
+                }
+                m
+            });
             list = list.child(row);
         }
-        list
+        // Keyboard: wrap the list in a focusable container.
+        let dirs: Vec<String> = items
+            .iter()
+            .filter(|(_, d)| *d)
+            .map(|(p, _)| p.clone())
+            .collect();
+        let items_clone = items.clone();
+        div()
+            .id("tree-keyboard")
+            .w_full()
+            .focusable()
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _w, cx| {
+                let n = items_clone.len();
+                if n == 0 {
+                    return;
+                }
+                let cur = this.tree_focus.unwrap_or(0).min(n - 1);
+                match event.keystroke.key.as_str() {
+                    "up" => this.tree_focus = Some((cur + n - 1) % n),
+                    "down" => this.tree_focus = Some((cur + 1) % n),
+                    "right" => {
+                        if let Some(dir) = dirs.iter().find(|p| {
+                            items_clone
+                                .iter()
+                                .position(|(path, _)| path == *p)
+                                .map(|idx| idx == cur)
+                                .unwrap_or(false)
+                        }) {
+                            this.load_tree(dir, cx);
+                            return;
+                        }
+                    }
+                    "left" => {
+                        let parent = this.tree_path.rsplit_once('/').map(|(p, _)| p.to_string());
+                        this.load_tree(parent.as_deref().unwrap_or(""), cx);
+                        return;
+                    }
+                    "enter" => {
+                        let (path, is_dir) = &items_clone[cur];
+                        if *is_dir {
+                            this.load_tree(path, cx);
+                        } else {
+                            this.open_doc(path, cx);
+                        }
+                    }
+                    _ => return,
+                }
+                cx.notify();
+            }))
+            .child(list)
+            .into_any_element()
     }
 
     /// Project card grid (web home.tsx style): hairline panels, hover lift,
@@ -1121,9 +1337,20 @@ impl XWikiApp {
                                 .child("打开 →"),
                         ),
                 )
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.open_project(&id, cx);
-                }));
+                .on_click({
+                    let click_id = id.clone();
+                    cx.listener(move |this, _, _, cx| {
+                        this.open_project(&click_id, cx)
+                    })
+                });
+            let card = card.context_menu(move |menu, _window, _cx| {
+                menu.menu(
+                    "打开项目",
+                    Box::new(ProjectContextAction {
+                        project_id: id.clone(),
+                    }),
+                )
+            });
             grid = grid.child(card);
         }
         grid
@@ -1278,7 +1505,39 @@ impl XWikiApp {
                         out
                     }),
             )
-            .child(div().flex_1().overflow_y_scrollbar().child(self.render_tree(cx)))
+            .child(if let Some(err) = &self.tree_error {
+                div()
+                    .flex_1()
+                    .p_3()
+                    .v_flex()
+                    .gap_3()
+                    .child(
+                        mono_label("目录加载失败")
+                            .text_color(theme.danger),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(theme.muted_foreground)
+                            .child(err.clone()),
+                    )
+                    .child(
+                        Button::new("retry-tree")
+                            .rounded(px(tokens::RADIUS))
+                            .label("重试")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                let path = this.tree_path.clone();
+                                this.load_tree(&path, cx);
+                            })),
+                    )
+                    .into_any_element()
+            } else {
+                div()
+                    .flex_1()
+                    .overflow_y_scrollbar()
+                    .child(self.render_tree(cx))
+                    .into_any_element()
+            })
     }
 
     /// Content area: reading/editor, plus the history context panel on the
@@ -1322,6 +1581,11 @@ impl XWikiApp {
     /// Main pane: the editor, or the reading view, or a select-a-doc hint.
     fn render_main_pane(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = cx.theme().clone();
+        if let Some(c) = &self.conflict {
+            return self
+                .render_conflict_panel(c, cx)
+                .into_any_element();
+        }
         if self.editing {
             return self.render_editor_view(cx).into_any_element();
         }
@@ -1332,12 +1596,72 @@ impl XWikiApp {
             .flex_col()
             .overflow_y_scrollbar()
             .child(if self.doc_loading {
+                // Plan §4: skeleton while the page loads.
                 div()
                     .p_6()
-                    .font_family(tokens::FONT_MONO)
-                    .text_xs()
-                    .text_color(theme.muted_foreground)
-                    .child("加载中…")
+                    .v_flex()
+                    .gap_3()
+                    .w_full()
+                    .child(
+                        div()
+                            .w(px(320.0))
+                            .h(px(20.0))
+                            .rounded(px(tokens::RADIUS_SMALL))
+                            .bg(theme.skeleton),
+                    )
+                    .child(
+                        div()
+                            .w_full()
+                            .h(px(12.0))
+                            .rounded(px(tokens::RADIUS_SMALL))
+                            .bg(theme.skeleton),
+                    )
+                    .child(
+                        div()
+                            .w(px(480.0))
+                            .h(px(12.0))
+                            .rounded(px(tokens::RADIUS_SMALL))
+                            .bg(theme.skeleton),
+                    )
+                    .child(
+                        div()
+                            .w(px(360.0))
+                            .h(px(12.0))
+                            .rounded(px(tokens::RADIUS_SMALL))
+                            .bg(theme.skeleton),
+                    )
+            } else if let Some(err) = &self.doc_error {
+                div()
+                    .flex_1()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .justify_center()
+                    .gap_4()
+                    .child(
+                        mono_label("加载失败")
+                            .text_color(theme.danger),
+                    )
+                    .child(
+                        div()
+                            .px_4()
+                            .text_center()
+                            .text_sm()
+                            .text_color(theme.muted_foreground)
+                            .child(err.clone()),
+                    )
+                    .child(
+                        Button::new("retry-doc")
+                            .rounded(px(tokens::RADIUS))
+                            .label("重试")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                let path = this
+                                    .doc_path
+                                    .clone()
+                                    .unwrap_or_default();
+                                this.open_doc(&path, cx);
+                            })),
+                    )
             } else if let Some(path) = &self.doc_path {
                 div()
                     .p_6()
@@ -1463,6 +1787,7 @@ impl XWikiApp {
             return;
         };
         self.loading = true;
+        self.projects_error = None;
         cx.spawn(async move |this, cx| {
             let projects = client.projects().await;
             let meta = client.meta().await;
@@ -1481,7 +1806,7 @@ impl XWikiApp {
                 Err(e) => {
                     let _ = this.update(cx, |app, cx| {
                         app.loading = false;
-                        app.login_error = Some(e.to_string());
+                        app.projects_error = Some(e.to_string());
                         cx.notify();
                     });
                 }
@@ -1808,6 +2133,7 @@ impl XWikiApp {
                                 Button::new("toggle-theme")
                                     .rounded(px(tokens::RADIUS))
                                     .label(if cx.theme().is_dark() { "浅色" } else { "深色" })
+                                    .tooltip("切换主题 (⌘⇧T)")
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.toggle_theme(cx)
                                     })),
@@ -1816,6 +2142,7 @@ impl XWikiApp {
                                 Button::new("logout")
                                     .rounded(px(tokens::RADIUS))
                                     .label("退出")
+                                    .tooltip("退出登录")
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.logout(cx)
                                     })),
@@ -1937,11 +2264,73 @@ impl XWikiApp {
                                 ),
                         )
                         .child(if self.loading {
+                            // Plan §4: skeleton cards while projects load.
                             div()
-                                .font_family(tokens::FONT_MONO)
-                                .text_xs()
-                                .text_color(theme.muted_foreground)
-                                .child("加载中…")
+                                .flex()
+                                .flex_wrap()
+                                .gap_3()
+                                .children((0..3).map(|i| {
+                                    div()
+                                        .id(format!("skeleton-card-{i}"))
+                                        .w(px(tokens::CARD_WIDTH))
+                                        .h(px(120.0))
+                                        .p_4()
+                                        .rounded(px(tokens::RADIUS))
+                                        .border_1()
+                                        .border_color(theme.border)
+                                        .v_flex()
+                                        .gap_3()
+                                        .child(
+                                            div()
+                                                .w(px(180.0))
+                                                .h(px(16.0))
+                                                .rounded(px(tokens::RADIUS_SMALL))
+                                                .bg(theme.skeleton),
+                                        )
+                                        .child(
+                                            div()
+                                                .w_full()
+                                                .h(px(12.0))
+                                                .rounded(px(tokens::RADIUS_SMALL))
+                                                .bg(theme.skeleton),
+                                        )
+                                        .child(
+                                            div()
+                                                .w(px(120.0))
+                                                .h(px(12.0))
+                                                .rounded(px(tokens::RADIUS_SMALL))
+                                                .bg(theme.skeleton),
+                                        )
+                                }))
+                                .into_any_element()
+                        } else if let Some(err) = &self.projects_error {
+                            div()
+                                .flex_1()
+                                .flex()
+                                .flex_col()
+                                .items_center()
+                                .justify_center()
+                                .gap_4()
+                                .child(
+                                    mono_label("加载失败")
+                                        .text_color(theme.danger),
+                                )
+                                .child(
+                                    div()
+                                        .px_4()
+                                        .text_center()
+                                        .text_sm()
+                                        .text_color(theme.muted_foreground)
+                                        .child(err.clone()),
+                                )
+                                .child(
+                                    Button::new("retry-projects")
+                                        .rounded(px(tokens::RADIUS))
+                                        .label("重试")
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            this.load_projects(cx)
+                                        })),
+                                )
                                 .into_any_element()
                         } else {
                             self.render_project_cards(cx).into_any_element()
@@ -2034,33 +2423,565 @@ impl XWikiApp {
                 div()
             })
     }
+
+    // ----- Window title & screen helpers -----
+
+    fn screen_is_workspace(&self) -> bool {
+        matches!(self.screen, Screen::Workspace)
+    }
+
+    /// Dynamic window title: AgentDocs — <project> / <doc>.
+    fn window_title(&self) -> String {
+        if self.screen_is_workspace() {
+            if let Some(project) = self.selected_project.as_deref() {
+                let name = self
+                    .projects
+                    .read()
+                    .unwrap()
+                    .iter()
+                    .find(|p| Some(p.id.as_str()) == self.selected_project.as_deref())
+                    .map(|p| p.name.clone())
+                    .unwrap_or_else(|| project.to_string());
+                if let Some(path) = &self.doc_path {
+                    return format!("AgentDocs — {name} / {path}");
+                }
+                return format!("AgentDocs — {name}");
+            }
+            "AgentDocs".into()
+        } else if matches!(self.screen, Screen::Settings) {
+            "AgentDocs — 设置".into()
+        } else {
+            "AgentDocs".into()
+        }
+    }
+
+    // ----- ⌘P quick open -----
+
+    fn quick_items(&self) -> Vec<QuickItem> {
+        let mut items = Vec::new();
+        if let Some(_project) = &self.selected_project {
+            for e in self.tree_entries.iter().filter(|e| e.path != "_sidebar.md") {
+                if e.r#type == "tree" {
+                    items.push(QuickItem {
+                        label: format!("目录 {}/", e.path),
+                        hint: "dir".into(),
+                        target: QuickTarget::EnterDir(e.path.clone()),
+                    });
+                } else {
+                    items.push(QuickItem {
+                        label: e.path.clone(),
+                        hint: "doc".into(),
+                        target: QuickTarget::OpenDoc(e.path.clone()),
+                    });
+                }
+            }
+            items.push(QuickItem {
+                label: "返回项目列表".into(),
+                hint: "esc".into(),
+                target: QuickTarget::BackToProjects,
+            });
+        }
+        if self.client.is_some() {
+            for p in self.projects.read().unwrap().iter() {
+                items.push(QuickItem {
+                    label: format!("项目 {}", p.name),
+                    hint: "project".into(),
+                    target: QuickTarget::OpenProject(p.id.clone()),
+                });
+            }
+        }
+        items
+    }
+
+    fn run_quick_open(&mut self, target: QuickTarget, cx: &mut Context<Self>) {
+        match target {
+            QuickTarget::OpenProject(id) => self.open_project(&id, cx),
+            QuickTarget::OpenDoc(path) => self.open_doc(&path, cx),
+            QuickTarget::EnterDir(path) => self.load_tree(&path, cx),
+            QuickTarget::BackToProjects => self.back_to_projects(cx),
+        }
+        cx.notify();
+    }
+
+    fn toggle_quick_open(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        self.quick_open = !self.quick_open;
+        if self.quick_open {
+            let input = self.quick_input.clone();
+            if let Some(h) = cx.active_window() {
+                let _ = cx.update_window(h, move |_v, window, cx| {
+                    input.update(cx, |s, cx| s.set_value(String::new(), window, cx));
+                });
+            }
+        }
+        cx.notify();
+    }
+
+    /// Quick-open overlay: filterable list of projects + current tree docs.
+    fn render_quick_open(&self, cx: &Context<Self>) -> impl IntoElement {
+        let theme = cx.theme().clone();
+        let q = self.quick_input.read(cx).value().to_lowercase();
+        let items: Vec<QuickItem> = self
+            .quick_items()
+            .into_iter()
+            .filter(|i| {
+                q.is_empty()
+                    || i.label.to_lowercase().contains(&q)
+                    || i.hint.contains(&q)
+            })
+            .collect();
+        let mut list = div().v_flex().gap_1().w_full().px_4().pb_4();
+        if items.is_empty() {
+            list = list.child(
+                div()
+                    .py_6()
+                    .text_center()
+                    .font_family(tokens::FONT_MONO)
+                    .text_size(px(tokens::FONT_SIZE_LABEL))
+                    .text_color(theme.muted_foreground)
+                    .child("没有匹配的项目或文档"),
+            );
+        }
+        for it in &items {
+            let label = it.label.clone();
+            let hint = it.hint.clone();
+            let target = it.target.clone();
+            list = list.child(
+                div()
+                    .id(format!("quick-{label}"))
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .px_3()
+                    .py_2()
+                    .rounded(px(tokens::RADIUS_SMALL))
+                    .hover(|s| s.bg(theme.list_hover))
+                    .cursor_pointer()
+                    .child(div().text_sm().text_color(theme.foreground).child(label))
+                    .child(
+                        div()
+                            .font_family(tokens::FONT_MONO)
+                            .text_size(px(tokens::FONT_SIZE_LABEL))
+                            .text_color(theme.muted_foreground)
+                            .child(hint),
+                    )
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.run_quick_open(target.clone(), cx)
+                    })),
+            );
+        }
+        div()
+            .id("quick-open-overlay")
+            .absolute()
+            .size_full()
+            .top_0()
+            .left_0()
+            .bg(gpui::rgba(0x0b12204d))
+            .flex()
+            .items_start()
+            .justify_center()
+            .pt(px(96.0))
+            .child(
+                div()
+                    .w(px(560.0))
+                    .rounded(px(tokens::RADIUS))
+                    .border_1()
+                    .border_color(theme.border)
+                    .bg(theme.popover)
+                    .shadow(vec![BoxShadow::new(px(0.0), px(8.0), gpui::rgba(0x0b122066).into())
+                        .blur_radius(px(24.0))])
+                    .v_flex()
+                    .child(
+                        div()
+                            .px_4()
+                            .py_3()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .border_b_1()
+                            .border_color(theme.border)
+                            .child(
+                                mono_label("快速打开 · ⌘P")
+                                    .text_color(theme.muted_foreground),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .px_4()
+                            .py_3()
+                            .border_b_1()
+                            .border_color(theme.border)
+                            .child(Input::new(&self.quick_input).w_full()),
+                    )
+                    .child(div().max_h(px(360.0)).overflow_y_scrollbar().child(list)),
+            )
+            .on_mouse_down(MouseButton::Left, cx.listener(|this, _: &MouseDownEvent, _, cx| {
+                this.quick_open = false;
+                cx.notify();
+            }))
+    }
+
+    // ----- Revision-conflict recovery (plan §4) -----
+
+    /// Reload the server copy, dropping the local edit.
+    fn resolve_conflict_reload(&mut self, cx: &mut Context<Self>) {
+        let path = self.conflict.take().map(|c| c.path);
+        self.stop_heartbeat();
+        self.editing = false;
+        self.lock_held = false;
+        self.edit_path = None;
+        if let Some(p) = path {
+            self.open_doc(&p, cx);
+        }
+        cx.notify();
+    }
+
+    /// Retry the save against the fresh revision (last-writer-wins).
+    fn resolve_conflict_force(&mut self, cx: &mut Context<Self>) {
+        self.conflict = None;
+        self.save_edit(cx);
+    }
+
+    /// Abandon the edit, releasing the lock.
+    fn resolve_conflict_abandon(&mut self, cx: &mut Context<Self>) {
+        self.conflict = None;
+        self.cancel_edit(cx);
+    }
+
+    fn render_conflict_panel(&self, c: &ConflictInfo, cx: &mut Context<Self>) -> Div {
+        let theme = cx.theme().clone();
+        div()
+            .flex_1()
+            .h_full()
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(
+                div()
+                    .w(px(520.0))
+                    .p_6()
+                    .rounded(px(tokens::RADIUS))
+                    .border_1()
+                    .border_color(theme.danger)
+                    .bg(theme.popover)
+                    .v_flex()
+                    .gap_4()
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_3()
+                            .child(
+                                mono_label("保存冲突")
+                                    .text_color(theme.danger),
+                            )
+                            .child(div().flex_1())
+                            .child(
+                                div()
+                                    .font_family(tokens::FONT_MONO)
+                                    .text_size(px(tokens::FONT_SIZE_LABEL))
+                                    .text_color(theme.muted_foreground)
+                                    .child(c.path.clone()),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(theme.foreground)
+                            .child(c.message.clone()),
+                    )
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(theme.muted_foreground)
+                            .child(
+                                "服务器上的文档已被修改。选择如何处理你的本地编辑：",
+                            ),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .gap_2()
+                            .justify_end()
+                            .w_full()
+                            .child(
+                                Button::new("conflict-abandon")
+                                    .rounded(px(tokens::RADIUS))
+                                    .label("放弃编辑")
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.resolve_conflict_abandon(cx)
+                                    })),
+                            )
+                            .child(
+                                Button::new("conflict-reload")
+                                    .rounded(px(tokens::RADIUS))
+                                    .label("重新加载")
+                                    .tooltip("丢弃本地修改，加载服务器版本")
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.resolve_conflict_reload(cx)
+                                    })),
+                            )
+                            .child(
+                                Button::new("conflict-force")
+                                    .primary()
+                                    .rounded(px(tokens::RADIUS))
+                                    .label("覆盖重试")
+                                    .tooltip("以最新 revision 重新提交（后写者胜）")
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.resolve_conflict_force(cx)
+                                    })),
+                            ),
+                    ),
+            )
+    }
+
+    // ----- Settings view -----
+
+    fn test_connection(&mut self, cx: &mut Context<Self>) {
+        let url = {
+            let v = self.settings_server_input.read(cx).value().to_string();
+            if v.trim().is_empty() {
+                config::load_server()
+            } else {
+                v.trim().to_string()
+            }
+        };
+        self.settings_test = None;
+        let c = Client::new(&url);
+        cx.spawn(async move |this, cx| {
+            match c.meta().await {
+                Ok(m) => {
+                    let _ = this.update(cx, |app, cx| {
+                        app.settings_test =
+                            Some((true, format!("连接成功 · server v{}", m.version)));
+                        cx.notify();
+                    });
+                }
+                Err(e) => {
+                    let _ = this.update(cx, |app, cx| {
+                        app.settings_test = Some((false, format!("连接失败: {e}")));
+                        cx.notify();
+                    });
+                }
+            }
+        })
+        .detach();
+    }
+
+    fn save_server_settings(&mut self, cx: &mut Context<Self>) {
+        let url = self.settings_server_input.read(cx).value().trim().to_string();
+        if url.is_empty() {
+            self.settings_test = Some((false, "地址不能为空".into()));
+            cx.notify();
+            return;
+        }
+        config::save_server(&url);
+        self.server_url = url;
+        self.notify("服务器地址已保存,重新登录后生效".into(), cx);
+    }
+
+    fn render_settings(&self, cx: &mut Context<Self>) -> Div {
+        let theme = cx.theme().clone();
+        div()
+            .size_full()
+            .flex()
+            .flex_col()
+            .child(
+                // Header: mono label + back to workspace.
+                div()
+                    .h(px(tokens::TOOLBAR_H))
+                    .px_4()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .border_b_1()
+                    .border_color(theme.border)
+                    .bg(theme.sidebar)
+                    .child(mono_label("SETTINGS").text_color(theme.muted_foreground))
+                    .child(
+                        Button::new("settings-back")
+                            .rounded(px(tokens::RADIUS))
+                            .label("← 返回工作台")
+                            .tooltip("返回工作台 (Esc)")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.screen = Screen::Workspace;
+                                cx.notify();
+                            })),
+                    ),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .flex()
+                    .justify_center()
+                    .p_6()
+                    .child(
+                        div()
+                            .w(px(560.0))
+                            .v_flex()
+                            .gap_4()
+                            .child(mono_label("服务地址").text_color(theme.muted_foreground))
+                            .child(
+                                div()
+                                    .flex()
+                                    .gap_2()
+                                    .child(
+                                        div()
+                                            .flex_1()
+                                            .child(Input::new(&self.settings_server_input).w_full()),
+                                    )
+                                    .child(
+                                        Button::new("settings-test")
+                                            .rounded(px(tokens::RADIUS))
+                                            .label("测试连接")
+                                            .tooltip("检查服务器是否可达")
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                this.test_connection(cx)
+                                            })),
+                                    )
+                                    .child(
+                                        Button::new("settings-save")
+                                            .primary()
+                                            .rounded(px(tokens::RADIUS))
+                                            .label("保存")
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                this.save_server_settings(cx)
+                                            })),
+                                    ),
+                            )
+                            .child(if let Some((ok, msg)) = &self.settings_test {
+                                div()
+                                    .font_family(tokens::FONT_MONO)
+                                    .text_xs()
+                                    .text_color(if *ok { theme.success_foreground } else { theme.danger })
+                                    .child(msg.clone())
+                            } else {
+                                div()
+                            })
+                            .child(div().w_full().h(px(1.0)).bg(theme.border))
+                            .child(mono_label("当前用户").text_color(theme.muted_foreground))
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .text_color(theme.foreground)
+                                    .child(self.username.clone()),
+                            )
+                            .child(div().w_full().h(px(1.0)).bg(theme.border))
+                            .child(mono_label("主题").text_color(theme.muted_foreground))
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .text_color(theme.foreground)
+                                    .child(if cx.theme().is_dark() { "深色" } else { "浅色" }),
+                            )
+                            .child(div().w_full().h(px(1.0)).bg(theme.border))
+                            .child(mono_label("布局").text_color(theme.muted_foreground))
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .text_color(theme.muted_foreground)
+                                    .child(format!(
+                                        "项目侧栏 {}px · 文档树 {}px · 历史面板 {}px",
+                                        self.layout.projects_rail as i32,
+                                        self.layout.doc_rail as i32,
+                                        self.layout.history as i32,
+                                    )),
+                            ),
+                    ),
+            )
+    }
 }
 
 impl Render for XWikiApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // ⌘K / ⌘⇧T dispatch here; bindings live on the root element so they
-        // register during paint (Window::on_action requires it).
+        // ⌘K / ⌘P / ⌘⇧T dispatch here; bindings live on the root element so
+        // they register during paint (Window::on_action requires it).
         let palette_weak = cx.weak_entity();
+        let quick_weak = cx.weak_entity();
         let theme_weak = cx.weak_entity();
+        let ctx_weak = cx.weak_entity();
+        let proj_weak = cx.weak_entity();
+        let edit_weak = cx.weak_entity();
+
+        // Plan §3.1 keyboard model — Esc closes the innermost layer first.
+        // Dialogs own their own Escape binding (gpui-component), so while a
+        // dialog is open its CancelDialog consumes the key before this fires.
+        let title = self.window_title();
+        if title != self.last_title {
+            window.set_window_title(&title);
+            self.last_title = title;
+        }
         div()
             .id("app-root")
             .size_full()
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _window, cx| {
+                if event.keystroke.key != "escape" {
+                    return;
+                }
+                if this.quick_open {
+                    this.quick_open = false;
+                    cx.notify();
+                } else if this.editing {
+                    this.cancel_edit(cx);
+                } else if this.history_open {
+                    this.close_history(cx);
+                } else if this.screen_is_workspace() && this.selected_project.is_some() {
+                    this.back_to_projects(cx);
+                } else if matches!(this.screen, Screen::Settings) {
+                    this.screen = Screen::Workspace;
+                    cx.notify();
+                }
+            }))
             .on_action(move |_: &TogglePalette, window, cx| {
                 let _ = palette_weak.update(cx, |app, cx| app.toggle_palette(window, cx));
+            })
+            .on_action(move |_: &QuickOpen, window, cx| {
+                let _ = quick_weak.update(cx, |app, cx| app.toggle_quick_open(window, cx));
             })
             .on_action(move |_: &ToggleTheme, _window, cx| {
                 let _ = theme_weak.update(cx, |app, cx| app.toggle_theme(cx));
             })
-            .child(match self.screen {
-                Screen::Login => self.render_login(cx).into_any_element(),
-                Screen::Workspace => {
-                    if self.selected_project.is_some() {
-                        self.render_doc_view(window, cx).into_any_element()
+            .on_action(move |action: &TreeContextAction, _window, cx| {
+                let _ = ctx_weak.update(cx, |app, cx| {
+                    if action.is_dir {
+                        app.load_tree(&action.path, cx);
                     } else {
-                        self.render_workspace(window, cx).into_any_element()
+                        app.open_doc(&action.path, cx);
                     }
-                }
+                });
             })
+            .on_action(move |action: &ProjectContextAction, _window, cx| {
+                let _ = proj_weak.update(cx, |app, cx| {
+                    app.open_project(&action.project_id, cx);
+                });
+            })
+            .on_action(move |action: &EditDocAction, _window, cx| {
+                let _ = edit_weak.update(cx, |app, cx| {
+                    app.pending_edit = Some(action.path.clone());
+                    app.open_doc(&action.path, cx);
+                });
+            })
+            .child(
+                div()
+                    .flex_1()
+                    .size_full()
+                    .relative()
+                    .child(match self.screen {
+                        Screen::Login => self.render_login(cx).into_any_element(),
+                        Screen::Settings => self.render_settings(cx).into_any_element(),
+                        Screen::Workspace => {
+                            if self.selected_project.is_some() {
+                                self.render_doc_view(window, cx).into_any_element()
+                            } else {
+                                self.render_workspace(window, cx).into_any_element()
+                            }
+                        }
+                    })
+                    .child(if self.quick_open {
+                        self.render_quick_open(cx).into_any_element()
+                    } else {
+                        div().into_any_element()
+                    }),
+            )
     }
 }
 
