@@ -934,6 +934,8 @@ impl XWikiApp {
         for e in self.tree_entries.iter().filter(|e| e.path != "_sidebar.md") {
             let is_dir = e.r#type == "tree";
             let path = e.path.clone();
+            let is_selected =
+                !is_dir && self.doc_path.as_deref() == Some(path.as_str());
             let row = div()
                 .id(path.clone())
                 .flex()
@@ -943,8 +945,18 @@ impl XWikiApp {
                 .py_2()
                 .border_b_1()
                 .border_color(theme.border)
-                .hover(|s| s.bg(theme.list_hover))
                 .cursor_pointer()
+                .child(
+                    // Selection bar: the cobalt signal on the active row.
+                    div()
+                        .w(px(2.0))
+                        .self_stretch()
+                        .bg(if is_selected {
+                            theme.accent
+                        } else {
+                            gpui::transparent_black()
+                        }),
+                )
                 .child(
                     div()
                         .w(px(16.0))
@@ -959,7 +971,11 @@ impl XWikiApp {
                         .flex_1()
                         .font_family(tokens::FONT_MONO)
                         .text_xs()
-                        .text_color(if is_dir { theme.foreground } else { theme.muted_foreground })
+                        .text_color(if is_selected || is_dir {
+                            theme.foreground
+                        } else {
+                            theme.muted_foreground
+                        })
                         .child(e.name.clone()),
                 )
                 .on_click(cx.listener(move |this, _, _, cx| {
@@ -969,6 +985,11 @@ impl XWikiApp {
                         this.open_doc(&path, cx);
                     }
                 }));
+            let row = if is_selected {
+                row.bg(theme.list_active)
+            } else {
+                row.hover(|s| s.bg(theme.list_hover))
+            };
             list = list.child(row);
         }
         list
@@ -992,19 +1013,34 @@ impl XWikiApp {
             .cloned()
             .collect();
         if projects.is_empty() {
-            return div()
+            let empty = div()
                 .flex_1()
                 .flex()
+                .flex_col()
                 .items_center()
                 .justify_center()
-                .font_family(tokens::FONT_MONO)
-                .text_xs()
-                .text_color(theme.muted_foreground)
-                .child(if q.is_empty() {
-                    "还没有项目 · 点击右上角新建"
-                } else {
-                    "没有匹配的项目"
-                });
+                .gap_4()
+                .child(
+                    mono_label(if q.is_empty() {
+                        "还没有项目"
+                    } else {
+                        "没有匹配的项目"
+                    })
+                    .text_color(theme.muted_foreground),
+                );
+            return if q.is_empty() {
+                empty.child(
+                    Button::new("empty-new-project")
+                        .primary()
+                        .rounded(px(tokens::RADIUS))
+                        .label("新建项目")
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.open_new_project_dialog(window, cx)
+                        })),
+                )
+            } else {
+                empty
+            };
         }
         let mut grid = div().flex().flex_wrap().gap_3().w_full();
         for p in projects {
@@ -1017,8 +1053,13 @@ impl XWikiApp {
                 .border_1()
                 .border_color(theme.border)
                 .hover(|s| {
-                    s.border_color(theme.border)
-                        .bg(theme.list_hover)
+                    // Web "hover lift": surface tint + a soft lift shadow.
+                    s.bg(theme.list_hover).shadow(vec![BoxShadow::new(
+                        px(0.0),
+                        px(2.0),
+                        gpui::rgba(0x1920291a).into(),
+                    )
+                    .blur_radius(px(8.0))])
                 })
                 .cursor_pointer()
                 .v_flex()
@@ -1813,29 +1854,52 @@ impl XWikiApp {
                                 .map(|p| {
                                     let id = p.id.clone();
                                     let theme2 = theme.clone();
-                                    div()
+                                    let is_selected =
+                                        self.selected_project.as_deref()
+                                            == Some(p.id.as_str());
+                                    let row = div()
                                         .id(format!("nav-{}", p.name))
                                         .flex()
                                         .items_center()
+                                        .gap_2_5()
                                         .px_3()
                                         .py_1_5()
-                                        .hover(|s| s.bg(theme2.list_hover))
                                         .cursor_pointer()
+                                        .child(
+                                            // Selection bar: cobalt signal.
+                                            div()
+                                                .w(px(2.0))
+                                                .self_stretch()
+                                                .bg(if is_selected {
+                                                    theme2.accent
+                                                } else {
+                                                    gpui::transparent_black()
+                                                }),
+                                        )
                                         .child(
                                             div()
                                                 .font_family(tokens::FONT_MONO)
                                                 .text_xs()
-                                                .text_color(if p.archived {
+                                                .text_color(if is_selected {
+                                                    theme2.foreground
+                                                } else if p.archived {
                                                     theme2.muted_foreground
                                                 } else {
                                                     theme2.foreground
                                                 })
                                                 .child(p.name.clone()),
                                         )
-                                        .on_click(cx.listener(move |this, _, _, cx| {
-                                            this.open_project(&id, cx);
-                                        }))
-                                        .into_any_element()
+                                        .on_click(cx.listener(
+                                            move |this, _, _, cx| {
+                                                this.open_project(&id, cx)
+                                            },
+                                        ));
+                                    let row = if is_selected {
+                                        row.bg(theme2.list_active)
+                                    } else {
+                                        row.hover(|s| s.bg(theme2.list_hover))
+                                    };
+                                    row.into_any_element()
                                 })
                                 .collect();
                             div().children(items)

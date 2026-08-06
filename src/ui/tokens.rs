@@ -96,6 +96,11 @@ pub const LOGIN_TEXT: f32 = 420.0;
 ///
 /// Most slots are already backed by `themes/cobalt.json`; `graphite` (the
 /// code-card surface) and friends have no slot and live here.
+///
+/// `#[allow(dead_code)]`: only `graphite`/`graphite_soft` are consumed so
+/// far; views still read `theme.*` directly. The remaining fields are the
+/// migration target for the next pass (semantic names over raw theme reads).
+#[allow(dead_code)]
 #[derive(Clone)]
 pub struct Cobalt {
     /// App background (web `paper`).
