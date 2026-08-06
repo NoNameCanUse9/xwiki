@@ -11,6 +11,12 @@ fn config_path() -> PathBuf {
     PathBuf::from(home).join(".config/agentdocs-client")
 }
 
+/// Serializes tests that mutate `HOME` (see `cli::tests::isolated_home` and
+/// `config::tests`): `set_var` is process-global, so parallel tests would
+/// otherwise race on the same config directory.
+#[cfg(test)]
+pub(crate) static TEST_HOME_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Saved server address (CLI + GUI login prefill).
 pub fn load_server() -> String {
     std::fs::read_to_string(config_path().join("server"))
@@ -88,6 +94,7 @@ mod tests {
 
     #[test]
     fn layout_roundtrip_and_corrupt_defaults() {
+        let _lock = TEST_HOME_LOCK.lock().unwrap();
         let home = tempfile::tempdir().unwrap();
         std::env::set_var("HOME", home.path());
         let l = Layout {

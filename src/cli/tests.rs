@@ -2,15 +2,23 @@
 //! Network commands need a live server and are covered by the e2e suite.
 
 use super::*;
-use std::sync::Once;
-
-static INIT: Once = Once::new();
 
 /// Point HOME at a temp dir so config writes never touch the real one.
-fn isolated_home() -> tempfile::TempDir {
+/// Holds the shared `TEST_HOME_LOCK` for its lifetime: `set_var` is
+/// process-global, so HOME-mutating tests must not run concurrently.
+struct IsolatedHome {
+    _dir: tempfile::TempDir,
+    _lock: std::sync::MutexGuard<'static, ()>,
+}
+
+fn isolated_home() -> IsolatedHome {
+    let lock = crate::config::TEST_HOME_LOCK.lock().unwrap();
     let dir = tempfile::tempdir().unwrap();
     std::env::set_var("HOME", dir.path());
-    dir
+    IsolatedHome {
+        _dir: dir,
+        _lock: lock,
+    }
 }
 
 fn rt() -> tokio::runtime::Runtime {
