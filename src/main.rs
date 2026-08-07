@@ -45,7 +45,8 @@ fn main() {
             std::process::exit(cli::run(args));
         }
     }
-    gpui_platform::application().run(move |cx| {
+    let app = gpui_platform::application().with_assets(gpui_component_assets::Assets);
+    app.run(move |cx| {
         // Must be called before any GPUI Component features are used.
         gpui_component::init(cx);
 
