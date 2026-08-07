@@ -63,6 +63,7 @@ impl XWikiApp {
                     Button::new("empty-new-project")
                         .primary()
                         .rounded(px(tokens::RADIUS))
+                        .icon(IconName::Plus)
                         .label("新建项目")
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.open_new_project_dialog(window, cx)
@@ -172,10 +173,18 @@ impl XWikiApp {
                         )
                         .child(
                             div()
+                                .flex()
+                                .items_center()
+                                .gap_1()
                                 .font_family(tokens::FONT_MONO)
                                 .text_xs()
                                 .text_color(theme.accent)
-                                .child("打开 →"),
+                                .child("打开")
+                                .child(
+                                    Icon::new(IconName::ArrowRight)
+                                        .with_size(px(14.0))
+                                        .text_color(theme.accent),
+                                ),
                         ),
                 )
                 .on_click({
@@ -313,6 +322,11 @@ impl XWikiApp {
                             .child(
                                 Button::new("toggle-theme")
                                     .rounded(px(tokens::RADIUS))
+                                    .icon(if cx.theme().is_dark() {
+                                        IconName::Sun
+                                    } else {
+                                        IconName::Moon
+                                    })
                                     .label(if cx.theme().is_dark() {
                                         "浅色"
                                     } else {
@@ -324,6 +338,7 @@ impl XWikiApp {
                             .child(
                                 Button::new("settings")
                                     .rounded(px(tokens::RADIUS))
+                                    .icon(IconName::Settings)
                                     .label("设置")
                                     .tooltip("打开设置")
                                     .on_click(cx.listener(|this, _, _, cx| {
@@ -334,6 +349,7 @@ impl XWikiApp {
                             .child(
                                 Button::new("logout")
                                     .rounded(px(tokens::RADIUS))
+                                    .icon(IconName::ArrowLeft)
                                     .label("退出")
                                     .tooltip("退出登录")
                                     .on_click(cx.listener(|this, _, _, cx| this.logout(cx))),
@@ -550,6 +566,7 @@ impl XWikiApp {
                                     Button::new("new-project")
                                         .primary()
                                         .rounded(px(tokens::RADIUS))
+                                        .icon(IconName::Plus)
                                         .label("新建项目")
                                         .on_click(cx.listener(|this, _, window, cx| {
                                             this.open_new_project_dialog(window, cx)
@@ -624,6 +641,7 @@ impl XWikiApp {
                                 .child(
                                     Button::new("retry-projects")
                                         .rounded(px(tokens::RADIUS))
+                                        .icon(IconName::Redo2)
                                         .label("重试")
                                         .on_click(
                                             cx.listener(|this, _, _, cx| this.load_projects(cx)),

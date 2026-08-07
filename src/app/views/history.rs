@@ -34,6 +34,7 @@ impl XWikiApp {
                     .child(
                         Button::new("close-history")
                             .rounded(px(tokens::RADIUS))
+                            .icon(IconName::Close)
                             .label("关闭")
                             .tooltip("关闭历史面板 (Esc)")
                             .on_click(cx.listener(|this, _, _, cx| {

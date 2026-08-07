@@ -33,7 +33,8 @@ impl XWikiApp {
                     .child(
                         Button::new("settings-back")
                             .rounded(px(tokens::RADIUS))
-                            .label("← 返回工作台")
+                            .icon(IconName::ArrowLeft)
+                            .label("返回工作台")
                             .tooltip("返回工作台 (Esc)")
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.screen = Screen::Workspace;
@@ -65,6 +66,7 @@ impl XWikiApp {
                                     .child(
                                         Button::new("settings-test")
                                             .rounded(px(tokens::RADIUS))
+                                            .icon(IconName::Network)
                                             .label("测试连接")
                                             .tooltip("检查服务器是否可达")
                                             .on_click(cx.listener(|this, _, _, cx| {
@@ -75,6 +77,7 @@ impl XWikiApp {
                                         Button::new("settings-save")
                                             .primary()
                                             .rounded(px(tokens::RADIUS))
+                                            .icon(IconName::Check)
                                             .label("保存")
                                             .on_click(cx.listener(|this, _, _, cx| {
                                                 this.save_server_settings(cx)

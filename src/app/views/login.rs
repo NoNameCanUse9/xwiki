@@ -206,6 +206,7 @@ impl XWikiApp {
                                     .primary()
                                     .w_full()
                                     .rounded(px(tokens::RADIUS))
+                                    .icon(IconName::ArrowRight)
                                     .label("登录")
                                     .on_click(cx.listener(|this, _, window, cx| {
                                         this.do_login(window, cx)

@@ -1350,6 +1350,7 @@ fn open_new_project_dialog_window(
 
             let cancel = Button::new("cancel-project")
                 .rounded(px(tokens::RADIUS))
+                .icon(IconName::Close)
                 .label("取消")
                 .on_click(move |_, window, cx| window.close_dialog(cx));
 
@@ -1360,6 +1361,7 @@ fn open_new_project_dialog_window(
             let create = Button::new("create-project")
                 .primary()
                 .rounded(px(tokens::RADIUS))
+                .icon(IconName::Folder)
                 .label("创建")
                 .on_click(move |_, window, cx| {
                     let name = create_name.read(cx).value().to_string();

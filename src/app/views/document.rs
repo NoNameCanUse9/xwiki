@@ -256,7 +256,8 @@ impl XWikiApp {
                     .child(
                         Button::new("back-projects")
                             .rounded(px(tokens::RADIUS))
-                            .label("← 项目")
+                            .icon(IconName::ArrowLeft)
+                            .label("项目")
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.back_to_projects(cx)
                             })),
@@ -365,6 +366,7 @@ impl XWikiApp {
                     .child(
                         Button::new("retry-tree")
                             .rounded(px(tokens::RADIUS))
+                            .icon(IconName::Redo2)
                             .label("重试")
                             .on_click(cx.listener(|this, _, _, cx| {
                                 let path = this.tree_path.clone();
@@ -494,6 +496,7 @@ impl XWikiApp {
                     .child(
                         Button::new("retry-doc")
                             .rounded(px(tokens::RADIUS))
+                            .icon(IconName::Redo2)
                             .label("重试")
                             .on_click(cx.listener(|this, _, _, cx| {
                                 let path = this
@@ -530,6 +533,7 @@ impl XWikiApp {
                                     .child(
                                         Button::new("open-history")
                                             .rounded(px(tokens::RADIUS))
+                                            .icon(IconName::Undo2)
                                             .label("历史")
                                             .on_click(cx.listener(
                                                 |this, _, _, cx| {
@@ -540,6 +544,7 @@ impl XWikiApp {
                                     .child(
                                         Button::new("start-edit")
                                             .rounded(px(tokens::RADIUS))
+                                            .icon(IconName::File)
                                             .label("编辑")
                                             .on_click(cx.listener(
                                                 |this, _, _, cx| {

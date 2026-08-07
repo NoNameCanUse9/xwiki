@@ -47,6 +47,7 @@ impl XWikiApp {
                         Button::new("save-edit")
                             .primary()
                             .rounded(px(tokens::RADIUS))
+                            .icon(IconName::Check)
                             .label("保存")
                             .tooltip("提交修改 (⌘S)")
                             .disabled(!self.lock_held)
@@ -57,6 +58,7 @@ impl XWikiApp {
                     .child(
                         Button::new("cancel-edit")
                             .rounded(px(tokens::RADIUS))
+                            .icon(IconName::Close)
                             .label("取消")
                             .tooltip("放弃修改并释放锁 (Esc)")
                             .on_click(cx.listener(|this, _, _, cx| {
@@ -145,6 +147,7 @@ impl XWikiApp {
                             .child(
                                 Button::new("conflict-abandon")
                                     .rounded(px(tokens::RADIUS))
+                                    .icon(IconName::Delete)
                                     .label("放弃编辑")
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.resolve_conflict_abandon(cx)
@@ -153,6 +156,7 @@ impl XWikiApp {
                             .child(
                                 Button::new("conflict-reload")
                                     .rounded(px(tokens::RADIUS))
+                                    .icon(IconName::Redo2)
                                     .label("重新加载")
                                     .tooltip("丢弃本地修改，加载服务器版本")
                                     .on_click(cx.listener(|this, _, _, cx| {
@@ -163,6 +167,7 @@ impl XWikiApp {
                                 Button::new("conflict-force")
                                     .primary()
                                     .rounded(px(tokens::RADIUS))
+                                    .icon(IconName::Check)
                                     .label("覆盖重试")
                                     .tooltip("以最新 revision 重新提交（后写者胜）")
                                     .on_click(cx.listener(|this, _, _, cx| {
