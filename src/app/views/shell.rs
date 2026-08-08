@@ -34,11 +34,14 @@ impl XWikiApp {
 
     fn render_shell_topbar(&self, cx: &Context<Self>) -> Div {
         let theme = cx.theme().clone();
-        let project = self
-            .selected_project
-            .as_deref()
-            .unwrap_or("workspace")
-            .to_string();
+        let project = match &self.screen {
+            Screen::Settings => "设置".to_string(),
+            _ => self
+                .selected_project
+                .as_deref()
+                .unwrap_or("workspace")
+                .to_string(),
+        };
         let document = self
             .doc_path
             .as_deref()
@@ -114,6 +117,8 @@ impl XWikiApp {
                         Button::new("shell-settings")
                             .ghost()
                             .compact()
+                            .selected(matches!(&self.screen, &Screen::Settings))
+                            .toggled(matches!(&self.screen, &Screen::Settings))
                             .icon(IconName::Settings)
                             .tooltip("打开设置")
                             .disabled(self.editing)

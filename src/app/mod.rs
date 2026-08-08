@@ -167,6 +167,7 @@ pub struct XWikiApp {
     /// Settings view: server URL input + connection-test result.
     settings_server_input: Entity<InputState>,
     settings_test: Option<(bool, String)>,
+    settings_test_detail: Option<String>,
     settings_loading: bool,
     settings_error: Option<String>,
     settings_tokens: Vec<dto::Token>,
@@ -329,6 +330,20 @@ impl XWikiApp {
                 }),
             );
         }
+        // Changing the server address invalidates the previous connection result.
+        {
+            let settings_input = settings_server_input.clone();
+            subs.push(cx.subscribe_in(
+                &settings_server_input,
+                window,
+                move |app, _, _: &InputEvent, _, cx| {
+                    let _ = settings_input.read(cx);
+                    app.settings_test = None;
+                    app.settings_test_detail = None;
+                    cx.notify();
+                },
+            ));
+        }
 
         let mut app = Self {
             screen: Screen::Login,
@@ -389,6 +404,7 @@ impl XWikiApp {
             project_action: None,
             settings_server_input,
             settings_test: None,
+            settings_test_detail: None,
             settings_loading: false,
             settings_error: None,
             settings_tokens: Vec::new(),
@@ -2013,11 +2029,11 @@ impl XWikiApp {
                 let mut errors = Vec::new();
                 match tokens {
                     Ok(items) => app.settings_tokens = items,
-                    Err(e) => errors.push(format!("Token: {e}")),
+                    Err(e) => errors.push(format!("Token：{}", Self::friendly_api_error(&e))),
                 }
                 match users {
                     Ok(items) => app.settings_users = items,
-                    Err(e) => errors.push(format!("用户: {e}")),
+                    Err(e) => errors.push(format!("用户：{}", Self::friendly_api_error(&e))),
                 }
                 if !errors.is_empty() {
                     app.settings_error = Some(format!("访问控制加载失败：{}", errors.join("；")));
@@ -2102,7 +2118,10 @@ impl XWikiApp {
                             Err(e) => {
                                 h.update(cx, |app, cx| {
                                     app.settings_access_loading = false;
-                                    app.settings_error = Some(format!("创建 Token 失败: {e}"));
+                                    app.settings_error = Some(format!(
+                                        "创建 Token 失败：{}",
+                                        Self::friendly_api_error(&e)
+                                    ));
                                     cx.notify();
                                 });
                             }
@@ -2203,7 +2222,10 @@ impl XWikiApp {
                             Err(e) => {
                                 h.update(cx, |app, cx| {
                                     app.settings_access_loading = false;
-                                    app.settings_error = Some(format!("创建用户失败: {e}"));
+                                    app.settings_error = Some(format!(
+                                        "创建用户失败：{}",
+                                        Self::friendly_api_error(&e)
+                                    ));
                                     cx.notify();
                                 });
                             }
@@ -2375,7 +2397,8 @@ impl XWikiApp {
             Err(e) => {
                 let _ = this.update(cx, |app, cx| {
                     app.settings_access_loading = false;
-                    app.settings_error = Some(format!("撤销 Token 失败: {e}"));
+                    app.settings_error =
+                        Some(format!("撤销 Token 失败：{}", Self::friendly_api_error(&e)));
                     cx.notify();
                 });
             }
@@ -2412,13 +2435,27 @@ impl XWikiApp {
                 Err(e) => {
                     let _ = this.update(cx, |app, cx| {
                         app.settings_access_loading = false;
-                        app.settings_error = Some(format!("更新用户状态失败: {e}"));
+                        app.settings_error = Some(format!(
+                            "更新用户状态失败：{}",
+                            Self::friendly_api_error(&e)
+                        ));
                         cx.notify();
                     });
                 }
             },
         )
         .detach();
+    }
+
+    fn friendly_api_error(error: &crate::api::ApiError) -> String {
+        match error.status {
+            0 => "无法连接到服务，请检查地址和网络连接。".into(),
+            401 | 403 => "服务拒绝了请求，请重新登录后再试。".into(),
+            404 => "服务已响应，但未找到 AgentDocs 接口，请检查服务地址。".into(),
+            400..=499 => format!("请求未被接受（HTTP {}），请检查服务配置。", error.status),
+            500..=599 => "服务暂时不可用，请稍后重试。".into(),
+            status => format!("连接失败（HTTP {}），请稍后重试。", status),
+        }
     }
 
     fn test_connection(&mut self, cx: &mut Context<Self>) {
@@ -2431,20 +2468,26 @@ impl XWikiApp {
             }
         };
         self.settings_test = None;
+        self.settings_test_detail = None;
         self.settings_loading = true;
         let c = Client::new(&url);
         cx.spawn(async move |this, cx| match c.meta().await {
             Ok(m) => {
+                let detail = format!("服务版本 {}", m.version);
                 let _ = this.update(cx, |app, cx| {
                     app.settings_loading = false;
-                    app.settings_test = Some((true, format!("连接成功 · server v{}", m.version)));
+                    app.settings_test = Some((true, "连接成功".into()));
+                    app.settings_test_detail = Some(detail);
                     cx.notify();
                 });
             }
             Err(e) => {
+                let message = Self::friendly_api_error(&e);
+                let detail = e.request_id.map(|id| format!("请求 ID · {}", id));
                 let _ = this.update(cx, |app, cx| {
                     app.settings_loading = false;
-                    app.settings_test = Some((false, format!("连接失败: {e}")));
+                    app.settings_test = Some((false, message));
+                    app.settings_test_detail = detail;
                     cx.notify();
                 });
             }
@@ -2460,7 +2503,8 @@ impl XWikiApp {
             .trim()
             .to_string();
         if url.is_empty() {
-            self.settings_test = Some((false, "地址不能为空".into()));
+            self.settings_test = Some((false, "请输入服务地址。".into()));
+            self.settings_test_detail = None;
             cx.notify();
             return;
         }
@@ -2469,7 +2513,9 @@ impl XWikiApp {
         }
         config::save_server(&url);
         self.server_url = url;
-        self.notify("服务器地址已保存,重新登录后生效".into(), cx);
+        self.settings_test = None;
+        self.settings_test_detail = None;
+        self.notify("服务地址已保存，重新登录后生效".into(), cx);
     }
 }
 

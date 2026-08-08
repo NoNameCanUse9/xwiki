@@ -66,10 +66,21 @@ impl XWikiApp {
         let theme = cx.theme().clone();
         let access_busy = self.settings_access_loading;
         let test_busy = self.settings_loading;
+        let test_failed = matches!(self.settings_test.as_ref(), Some((false, _)));
+        let test_detail: AnyElement = if let Some(detail) = &self.settings_test_detail {
+            div()
+                .font_family(tokens::FONT_MONO)
+                .text_xs()
+                .text_color(theme.muted_foreground)
+                .child(detail.clone())
+                .into_any_element()
+        } else {
+            div().into_any_element()
+        };
         let status: AnyElement = if let Some((ok, message)) = &self.settings_test {
             div()
                 .flex()
-                .items_center()
+                .items_start()
                 .gap_2()
                 .p_2()
                 .rounded(px(tokens::RADIUS_SMALL))
@@ -87,10 +98,15 @@ impl XWikiApp {
                 }))
                 .child(
                     div()
-                        .font_family(tokens::FONT_MONO)
-                        .text_xs()
-                        .text_color(if *ok { theme.success } else { theme.danger })
-                        .child(message.clone()),
+                        .v_flex()
+                        .gap_1()
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(if *ok { theme.success } else { theme.danger })
+                                .child(message.clone()),
+                        )
+                        .child(test_detail),
                 )
                 .into_any_element()
         } else {
@@ -143,8 +159,8 @@ impl XWikiApp {
                             .primary()
                             .rounded(px(tokens::RADIUS))
                             .icon(IconName::Check)
-                            .label("保存")
-                            .disabled(test_busy)
+                            .label("保存地址")
+                            .disabled(test_busy || test_failed)
                             .on_click(cx.listener(|this, _, _, cx| this.save_server_settings(cx))),
                     ),
             )
@@ -250,8 +266,8 @@ impl XWikiApp {
                                     }),
                             ),
                     )
-                    .child(
-                        Button::new(format!("toggle-user-{id}"))
+                    .child({
+                        let button = Button::new(format!("toggle-user-{id}"))
                             .compact()
                             .icon(if enabled {
                                 IconName::CircleX
@@ -271,8 +287,13 @@ impl XWikiApp {
                                 } else {
                                     this.set_user_enabled(&id, true, cx);
                                 }
-                            })),
-                    )
+                            }));
+                        if enabled {
+                            button.danger()
+                        } else {
+                            button
+                        }
+                    })
                     .into_any_element()
             })
             .collect();
