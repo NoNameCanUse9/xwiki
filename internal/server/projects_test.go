@@ -353,4 +353,67 @@ func TestProjectPurge(t *testing.T) {
 	if out := gitShow(t, id, svc.ReposRoot(), "docs/secret.md"); out != "" {
 		t.Fatalf("secret doc still in history: %q", out)
 	}
+	// The pre-rewrite commits must not survive under refs/original, and the
+	// purged blob must be physically gone from the object store.
+	dir := filepath.Join(svc.ReposRoot(), id, "repo.git")
+	if out := gitRefs(t, dir, "refs/original/"); out != "" {
+		t.Fatalf("refs/original still present after purge: %q", out)
+	}
+	if out := gitObjects(t, dir); strings.Contains(out, "docs/secret.md") {
+		t.Fatalf("secret path still reachable after purge")
+	}
+}
+
+// gitRefs lists ref names under a prefix ("" when none).
+func gitRefs(t *testing.T, repoDir, prefix string) string {
+	t.Helper()
+	cmd := exec.CommandContext(t.Context(), "git", "--git-dir", repoDir,
+		"for-each-ref", "--format=%(refname)", prefix)
+	out, _ := cmd.Output()
+	return strings.TrimSpace(string(out))
+}
+
+// gitObjects lists all reachable objects (rev-list --objects --all).
+func gitObjects(t *testing.T, repoDir string) string {
+	t.Helper()
+	cmd := exec.CommandContext(t.Context(), "git", "--git-dir", repoDir,
+		"rev-list", "--objects", "--all")
+	out, _ := cmd.Output()
+	return string(out)
+}
+
+func TestProjectPurgeEmptyHistory(t *testing.T) {
+	h, svc := newTestRouterWithService(t)
+	cookie := loginAndGetCookie(t, h)
+
+	rec := apiRequest(h, http.MethodPost, "/api/v1/projects", cookie, `{"name":"purge-all"}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create: status = %d", rec.Code)
+	}
+	var created struct {
+		Project struct {
+			ID string `json:"id"`
+		} `json:"project"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	id := created.Project.ID
+
+	// Purge every path (README.md is in every commit): --prune-empty would
+	// otherwise strip the branch to zero commits.
+	rec = apiRequest(h, http.MethodPost, "/api/v1/projects/"+id+"/purge", cookie,
+		`{"paths":["README.md"],"message":"remove readme"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("purge all: status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	if out := gitRevParse(t, id, svc.ReposRoot()); out == "" {
+		t.Fatal("branch ref missing after purge-all")
+	}
+	// Branch must still be usable: a new doc commit succeeds.
+	rec = apiRequest(h, http.MethodPost, "/api/v1/projects/"+id+"/changesets", cookie,
+		`{"base_revision":"`+gitHead(t, id, svc.ReposRoot())+`","message":"re-add","changes":[{"op":"create","path":"docs/new.md","content":"fresh"}]}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("re-add after purge-all: status = %d body = %s", rec.Code, rec.Body.String())
+	}
 }

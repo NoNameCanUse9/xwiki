@@ -196,10 +196,11 @@ func (r *Repo) DefaultBranch(ctx context.Context) (string, error) {
 }
 
 // PurgePaths removes the given paths from the entire history using
-// filter-branch, then expires reflogs and runs a full gc so the blobs are
-// gone from the object store. This is the "hard delete" mode: irreversible
-// and destructive. paths are repository-relative, either files or
-// directories (a directory prefix is removed recursively).
+// filter-branch, then drops the original refs, expires reflogs and runs a
+// full gc so the blobs are physically gone from the object store. This is
+// the "hard delete" mode: irreversible and destructive. paths are
+// repository-relative, either files or directories (a directory prefix is
+// removed recursively).
 func (r *Repo) PurgePaths(ctx context.Context, paths []string) error {
 	if len(paths) == 0 {
 		return fmt.Errorf("no paths to purge")
@@ -227,6 +228,18 @@ func (r *Repo) PurgePaths(ctx context.Context, paths []string) error {
 		"--prune-empty", "--", branch); err != nil {
 		return fmt.Errorf("filter-branch: %w", err)
 	}
+	// filter-branch leaves the pre-rewrite commits reachable from
+	// refs/original/refs/heads/<branch>; without deleting that ref the
+	// purged blobs survive gc and stay recoverable. Drop every original ref.
+	_ = deleteOriginalRefs(ctx, r.Dir)
+	// When --prune-empty strips every commit (all paths purged from every
+	// commit), the branch ref disappears entirely. Recreate a valid empty
+	// root commit so the repository keeps a usable HEAD.
+	if _, err := gitOutput(ctx, r.Dir, "rev-parse", "--verify", "refs/heads/"+branch); err != nil {
+		if err := r.ensureBranchExists(ctx, branch); err != nil {
+			return fmt.Errorf("restore branch after purge: %w", err)
+		}
+	}
 	// Drop reflogs and garbage-collect so the removed objects are physically
 	// gone from the object store.
 	if _, err := gitOutput(ctx, r.Dir, "reflog", "expire", "--expire=now", "--all"); err != nil {
@@ -234,6 +247,44 @@ func (r *Repo) PurgePaths(ctx context.Context, paths []string) error {
 	}
 	if _, err := gitOutput(ctx, r.Dir, "gc", "--prune=now", "--aggressive"); err != nil {
 		return fmt.Errorf("git gc: %w", err)
+	}
+	return nil
+}
+
+// deleteOriginalRefs removes every ref under refs/original/ (the
+// filter-branch backup refs).
+func deleteOriginalRefs(ctx context.Context, repoDir string) error {
+	out, err := gitOutput(ctx, repoDir,
+		"for-each-ref", "--format=%(refname)", "refs/original/")
+	if err != nil || strings.TrimSpace(out) == "" {
+		return err
+	}
+	for _, ref := range strings.Split(strings.TrimSpace(out), "\n") {
+		if ref == "" {
+			continue
+		}
+		if _, err := gitOutput(ctx, repoDir, "update-ref", "-d", ref); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ensureBranchExists recreates a branch with an empty root commit when a
+// purge has emptied the history (branch ref no longer resolves).
+func (r *Repo) ensureBranchExists(ctx context.Context, branch string) error {
+	tree, err := gitOutput(ctx, r.Dir, "mktree")
+	if err != nil {
+		return fmt.Errorf("mktree: %w", err)
+	}
+	commit, err := gitOutput(ctx, r.Dir,
+		"commit-tree", strings.TrimSpace(tree), "-m", "Initialize project")
+	if err != nil {
+		return fmt.Errorf("commit-tree: %w", err)
+	}
+	if _, err := gitOutput(ctx, r.Dir,
+		"update-ref", "refs/heads/"+branch, strings.TrimSpace(commit)); err != nil {
+		return fmt.Errorf("update-ref: %w", err)
 	}
 	return nil
 }

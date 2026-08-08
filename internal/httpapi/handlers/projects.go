@@ -15,10 +15,10 @@ import (
 
 // ProjectHandler serves the /api/v1/projects endpoints.
 type ProjectHandler struct {
-	cfg      *config.Config
-	svc      *project.Service
+	cfg       *config.Config
+	svc       *project.Service
 	searchSvc *search.Service
-	log      *slog.Logger
+	log       *slog.Logger
 }
 
 func NewProjectHandler(cfg *config.Config, svc *project.Service, searchSvc *search.Service, log *slog.Logger) *ProjectHandler {
@@ -261,12 +261,15 @@ func (h *ProjectHandler) Purge(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.svc.Purge(r.Context(), projectID, req.Paths, req.Message); err != nil {
-		if errors.Is(err, project.ErrNotFound) {
+		switch {
+		case errors.Is(err, project.ErrNotFound):
 			response.WriteError(w, r, http.StatusNotFound, "project_not_found", "project not found")
-			return
+		case errors.Is(err, project.ErrArchived):
+			response.WriteError(w, r, http.StatusGone, "project_archived", "project is archived")
+		default:
+			h.log.Error("purge paths failed", "error", err, "request_id", request.RequestID(r))
+			response.WriteError(w, r, http.StatusInternalServerError, "internal_error", "could not purge paths")
 		}
-		h.log.Error("purge paths failed", "error", err, "request_id", request.RequestID(r))
-		response.WriteError(w, r, http.StatusInternalServerError, "internal_error", "could not purge paths")
 		return
 	}
 	if _, err := h.searchSvc.ReindexProject(r.Context(), projectID); err != nil {
