@@ -50,6 +50,55 @@ func (r *Repo) WriteReadme(ctx context.Context, name, description string, now ti
 	return nil
 }
 
+// RewriteReadmeTitle rewrites the first line of README.md to the project's
+// new name, committing the change on the default branch. If the repository
+// has no README, it writes a fresh one.
+func (r *Repo) RewriteReadmeTitle(ctx context.Context, name string) error {
+	branch, err := r.DefaultBranch(ctx)
+	if err != nil {
+		return fmt.Errorf("resolve branch: %w", err)
+	}
+	wtDir, err := os.MkdirTemp("", "agentdocs-wt-*")
+	if err != nil {
+		return fmt.Errorf("create worktree dir: %w", err)
+	}
+	cleanup := func() {
+		_, _ = gitOutput(context.Background(), r.Dir, "worktree", "remove", "--force", wtDir)
+		_ = os.RemoveAll(wtDir)
+	}
+	// Attach the worktree to the default branch (not --detach) so the commit
+	// advances the branch ref in the bare repository.
+	if _, err := gitOutput(ctx, r.Dir, "worktree", "add", wtDir, branch); err != nil {
+		cleanup()
+		return fmt.Errorf("add worktree: %w", err)
+	}
+	readmePath := filepath.Join(wtDir, "README.md")
+	var readme string
+	if b, err := os.ReadFile(readmePath); err == nil {
+		lines := strings.Split(string(b), "\n")
+		if len(lines) > 0 && strings.HasPrefix(strings.TrimSpace(lines[0]), "#") {
+			lines[0] = "# " + name
+		}
+		readme = strings.Join(lines, "\n")
+	} else {
+		readme = fmt.Sprintf("# %s\n\n---\n\nAgentDocs 项目\n", name)
+	}
+	if err := os.WriteFile(readmePath, []byte(readme), 0o644); err != nil {
+		cleanup()
+		return fmt.Errorf("write readme: %w", err)
+	}
+	if _, err := gitOutputIn(ctx, wtDir, "add", "README.md"); err != nil {
+		cleanup()
+		return fmt.Errorf("git add readme: %w", err)
+	}
+	if _, err := gitOutputIn(ctx, wtDir, "commit", "-m", "Rename project to "+name); err != nil {
+		cleanup()
+		return fmt.Errorf("git commit readme: %w", err)
+	}
+	cleanup()
+	return nil
+}
+
 // mkTree writes the README blob and builds the root tree via mktree.
 func (r *Repo) mkTree(ctx context.Context, readme string) (string, error) {
 	cmd := exec.CommandContext(ctx, "git", "--git-dir", r.Dir, "hash-object", "-w", "--stdin")
@@ -144,6 +193,55 @@ func (r *Repo) DefaultBranch(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("repository has no branch yet")
 	}
 	return out, nil
+}
+
+// PurgePaths removes the given paths from the entire history using
+// filter-branch, then expires reflogs and runs a full gc so the blobs are
+// gone from the object store. This is the "hard delete" mode: irreversible
+// and destructive. paths are repository-relative, either files or
+// directories (a directory prefix is removed recursively).
+func (r *Repo) PurgePaths(ctx context.Context, paths []string) error {
+	if len(paths) == 0 {
+		return fmt.Errorf("no paths to purge")
+	}
+	for _, p := range paths {
+		if !validateDocPathInternal(p) {
+			return fmt.Errorf("invalid path %q", p)
+		}
+	}
+	branch, err := r.DefaultBranch(ctx)
+	if err != nil {
+		return err
+	}
+	// filter-branch runs an index filter that removes each path from every
+	// commit (git rm -r --cached handles files and directories).
+	var filter strings.Builder
+	for _, p := range paths {
+		filter.WriteString("git rm -r --cached --ignore-unmatch -- ")
+		filter.WriteString(shellQuote(p))
+		filter.WriteString("; ")
+	}
+	if _, err := gitOutput(ctx, r.Dir,
+		"filter-branch", "--force",
+		"--index-filter", filter.String(),
+		"--prune-empty", "--", branch); err != nil {
+		return fmt.Errorf("filter-branch: %w", err)
+	}
+	// Drop reflogs and garbage-collect so the removed objects are physically
+	// gone from the object store.
+	if _, err := gitOutput(ctx, r.Dir, "reflog", "expire", "--expire=now", "--all"); err != nil {
+		return fmt.Errorf("reflog expire: %w", err)
+	}
+	if _, err := gitOutput(ctx, r.Dir, "gc", "--prune=now", "--aggressive"); err != nil {
+		return fmt.Errorf("git gc: %w", err)
+	}
+	return nil
+}
+
+// shellQuote wraps a path in single quotes for embedding in the
+// filter-branch index filter shell snippet.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
 }
 
 // ListTree lists one directory level of the branch. path is repository

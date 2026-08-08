@@ -61,6 +61,12 @@ func (s *Service) Search(ctx context.Context, projectID, query string, limit int
 	return s.store.Query(ctx, projectID, BuildMatchExprRaw(q), q, limit)
 }
 
+// DeleteProject removes every index entry for a project (used when the
+// project itself is deleted).
+func (s *Service) DeleteProject(ctx context.Context, projectID string) error {
+	return s.store.DeleteProject(ctx, projectID)
+}
+
 // ReindexProject incrementally syncs the index with the project's current
 // Git tree: changed blobs are upserted, vanished paths are removed.
 func (s *Service) ReindexProject(ctx context.Context, projectID string) (*ReindexStats, error) {

@@ -262,7 +262,7 @@ func applyOne(wtDir string, c Change) (ChangeOutcome, error) {
 		}
 		return ChangeOutcome{Op: c.Op, Path: c.Path, Status: status}, nil
 	case "delete":
-		if err := os.Remove(abs); err != nil {
+		if err := os.RemoveAll(abs); err != nil {
 			return ChangeOutcome{}, fmt.Errorf("delete %s: %w", c.Path, err)
 		}
 		return ChangeOutcome{Op: c.Op, Path: c.Path, Status: "deleted"}, nil

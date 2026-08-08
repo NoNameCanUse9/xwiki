@@ -121,3 +121,66 @@ func (s *Service) Unarchive(ctx context.Context, projectID string) (*Project, er
 	}
 	return s.store.GetByID(ctx, projectID)
 }
+
+// RenameInput carries the user-supplied name for Rename.
+type RenameInput struct {
+	Name string
+}
+
+// Rename updates a project's name in metadata and refreshes the README
+// headline in the repository with a new commit, keeping the two in sync.
+func (s *Service) Rename(ctx context.Context, projectID string, input RenameInput) (*Project, error) {
+	if err := ValidateName(input.Name); err != nil {
+		return nil, ErrInvalid
+	}
+	p, err := s.store.GetByID(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	if p.Name == input.Name {
+		return p, nil
+	}
+	now := s.clock.Now().UTC()
+	if err := s.store.Rename(ctx, projectID, input.Name, now); err != nil {
+		return nil, err
+	}
+	// Refresh the README headline so the repository matches the new name.
+	// Failures here are non-fatal: metadata already updated.
+	repo := &Repo{Dir: filepath.Join(s.reposRoot, p.ID, "repo.git")}
+	if err := repo.RewriteReadmeTitle(ctx, input.Name); err != nil {
+		return s.store.GetByID(ctx, projectID)
+	}
+	return s.store.GetByID(ctx, projectID)
+}
+
+// Delete removes a project completely: metadata row and the on-disk bare
+// repository (git history included). It is destructive and irreversible.
+func (s *Service) Delete(ctx context.Context, projectID string) error {
+	p, err := s.store.GetByID(ctx, projectID)
+	if err != nil {
+		return err
+	}
+	if err := s.store.Delete(ctx, projectID); err != nil {
+		return err
+	}
+	// Remove the repository directory; tolerate a missing repo dir.
+	repoDir := filepath.Join(s.reposRoot, p.ID)
+	if err := os.RemoveAll(repoDir); err != nil {
+		return fmt.Errorf("remove repository: %w", err)
+	}
+	return nil
+}
+
+// Purge rewrites the project's git history to remove the given paths
+// completely (hard delete, irreversible). It requires an existing project.
+func (s *Service) Purge(ctx context.Context, projectID string, paths []string, message string) error {
+	p, err := s.store.GetByID(ctx, projectID)
+	if err != nil {
+		return err
+	}
+	if p.IsArchived() {
+		return ErrArchived
+	}
+	repo := &Repo{Dir: filepath.Join(s.reposRoot, p.ID, "repo.git")}
+	return repo.PurgePaths(ctx, paths)
+}

@@ -149,6 +149,48 @@ func (s *Store) Archive(ctx context.Context, id string, at time.Time) error {
 	return nil
 }
 
+// Rename updates a project's name and bump the updated timestamp. A
+// duplicate target name yields ErrConflict; a missing row yields
+// ErrNotFound.
+func (s *Store) Rename(ctx context.Context, id, name string, at time.Time) error {
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE projects
+		SET name = ?, updated_at = ?
+		WHERE id = ?`,
+		name, at.UTC().Format(time.RFC3339), id)
+	if err != nil {
+		if isUniqueViolation(err) {
+			return ErrConflict
+		}
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// Delete removes a project's metadata row. A missing row yields
+// ErrNotFound.
+func (s *Store) Delete(ctx context.Context, id string) error {
+	res, err := s.db.ExecContext(ctx, `DELETE FROM projects WHERE id = ?`, id)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func isUniqueViolation(err error) bool {
 	var sqliteErr interface{ Error() string }
 	return errors.As(err, &sqliteErr) && contains(sqliteErr.Error(), "UNIQUE constraint failed")

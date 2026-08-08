@@ -205,3 +205,152 @@ func gitRevParse(t *testing.T, projectID, reposRoot string) string {
 	}
 	return strings.TrimSpace(string(out))
 }
+
+// gitHead returns the current HEAD of a project's bare repo (shortcut for
+// building changeset payloads).
+func gitHead(t *testing.T, projectID, reposRoot string) string {
+	t.Helper()
+	return gitRevParse(t, projectID, reposRoot)
+}
+
+// gitShow returns the content of a path at HEAD in a project's bare repo,
+// or "" when the path does not exist.
+func gitShow(t *testing.T, projectID, reposRoot, path string) string {
+	t.Helper()
+	dir := filepath.Join(reposRoot, projectID, "repo.git")
+	cmd := exec.CommandContext(t.Context(), "git", "--git-dir", dir, "show", "HEAD:"+path)
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func TestProjectRename(t *testing.T) {
+	h, svc := newTestRouterWithService(t)
+	cookie := loginAndGetCookie(t, h)
+
+	rec := apiRequest(h, http.MethodPost, "/api/v1/projects", cookie,
+		`{"name":"old-name","description":"desc"}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create: status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	var created struct {
+		Project struct {
+			ID string `json:"id"`
+		} `json:"project"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	id := created.Project.ID
+
+	// Rename -> new name in metadata.
+	rec = apiRequest(h, http.MethodPatch, "/api/v1/projects/"+id, cookie,
+		`{"name":"new-name"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("rename: status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	p, err := svc.Get(t.Context(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Name != "new-name" {
+		t.Fatalf("name = %q, want new-name", p.Name)
+	}
+
+	// README headline updated in the repo.
+	readme := gitShow(t, id, svc.ReposRoot(), "README.md")
+	if !strings.Contains(readme, "# new-name") {
+		t.Fatalf("readme headline not updated: %q", readme)
+	}
+
+	// Rename to an existing name -> 409.
+	rec = apiRequest(h, http.MethodPost, "/api/v1/projects", cookie, `{"name":"other"}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create other: status = %d", rec.Code)
+	}
+	rec = apiRequest(h, http.MethodPatch, "/api/v1/projects/"+id, cookie, `{"name":"other"}`)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("rename conflict: status = %d, want 409", rec.Code)
+	}
+}
+
+func TestProjectDelete(t *testing.T) {
+	h, svc := newTestRouterWithService(t)
+	cookie := loginAndGetCookie(t, h)
+
+	rec := apiRequest(h, http.MethodPost, "/api/v1/projects", cookie, `{"name":"to-delete"}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create: status = %d", rec.Code)
+	}
+	var created struct {
+		Project struct {
+			ID string `json:"id"`
+		} `json:"project"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	id := created.Project.ID
+	repoDir := filepath.Join(svc.ReposRoot(), id)
+	if _, err := os.Stat(repoDir); err != nil {
+		t.Fatalf("repo dir missing before delete: %v", err)
+	}
+
+	rec = apiRequest(h, http.MethodDelete, "/api/v1/projects/"+id, cookie, "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("delete: status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	if _, err := svc.Get(t.Context(), id); err == nil {
+		t.Fatal("project still present after delete")
+	}
+	if _, err := os.Stat(repoDir); !os.IsNotExist(err) {
+		t.Fatalf("repo dir still present after delete: %v", err)
+	}
+
+	// Delete missing -> 404.
+	rec = apiRequest(h, http.MethodDelete, "/api/v1/projects/"+id, cookie, "")
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("delete missing: status = %d, want 404", rec.Code)
+	}
+}
+
+func TestProjectPurge(t *testing.T) {
+	h, svc := newTestRouterWithService(t)
+	cookie := loginAndGetCookie(t, h)
+
+	rec := apiRequest(h, http.MethodPost, "/api/v1/projects", cookie, `{"name":"purge-me"}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create: status = %d", rec.Code)
+	}
+	var created struct {
+		Project struct {
+			ID string `json:"id"`
+		} `json:"project"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	id := created.Project.ID
+
+	// Commit a secret doc.
+	rec = apiRequest(h, http.MethodPost, "/api/v1/projects/"+id+"/changesets", cookie,
+		`{"base_revision":"`+gitHead(t, id, svc.ReposRoot())+`","message":"add secret","changes":[{"op":"create","path":"docs/secret.md","content":"top-secret"}]}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("add secret: status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	if out := gitShow(t, id, svc.ReposRoot(), "docs/secret.md"); !strings.Contains(out, "top-secret") {
+		t.Fatalf("secret doc not committed: %q", out)
+	}
+
+	// Purge the path from history.
+	rec = apiRequest(h, http.MethodPost, "/api/v1/projects/"+id+"/purge", cookie,
+		`{"paths":["docs/secret.md"],"message":"remove secret"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("purge: status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	if out := gitShow(t, id, svc.ReposRoot(), "docs/secret.md"); out != "" {
+		t.Fatalf("secret doc still in history: %q", out)
+	}
+}

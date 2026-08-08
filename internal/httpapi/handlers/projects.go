@@ -188,3 +188,89 @@ func (h *ProjectHandler) Archive(w http.ResponseWriter, r *http.Request) {
 	}
 	response.WriteJSON(w, http.StatusOK, map[string]any{"project": p})
 }
+
+type renameProjectRequest struct {
+	Name string `json:"name"`
+}
+
+// Rename handles PATCH /api/v1/projects/{id}. It updates the project name
+// and refreshes the repository README headline.
+func (h *ProjectHandler) Rename(w http.ResponseWriter, r *http.Request) {
+	projectID := request.PathParam(r, "id")
+	var req renameProjectRequest
+	if err := request.DecodeJSON(w, r, &req, h.cfg.MaxBodyBytes); err != nil {
+		response.WriteError(w, r, http.StatusBadRequest, "validation_failed", "invalid request body")
+		return
+	}
+	p, err := h.svc.Rename(r.Context(), projectID, project.RenameInput{Name: req.Name})
+	if err != nil {
+		switch {
+		case errors.Is(err, project.ErrNotFound):
+			response.WriteError(w, r, http.StatusNotFound, "project_not_found", "project not found")
+		case errors.Is(err, project.ErrInvalid):
+			response.WriteError(w, r, http.StatusBadRequest, "invalid_project_name",
+				"project name must be 1-64 lowercase letters, digits and single hyphens")
+		case errors.Is(err, project.ErrConflict):
+			response.WriteError(w, r, http.StatusConflict, "project_name_conflict",
+				"a project with this name already exists")
+		default:
+			h.log.Error("rename project failed", "error", err, "request_id", request.RequestID(r))
+			response.WriteError(w, r, http.StatusInternalServerError, "internal_error", "could not rename project")
+		}
+		return
+	}
+	response.WriteJSON(w, http.StatusOK, map[string]any{"project": p})
+}
+
+// Delete handles DELETE /api/v1/projects/{id}. The default removes the
+// project completely (metadata + repository).
+func (h *ProjectHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	projectID := request.PathParam(r, "id")
+	if err := h.svc.Delete(r.Context(), projectID); err != nil {
+		if errors.Is(err, project.ErrNotFound) {
+			response.WriteError(w, r, http.StatusNotFound, "project_not_found", "project not found")
+			return
+		}
+		h.log.Error("delete project failed", "error", err, "request_id", request.RequestID(r))
+		response.WriteError(w, r, http.StatusInternalServerError, "internal_error", "could not delete project")
+		return
+	}
+	// Remove the project from the search index so it stops matching queries.
+	if err := h.searchSvc.DeleteProject(r.Context(), projectID); err != nil {
+		h.log.Warn("delete project index failed", "error", err, "project_id", projectID)
+	}
+	response.WriteJSON(w, http.StatusOK, map[string]any{"deleted": true})
+}
+
+type purgePathsRequest struct {
+	Paths   []string `json:"paths"`
+	Message string   `json:"message,omitempty"`
+}
+
+// Purge handles POST /api/v1/projects/{id}/purge. It rewrites history to
+// remove the given paths completely (hard delete, irreversible).
+func (h *ProjectHandler) Purge(w http.ResponseWriter, r *http.Request) {
+	projectID := request.PathParam(r, "id")
+	var req purgePathsRequest
+	if err := request.DecodeJSON(w, r, &req, h.cfg.MaxBodyBytes); err != nil {
+		response.WriteError(w, r, http.StatusBadRequest, "validation_failed", "invalid request body")
+		return
+	}
+	if len(req.Paths) == 0 {
+		response.WriteError(w, r, http.StatusBadRequest, "validation_failed", "paths required")
+		return
+	}
+	if err := h.svc.Purge(r.Context(), projectID, req.Paths, req.Message); err != nil {
+		if errors.Is(err, project.ErrNotFound) {
+			response.WriteError(w, r, http.StatusNotFound, "project_not_found", "project not found")
+			return
+		}
+		h.log.Error("purge paths failed", "error", err, "request_id", request.RequestID(r))
+		response.WriteError(w, r, http.StatusInternalServerError, "internal_error", "could not purge paths")
+		return
+	}
+	if _, err := h.searchSvc.ReindexProject(r.Context(), projectID); err != nil {
+		h.log.Warn("reindex after purge failed", "error", err, "project_id", projectID)
+	}
+	response.WriteJSON(w, http.StatusOK, map[string]any{"purged": true})
+}
