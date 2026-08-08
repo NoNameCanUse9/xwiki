@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+
+<html class="h-full" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>AgentDocs - Document Editor</title>
+<!-- Material Symbols -->
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Google Fonts -->
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500&amp;family=JetBrains+Mono:wght@400;500&amp;family=Space+Grotesk:wght@600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "primary": "#004ac6",
+                        "secondary-fixed-dim": "#bdc7d9",
+                        "ink-muted": "#6B7280",
+                        "on-primary-container": "#eeefff",
+                        "surface-container-lowest": "#ffffff",
+                        "surface-variant": "#e1e2ed",
+                        "surface": "#faf8ff",
+                        "danger": "#DC2626",
+                        "on-secondary": "#ffffff",
+                        "on-surface": "#191b23",
+                        "on-secondary-container": "#596373",
+                        "on-secondary-fixed-variant": "#3d4756",
+                        "tertiary-fixed-dim": "#ffb596",
+                        "surface-container": "#ededf9",
+                        "on-background": "#191b23",
+                        "graphite": "#1F2937",
+                        "paper": "#F9FAFB",
+                        "secondary-container": "#d6e0f3",
+                        "inverse-on-surface": "#f0f0fb",
+                        "primary-container": "#2563eb",
+                        "tertiary-fixed": "#ffdbcd",
+                        "error-container": "#ffdad6",
+                        "ink-subtle": "#9CA3AF",
+                        "on-surface-variant": "#434655",
+                        "paper-2": "#F3F4F6",
+                        "surface-container-highest": "#e1e2ed",
+                        "on-error-container": "#93000a",
+                        "surface-bright": "#faf8ff",
+                        "tertiary": "#943700",
+                        "on-primary": "#ffffff",
+                        "surface-dim": "#d9d9e5",
+                        "surface-container-high": "#e7e7f3",
+                        "on-tertiary-fixed-variant": "#7d2d00",
+                        "on-primary-fixed-variant": "#003ea8",
+                        "on-tertiary": "#ffffff",
+                        "error": "#ba1a1a",
+                        "success": "#16A34A",
+                        "primary-fixed-dim": "#b4c5ff",
+                        "on-secondary-fixed": "#121c2a",
+                        "ink": "#111827",
+                        "on-primary-fixed": "#00174b",
+                        "rule": "#E5E7EB",
+                        "secondary-fixed": "#d9e3f6",
+                        "primary-fixed": "#dbe1ff",
+                        "on-tertiary-fixed": "#360f00",
+                        "background": "#faf8ff",
+                        "surface-tint": "#0053db",
+                        "secondary": "#555f6f",
+                        "on-tertiary-container": "#ffede6",
+                        "inverse-primary": "#b4c5ff",
+                        "outline": "#737686",
+                        "outline-variant": "#c3c6d7",
+                        "warning": "#D97706",
+                        "surface-container-low": "#f3f3fe",
+                        "tertiary-container": "#bc4800",
+                        "on-error": "#ffffff",
+                        "inverse-surface": "#2e3039"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.125rem",
+                        "lg": "0.25rem",
+                        "xl": "0.5rem",
+                        "full": "0.75rem"
+                    },
+                    "spacing": {
+                        "sidebar-min": "220px",
+                        "base": "4px",
+                        "compact-height": "28px",
+                        "cozy-height": "34px",
+                        "editor-max-width": "820px",
+                        "sidebar-max": "400px"
+                    },
+                    "fontFamily": {
+                        "label-mono": ["JetBrains Mono"],
+                        "body-base": ["Inter"],
+                        "headline-md": ["Space Grotesk"],
+                        "body-sm": ["Inter"],
+                        "headline-lg": ["Space Grotesk"]
+                    },
+                    "fontSize": {
+                        "label-mono": ["12px", { "lineHeight": "1.4", "letterSpacing": "0.02em", "fontWeight": "500" }],
+                        "body-base": ["15px", { "lineHeight": "1.6", "fontWeight": "400" }],
+                        "headline-md": ["24px", { "lineHeight": "1.3", "fontWeight": "600" }],
+                        "body-sm": ["13px", { "lineHeight": "1.5", "fontWeight": "400" }],
+                        "headline-lg": ["32px", { "lineHeight": "1.2", "letterSpacing": "-0.02em", "fontWeight": "700" }]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+    </style>
+</head>
+<body class="h-full flex flex-col bg-background font-body-base text-body-base text-ink overflow-hidden">
+<!-- TopNavBar -->
+<header class="bg-surface border-b border-rule flex justify-between items-center h-cozy-height px-4 w-full z-50 flex-shrink-0">
+<div class="flex items-center gap-6">
+<span class="font-headline-md text-headline-md font-bold text-ink tracking-tight">AgentDocs</span>
+<!-- Command Palette trigger -->
+<div class="hidden md:flex items-center bg-paper-2 border border-rule rounded px-2 h-[24px] text-ink-muted cursor-text" style="width: 240px;">
+<span class="material-symbols-outlined text-[16px] mr-2">search</span>
+<span class="font-label-mono text-label-mono opacity-70">Search... (Ctrl+K)</span>
+</div>
+</div>
+<nav class="hidden md:flex gap-6 h-full items-center">
+<a class="h-full flex items-center text-primary border-b-2 border-primary font-body-sm px-1 cursor-pointer" href="#">Doc</a>
+<a class="h-full flex items-center text-ink-muted hover:bg-paper-2 transition-colors px-1 cursor-pointer" href="#">Project</a>
+</nav>
+<div class="flex items-center gap-3">
+<button class="text-ink-muted hover:text-primary transition-colors flex items-center justify-center p-1 cursor-pointer active:opacity-80">
+<span class="material-symbols-outlined text-[20px]" data-icon="settings">settings</span>
+</button>
+<button class="text-ink-muted hover:text-primary transition-colors flex items-center justify-center p-1 cursor-pointer active:opacity-80">
+<span class="material-symbols-outlined text-[20px]" data-icon="logout">logout</span>
+</button>
+<img alt="User profile" class="w-[24px] h-[24px] rounded-full object-cover border border-rule ml-2" data-alt="A small, circular avatar image of a professional user in a light, corporate environment. The image is a generic but high-quality placeholder for a user profile, utilizing neutral colors to fit seamlessly into a minimalist technical UI." src="https://lh3.googleusercontent.com/aida-public/AB6AXuD-e2GznY1jgfUeVJmi57qBbOw8KN6RNC543ohzH_Xhz5XdYHSV0LfUgcXJkHEk9efplFp2tSoQQ-UzxE9boqGkKsh0b-LjVvd4w7Jv1LE65VJWvlCiNKWH7ddsDbg1TjTWqNHE8xRvW0Ynek2Idlwl94yHIQes6lPwOPSex7qsNQoKISZhWoSe0OSOUsQS5g49xWg-McI6axtjMvoOiXYYgz93wdmoX8mUIDD01jcC804AMkQTu9f6"/>
+</div>
+</header>
+<!-- Main Workspace -->
+<div class="flex flex-1 overflow-hidden">
+<!-- SideNavBar -->
+<aside class="bg-paper border-r border-rule w-sidebar-min flex-shrink-0 flex flex-col pt-2 h-full z-40">
+<!-- Navigation Rail concept embedded within sidebar for density -->
+<div class="flex flex-col gap-1 px-2 mb-4">
+<a class="flex items-center gap-3 px-3 py-1.5 rounded bg-secondary-container text-primary font-label-mono text-label-mono cursor-pointer group" href="#">
+<span class="material-symbols-outlined text-[18px]" data-icon="description" data-weight="fill" style="font-variation-settings: 'FILL' 1;">description</span>
+<span>Workspace</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-1.5 rounded text-ink-muted hover:bg-paper-2 transition-all font-label-mono text-label-mono cursor-pointer group" href="#">
+<span class="material-symbols-outlined text-[18px]" data-icon="history">history</span>
+<span>Recent</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-1.5 rounded text-ink-muted hover:bg-paper-2 transition-all font-label-mono text-label-mono cursor-pointer group" href="#">
+<span class="material-symbols-outlined text-[18px]" data-icon="settings">settings</span>
+<span>Settings</span>
+</a>
+</div>
+<div class="border-t border-rule mx-2 mb-2"></div>
+<!-- Document Tree Panel -->
+<div class="flex-1 overflow-y-auto px-2 pb-4">
+<div class="font-label-mono text-label-mono text-ink-subtle uppercase tracking-wider px-2 py-1 mb-1">Project Alpha</div>
+<!-- Tree items -->
+<div class="flex flex-col font-body-sm text-body-sm">
+<div class="flex items-center gap-2 px-2 py-1 hover:bg-paper-2 rounded cursor-pointer text-ink">
+<span class="material-symbols-outlined text-[16px] text-ink-muted">folder</span>
+<span>src</span>
+</div>
+<div class="flex items-center gap-2 px-2 py-1 hover:bg-paper-2 rounded cursor-pointer text-ink">
+<span class="material-symbols-outlined text-[16px] text-ink-muted">folder_open</span>
+<span>docs</span>
+</div>
+<!-- Nested items -->
+<div class="pl-6 flex flex-col">
+<div class="flex items-center gap-2 px-2 py-1 bg-surface-variant text-primary rounded cursor-pointer">
+<span class="material-symbols-outlined text-[16px]" data-weight="fill" style="font-variation-settings: 'FILL' 1;">article</span>
+<span class="font-medium">README.md</span>
+</div>
+<div class="flex items-center gap-2 px-2 py-1 hover:bg-paper-2 rounded cursor-pointer text-ink">
+<span class="material-symbols-outlined text-[16px] text-ink-muted">article</span>
+<span>api_spec.md</span>
+</div>
+</div>
+<div class="flex items-center gap-2 px-2 py-1 hover:bg-paper-2 rounded cursor-pointer text-ink mt-1">
+<span class="material-symbols-outlined text-[16px] text-ink-muted">folder</span>
+<span>tests</span>
+</div>
+<div class="flex items-center gap-2 px-2 py-1 hover:bg-paper-2 rounded cursor-pointer text-ink">
+<span class="material-symbols-outlined text-[16px] text-ink-muted">insert_drive_file</span>
+<span>config.yaml</span>
+</div>
+</div>
+</div>
+</aside>
+<!-- Editor Content Area -->
+<main class="flex-1 flex flex-col bg-surface min-w-0 h-full relative">
+<!-- Breadcrumbs & Context Header -->
+<div class="h-cozy-height border-b border-rule bg-paper-2 flex items-center justify-between px-4 flex-shrink-0">
+<div class="flex items-center gap-2 font-label-mono text-label-mono text-ink-muted">
+<span class="hover:text-ink cursor-pointer">Home</span>
+<span class="text-ink-subtle">/</span>
+<span class="hover:text-ink cursor-pointer">Project Alpha</span>
+<span class="text-ink-subtle">/</span>
+<span class="hover:text-ink cursor-pointer">docs</span>
+<span class="text-ink-subtle">/</span>
+<span class="text-ink font-medium">README.md</span>
+</div>
+<div class="flex items-center gap-3">
+<div class="flex items-center gap-1 bg-surface-container-highest px-2 py-0.5 rounded border border-rule">
+<span class="material-symbols-outlined text-[14px] text-success">lock</span>
+<span class="font-label-mono text-[10px] text-success uppercase">Locked by you</span>
+</div>
+<!-- Top Toolbar Toggles -->
+<div class="flex bg-surface-container-highest rounded border border-rule overflow-hidden h-[24px]">
+<button class="px-3 bg-surface font-label-mono text-label-mono text-ink border-r border-rule hover:bg-paper-2 transition-colors">Edit</button>
+<button class="px-3 font-label-mono text-label-mono text-ink-muted hover:text-ink hover:bg-paper-2 transition-colors">Preview</button>
+</div>
+<button class="h-[24px] px-2 flex items-center gap-1 border border-rule rounded bg-surface font-label-mono text-label-mono text-ink-muted hover:bg-paper-2 transition-colors">
+<span class="material-symbols-outlined text-[16px]">history</span>
+<span>History</span>
+</button>
+</div>
+</div>
+<!-- Conflict Warning Banner (Simulated) -->
+<div class="bg-warning/10 border-b border-warning/20 px-4 py-2 flex items-center justify-between flex-shrink-0">
+<div class="flex items-center gap-2 text-warning font-body-sm">
+<span class="material-symbols-outlined text-[18px]">warning</span>
+<span><strong>Remote Conflict:</strong> A newer revision (v1.2) exists on the server.</span>
+</div>
+<button class="px-3 py-1 bg-warning text-on-primary font-label-mono text-label-mono rounded hover:opacity-90 transition-opacity">Review Changes</button>
+</div>
+<!-- Editor Canvas -->
+<div class="flex-1 overflow-y-auto flex justify-center bg-surface relative">
+<!-- Main Editor Column -->
+<div class="w-full max-w-editor-max-width px-8 py-8 h-full">
+<!-- Document Title Input -->
+<input class="w-full font-headline-lg text-headline-lg font-bold text-ink bg-transparent border-none focus:outline-none focus:ring-0 p-0 mb-6 placeholder-ink-subtle" placeholder="Document Title" type="text" value="README.md"/>
+<!-- Editor Body (Markdown source simulation) -->
+<div class="font-label-mono text-body-sm text-on-surface-variant leading-relaxed">
+<p class="text-primary-container mb-4"># AgentDocs Core Documentation</p>
+<p class="mb-4">Welcome to the central repository for the AgentDocs API and internal structure. This document outlines the primary data flows.</p>
+<p class="text-primary-container mt-6 mb-2">## Installation</p>
+<!-- Graphite Code Block -->
+<div class="bg-graphite text-surface-bright p-4 rounded-xl border border-outline-variant/30 mb-6 font-label-mono">
+<span class="text-tertiary-fixed-dim">npm</span> install @agentdocs/core<br/>
+<span class="text-tertiary-fixed-dim">npm</span> run build:sys
+                        </div>
+<p class="text-primary-container mt-6 mb-2">## System Architecture</p>
+<p class="mb-4">The architecture relies on a highly decoupled event bus that synchronizes documents across the network.</p>
+<ul class="list-none pl-0 space-y-2 mb-6">
+<li class="flex items-start"><span class="text-primary mr-2">-</span> <strong>Event Bus:</strong> Centralized message broker.</li>
+<li class="flex items-start"><span class="text-primary mr-2">-</span> <strong>Document Store:</strong> IndexedDB backed local persistence.</li>
+<li class="flex items-start"><span class="text-primary mr-2">-</span> <strong>Sync Engine:</strong> Handles conflict resolution and CRDT merging.</li>
+</ul>
+</div>
+</div>
+<!-- Right Sidebar TOC -->
+<div class="hidden xl:block w-[240px] flex-shrink-0 border-l border-rule bg-paper p-4 overflow-y-auto">
+<div class="font-label-mono text-[10px] uppercase text-ink-subtle tracking-wider mb-4">Table of Contents</div>
+<ul class="font-body-sm text-body-sm space-y-2 border-l-2 border-rule pl-3">
+<li class="text-primary -ml-[14px] pl-[12px] border-l-2 border-primary py-0.5 cursor-pointer">Introduction</li>
+<li class="text-ink-muted hover:text-ink cursor-pointer py-0.5">Installation</li>
+<li class="text-ink-muted hover:text-ink cursor-pointer py-0.5">System Architecture
+                            <ul class="pl-4 mt-1 space-y-1">
+<li class="text-ink-subtle hover:text-ink cursor-pointer">Event Bus</li>
+<li class="text-ink-subtle hover:text-ink cursor-pointer">Document Store</li>
+</ul>
+</li>
+<li class="text-ink-muted hover:text-ink cursor-pointer py-0.5">API Reference</li>
+</ul>
+</div>
+</div>
+</main>
+</div>
+<!-- Footer / Status Bar -->
+<footer class="bg-surface-container-low border-t border-rule h-compact-height fixed bottom-0 left-0 w-full flex justify-between items-center px-4 z-50 flex-shrink-0">
+<div class="flex items-center gap-4">
+<span class="font-label-mono text-[10px] uppercase text-success flex items-center gap-1">
+<span class="w-1.5 h-1.5 rounded-full bg-success"></span>
+                Go Service: Connected | Revision: 8f2a1c0 | Saved
+            </span>
+</div>
+<div class="flex items-center gap-4 font-label-mono text-[10px] uppercase text-ink-muted">
+<a class="hover:text-primary transition-colors" href="#">System Status</a>
+<a class="hover:text-primary transition-colors" href="#">API Logs</a>
+</div>
+</footer>
+</body></html>

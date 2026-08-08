@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8"/>
+    <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+    <title>AgentDocs - Revision History</title>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet"/>
+    <script>
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#2563eb",
+                        "primary-dark": "#1d4ed8",
+                        "surface": "#faf8ff",
+                        "paper": "#F9FAFB",
+                        "paper-2": "#F3F4F6",
+                        "ink": "#111827",
+                        "ink-muted": "#6B7280",
+                        "ink-subtle": "#9CA3AF",
+                        "rule": "#E5E7EB",
+                        "graphite": "#1F2937",
+                        "danger": "#DC2626",
+                        "success": "#16A34A",
+                        "warning": "#D97706",
+                    },
+                    fontFamily: {
+                        display: ["Space Grotesk", "sans-serif"],
+                        body: ["Inter", "sans-serif"],
+                        mono: ["JetBrains Mono", "monospace"],
+                    },
+                    spacing: {
+                        "xs": "4px",
+                        "sm": "8px",
+                        "md": "16px",
+                        "lg": "24px",
+                        "xl": "32px",
+                    },
+                    borderRadius: {
+                        "sm": "4px",
+                        "md": "6px",
+                        "lg": "10px",
+                    },
+                },
+            },
+        };
+    </script>
+    <style>
+        :root {
+            --color-background: #faf8ff;
+            --color-surface: #F9FAFB;
+            --color-text-primary: #111827;
+            --color-text-secondary: #6B7280;
+            --color-border: #E5E7EB;
+            --color-accent: #2563eb;
+        }
+        
+        .dark {
+            --color-background: #0f172a;
+            --color-surface: #1e293b;
+            --color-text-primary: #f8fafc;
+            --color-text-secondary: #94a3b8;
+            --color-border: #334155;
+            --color-accent: #3b82f6;
+        }
+        
+        .focus-ring:focus {
+            outline: none;
+            box-shadow: 0 0 0 2px var(--color-accent), 0 0 0 4px rgba(37, 99, 235, 0.2);
+        }
+        
+        .transition-smooth {
+            transition: all 0.2s ease-out;
+        }
+        
+        .revision-item {
+            transition: all 0.15s ease-out;
+        }
+        
+        .revision-item:hover {
+            background: rgba(37, 99, 235, 0.05);
+        }
+        
+        .revision-item.selected {
+            background: rgba(37, 99, 235, 0.1);
+            border-left: 3px solid var(--color-accent);
+        }
+        
+        .diff-line {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 13px;
+            line-height: 1.5;
+        }
+        
+        .diff-added {
+            background: rgba(22, 163, 74, 0.1);
+            border-left: 3px solid #16A34A;
+        }
+        
+        .diff-removed {
+            background: rgba(220, 38, 38, 0.1);
+            border-left: 3px solid #DC2626;
+        }
+        
+        .diff-modified {
+            background: rgba(217, 119, 6, 0.1);
+            border-left: 3px solid #D97706;
+        }
+        
+        .diff-context {
+            border-left: 3px solid transparent;
+        }
+    </style>
+</head>
+<body class="bg-surface font-body text-ink min-h-screen">
+    <div class="flex h-screen">
+        <!-- Sidebar: Document Content -->
+        <aside class="w-1/2 bg-paper border-r border-rule flex flex-col" role="complementary" aria-label="Document content">
+            <!-- Header -->
+            <div class="p-6 border-b border-rule">
+                <div class="flex items-center gap-3 mb-2">
+                    <span class="material-symbols-outlined text-primary">description</span>
+                    <h1 class="font-display text-xl font-semibold">System Architecture V2</h1>
+                </div>
+                <p class="text-ink-muted text-sm">Last updated: 2 hours ago by John Doe</p>
+            </div>
+            
+            <!-- Document Content -->
+            <div class="flex-1 overflow-auto p-6">
+                <div class="prose max-w-none">
+                    <h2 class="font-display text-lg font-semibold mb-3">Overview</h2>
+                    <p class="text-ink mb-4">The revised architecture introduces a decoupled state management system, allowing for independent scaling of the worker nodes. This addresses the bottleneck identified in the Q3 performance review.</p>
+                    
+                    <h2 class="font-display text-lg font-semibold mb-3">Key Changes</h2>
+                    <ul class="list-disc pl-6 mb-4 space-y-2">
+                        <li>Decoupled state management with event sourcing</li>
+                        <li>Independent worker node scaling</li>
+                        <li>Resilient message bus implementation</li>
+                        <li>Kafka-based task persistence</li>
+                    </ul>
+                    
+                    <h2 class="font-display text-lg font-semibold mb-3">Implementation</h2>
+                    <pre class="bg-graphite text-surface-bright p-4 rounded-lg mb-4 overflow-x-auto"><code>go func (s *Scheduler) Dispatch(ctx context.Context, job Job) error {
+    select {
+    case s.jobQueue <- job:
+        metrics.JobsQueued.Inc()
+        return nil
+    case <-ctx.Done():
+        return ctx.Err()
+    }
+}</code></pre>
+                    
+                    <p class="text-ink">Furthermore, the introduction of a resilient message bus ensures that tasks are not lost during node failures. We have selected Kafka for this implementation due to its proven durability guarantees.</p>
+                </div>
+            </div>
+        </aside>
+        
+        <!-- Main Content: Revision History -->
+        <main class="w-1/2 flex flex-col overflow-hidden">
+            <!-- Topbar -->
+            <header class="h-14 bg-paper border-b border-rule flex items-center justify-between px-6">
+                <div class="flex items-center gap-4">
+                    <h2 class="font-display text-lg font-semibold">Revision History</h2>
+                    <span class="text-ink-subtle text-sm">5 revisions</span>
+                </div>
+                
+                <div class="flex items-center gap-4">
+                    <!-- Search -->
+                    <div class="relative">
+                        <input
+                            type="text"
+                            placeholder="Search (Ctrl+K)"
+                            class="w-48 pl-9 pr-4 py-2 bg-paper-2 border border-rule rounded-md text-sm text-ink placeholder-ink-subtle focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-smooth"
+                            aria-label="Search revisions"
+                        />
+                        <span class="absolute left-3 top-1/2 -translate-y-1/2 text-ink-subtle">
+                            <span class="material-symbols-outlined text-[16px]">search</span>
+                        </span>
+                    </div>
+                    
+                    <!-- Actions -->
+                    <button class="flex items-center gap-2 bg-primary hover:bg-primary-dark text-on-primary text-sm font-medium py-2 px-3 rounded-lg transition-smooth">
+                        <span class="material-symbols-outlined text-[18px]">compare</span>
+                        Compare
+                    </button>
+                    <button class="flex items-center gap-2 bg-paper-2 hover:bg-rule text-ink text-sm font-medium py-2 px-3 rounded-lg transition-smooth">
+                        <span class="material-symbols-outlined text-[18px]">restore</span>
+                        Restore
+                    </button>
+                </div>
+            </header>
+            
+            <!-- Revision List -->
+            <div class="flex-1 overflow-auto">
+                <div class="divide-y divide-rule">
+                    <!-- Revision 1 (Current) -->
+                    <div class="revision-item selected p-4 cursor-pointer" role="button" tabindex="0" aria-selected="true">
+                        <div class="flex items-start gap-3">
+                            <div class="w-8 h-8 bg-primary rounded-full flex items-center justify-center flex-shrink-0">
+                                <span class="text-on-primary text-xs font-medium">JD</span>
+                            </div>
+                            <div class="flex-1 min-w-0">
+                                <div class="flex items-center gap-2 mb-1">
+                                    <span class="font-medium text-sm">John Doe</span>
+                                    <span class="text-xs text-ink-subtle">•</span>
+                                    <span class="text-xs text-ink-subtle">2 hours ago</span>
+                                    <span class="ml-auto px-2 py-0.5 bg-primary/10 text-primary text-xs font-medium rounded">Current</span>
+                                </div>
+                                <p class="text-sm text-ink-muted mb-2">Updated system architecture documentation with new state management approach</p>
+                                <div class="flex items-center gap-4 text-xs text-ink-subtle">
+                                    <span class="flex items-center gap-1">
+                                        <span class="w-2 h-2 bg-success rounded-full"></span>
+                                        +12 lines
+                                    </span>
+                                    <span class="flex items-center gap-1">
+                                        <span class="w-2 h-2 bg-danger rounded-full"></span>
+                                        -5 lines
+                                    </span>
+                                    <span>v1.2</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Revision 2 -->
+                    <div class="revision-item p-4 cursor-pointer" role="button" tabindex="0" aria-selected="false">
+                        <div class="flex items-start gap-3">
+                            <div class="w-8 h-8 bg-ink-subtle rounded-full flex items-center justify-center flex-shrink-0">
+                                <span class="text-white text-xs font-medium">AS</span>
+                            </div>
+                            <div class="flex-1 min-w-0">
+                                <div class="flex items-center gap-2 mb-1">
+                                    <span class="font-medium text-sm">Alice Smith</span>
+                                    <span class="text-xs text-ink-subtle">•</span>
+                                    <span class="text-xs text-ink-subtle">1 day ago</span>
+                                </div>
+                                <p class="text-sm text-ink-muted mb-2">Added implementation details for Kafka message bus</p>
+                                <div class="flex items-center gap-4 text-xs text-ink-subtle">
+                                    <span class="flex items-center gap-1">
+                                        <span class="w-2 h-2 bg-success rounded-full"></span>
+                                        +8 lines
+                                    </span>
+                                    <span>v1.1</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Revision 3 -->
+                    <div class="revision-item p-4 cursor-pointer" role="button" tabindex="0" aria-selected="false">
+                        <div class="flex items-start gap-3">
+                            <div class="w-8 h-8 bg-success rounded-full flex items-center justify-center flex-shrink-0">
+                                <span class="text-white text-xs font-medium">BJ</span>
+                            </div>
+                            <div class="flex-1 min-w-0">
+                                <div class="flex items-center gap-2 mb-1">
+                                    <span class="font-medium text-sm">Bob Johnson</span>
+                                    <span class="text-xs text-ink-subtle">•</span>
+                                    <span class="text-xs text-ink-subtle">3 days ago</span>
+                                </div>
+                                <p class="text-sm text-ink-muted mb-2">Initial draft of system architecture V2</p>
+                                <div class="flex items-center gap-4 text-xs text-ink-subtle">
+                                    <span class="flex items-center gap-1">
+                                        <span class="w-2 h-2 bg-success rounded-full"></span>
+                                        +45 lines
+                                    </span>
+                                    <span>v1.0</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Revision 4 -->
+                    <div class="revision-item p-4 cursor-pointer" role="button" tabindex="0" aria-selected="false">
+                        <div class="flex items-start gap-3">
+                            <div class="w-8 h-8 bg-warning rounded-full flex items-center justify-center flex-shrink-0">
+                                <span class="text-white text-xs font-medium">CW</span>
+                            </div>
+                            <div class="flex-1 min-w-0">
+                                <div class="flex items-center gap-2 mb-1">
+                                    <span class="font-medium text-sm">Carol White</span>
+                                    <span class="text-xs text-ink-subtle">•</span>
+                                    <span class="text-xs text-ink-subtle">1 week ago</span>
+                                </div>
+                                <p class="text-sm text-ink-muted mb-2">Fixed typos and formatting issues</p>
+                                <div class="flex items-center gap-4 text-xs text-ink-subtle">
+                                    <span class="flex items-center gap-1">
+                                        <span class="w-2 h-2 bg-danger rounded-full"></span>
+                                        -3 lines
+                                    </span>
+                                    <span>v0.9</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Diff View -->
+            <div class="border-t border-rule">
+                <div class="p-4 bg-paper-2 border-b border-rule">
+                    <div class="flex items-center justify-between">
+                        <h3 class="font-medium text-sm">Changes in v1.2</h3>
+                        <div class="flex items-center gap-2 text-xs text-ink-subtle">
+                            <span class="flex items-center gap-1">
+                                <span class="w-2 h-2 bg-success rounded-full"></span>
+                                Added
+                            </span>
+                            <span class="flex items-center gap-1">
+                                <span class="w-2 h-2 bg-danger rounded-full"></span>
+                                Removed
+                            </span>
+                            <span class="flex items-center gap-1">
+                                <span class="w-2 h-2 bg-warning rounded-full"></span>
+                                Modified
+                            </span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="overflow-auto max-h-64">
+                    <!-- Context line -->
+                    <div class="diff-line diff-context px-4 py-1 text-ink-muted">
+                        <span class="inline-block w-8 text-right mr-4 text-ink-subtle">1</span>
+                        <span>The revised architecture introduces a decoupled state</span>
+                    </div>
+                    
+                    <!-- Added line -->
+                    <div class="diff-line diff-added px-4 py-1">
+                        <span class="inline-block w-8 text-right mr-4 text-ink-subtle">2</span>
+                        <span class="text-success">+ management system, allowing for independent scaling</span>
+                    </div>
+                    
+                    <!-- Context line -->
+                    <div class="diff-line diff-context px-4 py-1 text-ink-muted">
+                        <span class="inline-block w-8 text-right mr-4 text-ink-subtle">3</span>
+                        <span>of the worker nodes.</span>
+                    </div>
+                    
+                    <!-- Modified line -->
+                    <div class="diff-line diff-modified px-4 py-1">
+                        <span class="inline-block w-8 text-right mr-4 text-ink-subtle">4</span>
+                        <span class="text-danger">- This addresses the bottleneck identified in Q2</span>
+                    </div>
+                    <div class="diff-line diff-modified px-4 py-1">
+                        <span class="inline-block w-8 text-right mr-4 text-ink-subtle">5</span>
+                        <span class="text-success">+ This addresses the bottleneck identified in Q3 performance review</span>
+                    </div>
+                    
+                    <!-- Removed line -->
+                    <div class="diff-line diff-removed px-4 py-1">
+                        <span class="inline-block w-8 text-right mr-4 text-ink-subtle">6</span>
+                        <span class="text-danger">- performance review.</span>
+                    </div>
+                    
+                    <!-- Context lines -->
+                    <div class="diff-line diff-context px-4 py-1 text-ink-muted">
+                        <span class="inline-block w-8 text-right mr-4 text-ink-subtle">7</span>
+                        <span></span>
+                    </div>
+                    <div class="diff-line diff-context px-4 py-1 text-ink-muted">
+                        <span class="inline-block w-8 text-right mr-4 text-ink-subtle">8</span>
+                        <span>go func (s *Scheduler) Dispatch(ctx context.Context, job Job) error {</span>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+    
+    <script>
+        // Revision selection
+        const revisions = document.querySelectorAll('.revision-item');
+        revisions.forEach(rev => {
+            rev.addEventListener('click', () => {
+                revisions.forEach(r => {
+                    r.classList.remove('selected');
+                    r.setAttribute('aria-selected', 'false');
+                });
+                rev.classList.add('selected');
+                rev.setAttribute('aria-selected', 'true');
+            });
+            
+            rev.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    rev.click();
+                }
+            });
+        });
+        
+        // Keyboard shortcuts
+        document.addEventListener('keydown', (e) => {
+            // Cmd/Ctrl + K to focus search
+            if (e.key === 'k' && (e.metaKey || e.ctrlKey)) {
+                e.preventDefault();
+                document.querySelector('input[type="text"]').focus();
+            }
+        });
+        
+        // Dark mode toggle
+        const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        if (prefersDark) {
+            document.documentElement.classList.add('dark');
+        }
+    </script>
+</body>
+</html>
