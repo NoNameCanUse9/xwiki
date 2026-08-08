@@ -18,6 +18,7 @@ func TestOpenAPISpecShape(t *testing.T) {
 	// All documented endpoint paths.
 	expected := []string{
 		"/auth/login", "/auth/logout", "/auth/me", "/auth/password",
+		"/auth/forgot-password", "/auth/reset-password",
 		"/tokens", "/tokens/{id}",
 		"/projects", "/projects/{id}", "/projects/{id}/archive",
 		"/projects/{id}/revision", "/projects/{id}/changesets",
@@ -37,12 +38,24 @@ func TestOpenAPISpecShape(t *testing.T) {
 	if len(paths) < 20 {
 		t.Fatalf("too few paths: %d", len(paths))
 	}
-	// Every operation declares security.
+	// Public endpoints intentionally carry no security.
+	public := map[string]bool{
+		"/auth/forgot-password": true,
+		"/auth/reset-password":  true,
+	}
+	// Every operation declares security, except the public reset flow.
 	for p, entry := range paths {
 		for method, op := range entry.(map[string]any) {
 			_ = method
 			opMap, _ := op.(map[string]any)
-			if opMap == nil || opMap["security"] == nil {
+			if opMap == nil {
+				t.Fatalf("path %s missing operation", p)
+			}
+			if public[p] {
+				if opMap["security"] != nil {
+					t.Fatalf("path %s must be public (no security)", p)
+				}
+			} else if opMap["security"] == nil {
 				t.Fatalf("path %s missing security", p)
 			}
 		}

@@ -105,3 +105,69 @@ func TestDeleteSessionByToken(t *testing.T) {
 		t.Fatalf("want ErrSessionNotFound, got %v", err)
 	}
 }
+
+func TestCreateResolveConsumePasswordReset(t *testing.T) {
+	svc, users, _ := newService(t)
+	createUser(t, users, "usr_1", "admin")
+
+	token, err := svc.CreatePasswordReset(context.Background(), "usr_1", 30*time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if token == "" {
+		t.Fatal("empty reset token")
+	}
+
+	// Valid token resolves to the user.
+	userID, err := svc.ResolvePasswordReset(context.Background(), token)
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if userID != "usr_1" {
+		t.Fatalf("want usr_1, got %s", userID)
+	}
+
+	// Consuming makes the token single-use.
+	if err := svc.ConsumePasswordReset(context.Background(), token); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.ResolvePasswordReset(context.Background(), token); err != ErrInvalidResetToken {
+		t.Fatalf("replay: want ErrInvalidResetToken, got %v", err)
+	}
+}
+
+func TestPasswordResetExpires(t *testing.T) {
+	svc, users, clk := newService(t)
+	createUser(t, users, "usr_1", "admin")
+
+	token, err := svc.CreatePasswordReset(context.Background(), "usr_1", 30*time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	clk.now = clk.now.Add(31 * time.Minute)
+	if _, err := svc.ResolvePasswordReset(context.Background(), token); err != ErrInvalidResetToken {
+		t.Fatalf("expired: want ErrInvalidResetToken, got %v", err)
+	}
+}
+
+func TestPasswordResetUnknownToken(t *testing.T) {
+	svc, _, _ := newService(t)
+	if _, err := svc.ResolvePasswordReset(context.Background(), "garbage"); err != ErrInvalidResetToken {
+		t.Fatalf("want ErrInvalidResetToken, got %v", err)
+	}
+}
+
+func TestDeleteSessionsByUser(t *testing.T) {
+	svc, users, _ := newService(t)
+	createUser(t, users, "usr_1", "admin")
+	token, err := svc.CreateSession(context.Background(), "usr_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.DeleteSessionsByUser(context.Background(), "usr_1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := svc.ResolveSession(context.Background(), token); err != ErrSessionNotFound {
+		t.Fatalf("want ErrSessionNotFound, got %v", err)
+	}
+}

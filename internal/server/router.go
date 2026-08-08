@@ -70,6 +70,8 @@ func NewRouter(cfg *config.Config, log *slog.Logger, db *sql.DB, users *user.Sto
 		r.Route("/auth", func(r chi.Router) {
 			r.Post("/login", h.Login)
 			r.Post("/logout", h.Logout)
+			r.Post("/forgot-password", h.ForgotPassword)
+			r.Post("/reset-password", h.ResetPassword)
 			r.Group(func(r chi.Router) {
 				r.Use(middleware.SessionAuth(authSvc))
 				r.Get("/me", h.Me)

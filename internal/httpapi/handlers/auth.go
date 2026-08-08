@@ -4,6 +4,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"agentdocs/internal/auth"
 	"agentdocs/internal/config"
@@ -124,4 +125,72 @@ func publicUser(u *user.User) map[string]any {
 		"display_name": u.DisplayName,
 		"is_admin":     u.IsAdmin,
 	}
+}
+
+// passwordResetTTL bounds how long a reset token stays valid.
+const passwordResetTTL = 30 * time.Minute
+
+// ForgotPassword handles POST /api/v1/auth/forgot-password.
+//
+// Self-hosted deployment without mail delivery: when the username exists a
+// one-time reset token is minted and written to the server log so the
+// operator can relay it out-of-band. The response is identical whether or
+// not the account exists, so the endpoint does not leak account presence.
+func (h *AuthHandler) ForgotPassword(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Username string `json:"username"`
+	}
+	if err := request.DecodeJSON(w, r, &req, h.cfg.MaxBodyBytes); err != nil || req.Username == "" {
+		response.WriteError(w, r, http.StatusBadRequest, "validation_failed", "username is required")
+		return
+	}
+	u, err := h.users.GetByUsername(r.Context(), req.Username)
+	if err == nil && !u.Disabled() {
+		token, terr := h.svc.CreatePasswordReset(r.Context(), u.ID, passwordResetTTL)
+		if terr != nil {
+			h.log.Error("create password reset", "error", terr)
+		} else {
+			h.log.Info("password reset token generated", "username", u.Username, "reset_token", token)
+		}
+	}
+	// Uniform response regardless of account existence.
+	response.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// ResetPassword handles POST /api/v1/auth/reset-password.
+func (h *AuthHandler) ResetPassword(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Token       string `json:"token"`
+		NewPassword string `json:"new_password"`
+	}
+	if err := request.DecodeJSON(w, r, &req, h.cfg.MaxBodyBytes); err != nil {
+		response.WriteError(w, r, http.StatusBadRequest, "validation_failed", "invalid request body")
+		return
+	}
+	if len(req.NewPassword) < 8 {
+		response.WriteError(w, r, http.StatusBadRequest, "validation_failed", "new password must be at least 8 characters")
+		return
+	}
+	userID, err := h.svc.ResolvePasswordReset(r.Context(), req.Token)
+	if err != nil {
+		response.WriteError(w, r, http.StatusBadRequest, "invalid_reset_token", "invalid or expired reset token")
+		return
+	}
+	hash, err := auth.HashPassword(req.NewPassword)
+	if err != nil {
+		h.log.Error("hash password", "error", err)
+		response.WriteError(w, r, http.StatusInternalServerError, "internal_error", "internal error")
+		return
+	}
+	if err := h.users.UpdatePassword(r.Context(), userID, hash); err != nil {
+		h.log.Error("update password", "error", err)
+		response.WriteError(w, r, http.StatusInternalServerError, "internal_error", "internal error")
+		return
+	}
+	if err := h.svc.ConsumePasswordReset(r.Context(), req.Token); err != nil {
+		h.log.Warn("consume reset token", "error", err)
+	}
+	// Kill existing sessions so a leaked old password cannot be replayed.
+	_ = h.svc.DeleteSessionsByUser(r.Context(), userID)
+	response.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }

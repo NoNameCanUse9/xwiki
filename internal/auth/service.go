@@ -18,6 +18,7 @@ var (
 	ErrInvalidCredentials = errors.New("invalid credentials")
 	ErrSessionNotFound    = errors.New("session not found")
 	ErrDisabled           = errors.New("account is disabled")
+	ErrInvalidResetToken  = errors.New("invalid or expired reset token")
 )
 
 type Session struct {
@@ -128,5 +129,66 @@ func (s *Service) DeleteSession(ctx context.Context, sessionID string) error {
 
 func (s *Service) DeleteSessionByToken(ctx context.Context, token string) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM sessions WHERE token_hash = ?`, hashToken(token))
+	return err
+}
+
+// DeleteSessionsByUser invalidates every session for a user (used after a
+// password reset so a leaked old password cannot be replayed).
+func (s *Service) DeleteSessionsByUser(ctx context.Context, userID string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM sessions WHERE user_id = ?`, userID)
+	return err
+}
+
+// CreatePasswordReset mints a one-time reset token for a user. The raw token
+// is returned exactly once (the caller delivers it out-of-band); only its
+// hash is persisted with a TTL.
+func (s *Service) CreatePasswordReset(ctx context.Context, userID string, ttl time.Duration) (string, error) {
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		return "", err
+	}
+	token := base64.RawURLEncoding.EncodeToString(raw)
+	now := s.clock.Now().UTC()
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO password_resets (id, user_id, token_hash, expires_at, created_at, used_at)
+		VALUES (?, ?, ?, ?, ?, NULL)`,
+		id.New("prs"), userID, hashToken(token),
+		now.Add(ttl).Format(time.RFC3339), now.Format(time.RFC3339))
+	if err != nil {
+		return "", err
+	}
+	return token, nil
+}
+
+// ResolvePasswordReset validates a raw reset token: it must exist, be unused,
+// and not be expired. The user ID is returned on success.
+func (s *Service) ResolvePasswordReset(ctx context.Context, token string) (string, error) {
+	row := s.db.QueryRowContext(ctx, `
+		SELECT user_id, expires_at, used_at FROM password_resets WHERE token_hash = ?`,
+		hashToken(token))
+	var userID string
+	var expiresAt string
+	var usedAt sql.NullString
+	if err := row.Scan(&userID, &expiresAt, &usedAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", ErrInvalidResetToken
+		}
+		return "", err
+	}
+	if usedAt.Valid {
+		return "", ErrInvalidResetToken
+	}
+	exp, _ := time.Parse(time.RFC3339, expiresAt)
+	if !exp.After(s.clock.Now()) {
+		return "", ErrInvalidResetToken
+	}
+	return userID, nil
+}
+
+// ConsumePasswordReset marks a reset token as used so it cannot be replayed.
+func (s *Service) ConsumePasswordReset(ctx context.Context, token string) error {
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE password_resets SET used_at = ? WHERE token_hash = ? AND used_at IS NULL`,
+		s.clock.Now().UTC().Format(time.RFC3339), hashToken(token))
 	return err
 }

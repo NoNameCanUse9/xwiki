@@ -24,8 +24,21 @@ func OpenAPISpec() map[string]any {
 			"parameters": params, "responses": map[string]any{"200": ok},
 		}
 	}
+	// addPublic is like add but without auth requirements.
+	addPublic := func(p, method, summary string) {
+		entry, _ := paths[p].(map[string]any)
+		if entry == nil {
+			entry = map[string]any{}
+			paths[p] = entry
+		}
+		entry[method] = map[string]any{
+			"summary": summary, "responses": map[string]any{"200": ok},
+		}
+	}
 	withID := func(p, m, s string) { add(p, m, s, projectParam) }
 
+	addPublic("/auth/forgot-password", "post", "请求密码重置（自托管：token 写入服务端日志）")
+	addPublic("/auth/reset-password", "post", "用一次性 token 重置密码")
 	add("/auth/login", "post", "登录（session cookie）", nil)
 	add("/auth/logout", "post", "退出登录", nil)
 	add("/auth/me", "get", "当前用户", nil)
