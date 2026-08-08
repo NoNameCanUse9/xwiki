@@ -7,7 +7,7 @@ use gpui_component::{
     button::*, input::Input, menu::ContextMenuExt, scroll::ScrollableElement as _, *,
 };
 
-use crate::app::{ProjectContextAction, ProjectRow, Screen, XWikiApp};
+use crate::app::{ProjectContextAction, ProjectFilter, ProjectRow, Screen, XWikiApp};
 use crate::config;
 use crate::ui::{mono_label, split_pane, tokens};
 
@@ -21,9 +21,15 @@ impl XWikiApp {
             .unwrap()
             .iter()
             .filter(|p| {
-                q.is_empty()
-                    || p.name.to_lowercase().contains(&q)
-                    || p.description.to_lowercase().contains(&q)
+                let status_matches = match self.project_filter {
+                    ProjectFilter::All => true,
+                    ProjectFilter::Active => !p.archived,
+                    ProjectFilter::Archived => p.archived,
+                };
+                status_matches
+                    && (q.is_empty()
+                        || p.name.to_lowercase().contains(&q)
+                        || p.description.to_lowercase().contains(&q))
             })
             .cloned()
             .collect();
@@ -210,6 +216,40 @@ impl XWikiApp {
             .text_xs()
             .text_color(cx.theme().muted_foreground)
             .child(label)
+    }
+
+    fn project_filter_button(
+        &self,
+        id: &'static str,
+        label: &'static str,
+        filter: ProjectFilter,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = cx.theme().clone();
+        let selected = self.project_filter == filter;
+        let row = div()
+            .id(id)
+            .px_3()
+            .py_1_5()
+            .rounded(px(tokens::RADIUS_SMALL))
+            .font_family(tokens::FONT_MONO)
+            .text_xs()
+            .text_color(if selected {
+                theme.accent
+            } else {
+                theme.muted_foreground
+            })
+            .cursor_pointer()
+            .child(label)
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.project_filter = filter;
+                cx.notify();
+            }));
+        if selected {
+            row.bg(theme.list_active).into_any_element()
+        } else {
+            row.hover(|s| s.bg(theme.list_hover)).into_any_element()
+        }
     }
 
     pub(crate) fn render_workspace(&self, window: &mut Window, cx: &mut Context<Self>) -> Div {
@@ -540,6 +580,35 @@ impl XWikiApp {
                                 .flex()
                                 .items_center()
                                 .gap_3()
+                                .child(
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .gap_1()
+                                        .px_1()
+                                        .py_1()
+                                        .rounded(px(tokens::RADIUS))
+                                        .border_1()
+                                        .border_color(theme.border)
+                                        .child(self.project_filter_button(
+                                            "filter-all",
+                                            "全部",
+                                            ProjectFilter::All,
+                                            cx,
+                                        ))
+                                        .child(self.project_filter_button(
+                                            "filter-active",
+                                            "活跃",
+                                            ProjectFilter::Active,
+                                            cx,
+                                        ))
+                                        .child(self.project_filter_button(
+                                            "filter-archived",
+                                            "已归档",
+                                            ProjectFilter::Archived,
+                                            cx,
+                                        )),
+                                )
                                 .child(
                                     div()
                                         .flex_1()

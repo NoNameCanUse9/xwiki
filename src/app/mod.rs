@@ -67,6 +67,13 @@ pub(crate) struct EditDocAction {
     pub path: String,
 }
 
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) enum ProjectFilter {
+    All,
+    Active,
+    Archived,
+}
+
 /// A filterable ⌘P entry.
 #[derive(Clone)]
 pub(crate) struct QuickItem {
@@ -91,6 +98,7 @@ pub struct XWikiApp {
     password_input: Entity<InputState>,
     projects: Arc<RwLock<Vec<ProjectRow>>>,
     filter_input: Entity<InputState>,
+    project_filter: ProjectFilter,
     // Document workspace state.
     selected_project: Option<String>,
     tree_entries: Vec<dto::TreeEntry>,
@@ -106,8 +114,11 @@ pub struct XWikiApp {
     status_msg: Option<String>,
     commit_msg: Entity<InputState>,
     editor_input: Entity<InputState>,
+    editor_title_input: Entity<InputState>,
+    editor_preview: bool,
     // History view state.
     history_open: bool,
+    history_input: Entity<InputState>,
     commits: Vec<dto::Commit>,
     commit_detail: Option<dto::CommitDetail>,
     diff_stats: Vec<dto::DiffStat>,
@@ -191,6 +202,11 @@ impl XWikiApp {
                 .multi_line(true)
                 .placeholder("# 用 Markdown 写作…")
         });
+        let editor_title_input = cx.new(|cx| {
+            InputState::new(window, cx).placeholder("文档标题")
+        });
+        let history_input =
+            cx.new(|cx| InputState::new(window, cx).placeholder("搜索版本…"));
 
         let settings_server_input = cx.new(|cx| {
             let mut state = InputState::new(window, cx);
@@ -229,6 +245,32 @@ impl XWikiApp {
                 },
             ));
         }
+        // Preview mode renders the current editor buffer, so changes need to
+        // invalidate the app even while the editor is open.
+        {
+            let editor = editor_input.clone();
+            subs.push(cx.subscribe_in(
+                &editor_input,
+                window,
+                move |_, _, _: &InputEvent, _, cx| {
+                    let _ = editor.read(cx);
+                    cx.notify();
+                },
+            ));
+        }
+        // History search filters the revision timeline without another
+        // network request.
+        {
+            let history = history_input.clone();
+            subs.push(cx.subscribe_in(
+                &history_input,
+                window,
+                move |_, _, _: &InputEvent, _, cx| {
+                    let _ = history.read(cx);
+                    cx.notify();
+                },
+            ));
+        }
 
         Self {
             screen: Screen::Login,
@@ -242,6 +284,7 @@ impl XWikiApp {
             password_input,
             projects,
             filter_input,
+            project_filter: ProjectFilter::All,
             selected_project: None,
             tree_entries: Vec::new(),
             tree_path: String::new(),
@@ -255,7 +298,10 @@ impl XWikiApp {
             status_msg: None,
             commit_msg,
             editor_input,
+            editor_title_input,
+            editor_preview: false,
             history_open: false,
+            history_input,
             commits: Vec::new(),
             commit_detail: None,
             diff_stats: Vec::new(),
@@ -403,6 +449,7 @@ impl XWikiApp {
             });
         }
         self.edit_path = Some(path.to_string());
+        self.editor_preview = false;
         self.editing = true;
         self.lock_held = true;
         self.start_heartbeat(cx);
@@ -447,6 +494,7 @@ impl XWikiApp {
     fn cancel_edit(&mut self, cx: &mut Context<Self>) {
         self.stop_heartbeat();
         self.editing = false;
+        self.editor_preview = false;
         self.lock_held = false;
         let (client, project, path) = (
             self.client.clone(),
@@ -528,6 +576,7 @@ impl XWikiApp {
         self.notify("已提交".into(), cx);
         self.stop_heartbeat();
         self.editing = false;
+        self.editor_preview = false;
         self.lock_held = false;
         let (client, project, path) = (
             self.client.clone(),

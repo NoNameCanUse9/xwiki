@@ -2,11 +2,7 @@
 //! stay in `crate::app` (mod.rs).
 
 use gpui::*;
-use gpui_component::{
-    button::*,
-    input::Input,
-    *,
-};
+use gpui_component::{button::*, input::Input, *};
 
 use crate::app::XWikiApp;
 use crate::ui::tokens;
@@ -207,18 +203,25 @@ impl XWikiApp {
                                     .w_full()
                                     .rounded(px(tokens::RADIUS))
                                     .icon(IconName::ArrowRight)
-                                    .label("登录")
+                                    .label(if self.loading { "登录中…" } else { "登录" })
+                                    .disabled(self.loading)
                                     .on_click(cx.listener(|this, _, window, cx| {
                                         this.do_login(window, cx)
                                     })),
                             )
-                            .child(
+                            .child(if self.loading {
+                                div()
+                                    .font_family(tokens::FONT_MONO)
+                                    .text_xs()
+                                    .text_color(theme.accent)
+                                    .child("正在连接服务器并验证会话…")
+                            } else {
                                 div()
                                     .font_family(tokens::FONT_MONO)
                                     .text_xs()
                                     .text_color(theme.muted_foreground)
-                                    .child("session · argon2id · http-only cookie"),
-                            ),
+                                    .child("session · argon2id · http-only cookie")
+                            }),
                     ),
             )
     }
