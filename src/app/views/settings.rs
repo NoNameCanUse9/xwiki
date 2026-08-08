@@ -396,103 +396,103 @@ impl XWikiApp {
 
         div()
             .v_flex()
-            .gap_3()
-            .p_4()
-            .rounded(px(tokens::RADIUS))
-            .border_1()
-            .border_color(theme.border)
-            .bg(theme.sidebar)
+            .gap_4()
             .child(
                 div()
-                    .flex()
-                    .items_center()
-                    .justify_between()
+                    .v_flex()
                     .gap_3()
-                    .child(
-                        div()
-                            .text_sm()
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_color(theme.foreground)
-                            .child("访问管理"),
-                    )
+                    .p_4()
+                    .rounded(px(tokens::RADIUS))
+                    .border_1()
+                    .border_color(theme.border)
+                    .bg(theme.sidebar)
                     .child(
                         div()
                             .flex()
-                            .flex_wrap()
                             .items_center()
-                            .justify_end()
-                            .gap_2()
+                            .justify_between()
+                            .gap_3()
                             .child(
-                                Button::new("create-token")
-                                    .compact()
-                                    .rounded(px(tokens::RADIUS))
-                                    .icon(IconName::Plus)
-                                    .label("Token")
-                                    .disabled(access_busy || test_busy)
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.open_create_token_dialog(window, cx)
-                                    })),
+                                div()
+                                    .text_sm()
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(theme.foreground)
+                                    .child("Token 管理"),
+                            )
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_wrap()
+                                    .items_center()
+                                    .justify_end()
+                                    .gap_2()
+                                    .child(
+                                        Button::new("create-token")
+                                            .compact()
+                                            .rounded(px(tokens::RADIUS))
+                                            .icon(IconName::Plus)
+                                            .label("新建 Token")
+                                            .disabled(access_busy || test_busy)
+                                            .on_click(cx.listener(|this, _, window, cx| {
+                                                this.open_create_token_dialog(window, cx)
+                                            })),
+                                    )
+                                    .child(
+                                        Button::new("refresh-access")
+                                            .compact()
+                                            .rounded(px(tokens::RADIUS))
+                                            .icon(IconName::Redo2)
+                                            .label(if access_busy {
+                                                "加载中…"
+                                            } else {
+                                                "刷新"
+                                            })
+                                            .loading(access_busy)
+                                            .disabled(access_busy || test_busy)
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                this.load_settings_access(cx)
+                                            })),
+                                    ),
+                            ),
+                    )
+                    .child(status)
+                    .child(token_content),
+            )
+            .child(
+                div()
+                    .v_flex()
+                    .gap_3()
+                    .p_4()
+                    .rounded(px(tokens::RADIUS))
+                    .border_1()
+                    .border_color(theme.border)
+                    .bg(theme.sidebar)
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .gap_3()
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(theme.foreground)
+                                    .child("用户管理"),
                             )
                             .child(
                                 Button::new("create-user")
                                     .compact()
                                     .rounded(px(tokens::RADIUS))
                                     .icon(IconName::Plus)
-                                    .label("用户")
+                                    .label("新建用户")
                                     .disabled(access_busy || test_busy)
                                     .on_click(cx.listener(|this, _, window, cx| {
                                         this.open_create_user_dialog(window, cx)
                                     })),
-                            )
-                            .child(
-                                Button::new("refresh-access")
-                                    .compact()
-                                    .rounded(px(tokens::RADIUS))
-                                    .icon(IconName::Redo2)
-                                    .label(if access_busy {
-                                        "加载中…"
-                                    } else {
-                                        "刷新"
-                                    })
-                                    .loading(access_busy)
-                                    .disabled(access_busy || test_busy)
-                                    .on_click(
-                                        cx.listener(|this, _, _, cx| this.load_settings_access(cx)),
-                                    ),
                             ),
-                    ),
-            )
-            .child(status)
-            .child(
-                div()
-                    .v_flex()
-                    .gap_4()
-                    .child(
-                        div()
-                            .v_flex()
-                            .gap_2()
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(theme.muted_foreground)
-                                    .child("访问 Token"),
-                            )
-                            .child(token_content),
                     )
-                    .child(
-                        div()
-                            .v_flex()
-                            .gap_2()
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(theme.muted_foreground)
-                                    .child("用户"),
-                            )
-                            .child(user_content),
-                    ),
+                    .child(user_content),
             )
     }
 
