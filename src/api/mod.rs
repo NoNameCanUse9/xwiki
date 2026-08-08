@@ -123,22 +123,37 @@ pub struct Client {
 
 impl Client {
     pub fn new(server: &str) -> Self {
-        Self::with_token(server, None)
+        Self::with_credentials(server, None, None)
     }
 
     pub fn with_token(server: &str, token: Option<String>) -> Self {
+        Self::with_credentials(server, token, None)
+    }
+
+    /// Rehydrates a client with the server-issued cookie saved by the GUI.
+    /// Passwords are never needed for session restoration.
+    pub fn with_session(server: &str, cookie: Option<String>) -> Self {
+        Self::with_credentials(server, None, cookie)
+    }
+
+    fn with_credentials(server: &str, token: Option<String>, cookie: Option<String>) -> Self {
         let base = server.trim_end_matches('/').to_string();
         let mut builder = reqwest::Client::builder().cookie_store(true);
+        let mut headers = reqwest::header::HeaderMap::new();
         if let Some(t) = token {
-            builder = builder.default_headers({
-                let mut h = reqwest::header::HeaderMap::new();
-                h.insert(
-                    reqwest::header::AUTHORIZATION,
-                    reqwest::header::HeaderValue::from_str(&format!("Bearer {t}"))
-                        .expect("bearer header"),
-                );
-                h
-            });
+            headers.insert(
+                reqwest::header::AUTHORIZATION,
+                reqwest::header::HeaderValue::from_str(&format!("Bearer {t}"))
+                    .expect("bearer header"),
+            );
+        }
+        if let Some(c) = cookie {
+            if let Ok(value) = reqwest::header::HeaderValue::from_str(&c) {
+                headers.insert(reqwest::header::COOKIE, value);
+            }
+        }
+        if !headers.is_empty() {
+            builder = builder.default_headers(headers);
         }
         Self {
             base,
@@ -174,23 +189,69 @@ impl Client {
         .await
     }
 
+    async fn send_with_session<T: DeserializeOwned + Send + 'static>(
+        req: reqwest::RequestBuilder,
+    ) -> Result<(T, Option<String>), ApiError> {
+        tokio_spawn(async move {
+            let resp = req.send().await.map_err(network_error)?;
+            let status = resp.status().as_u16();
+            let session_cookie = response_session_cookie(&resp);
+            if !resp.status().is_success() {
+                let body: Result<ErrorEnvelope, _> = resp.json().await;
+                let (code, message, request_id) = match body {
+                    Ok(env) => (
+                        env.error.code,
+                        env.error.message,
+                        Some(env.error.request_id),
+                    ),
+                    Err(_) => ("http_error".into(), format!("HTTP {}", status), None),
+                };
+                return Err(ApiError {
+                    code,
+                    message,
+                    request_id,
+                    status,
+                });
+            }
+            let value = resp.json().await.map_err(|e| ApiError {
+                code: "decode_error".into(),
+                message: e.to_string(),
+                request_id: None,
+                status,
+            })?;
+            Ok((value, session_cookie))
+        })
+        .await
+    }
+
     pub async fn meta(&self) -> Result<dto::Meta, ApiError> {
         Self::send(self.http.get(self.url("/api/v1/meta"))).await
     }
 
     pub async fn login(&self, username: &str, password: &str) -> Result<dto::User, ApiError> {
+        self.login_with_session(username, password)
+            .await
+            .map(|(user, _)| user)
+    }
+
+    /// Login and return the server-issued cookie so the GUI can persist it.
+    pub async fn login_with_session(
+        &self,
+        username: &str,
+        password: &str,
+    ) -> Result<(dto::User, Option<String>), ApiError> {
         #[derive(Serialize)]
         struct Body<'a> {
             username: &'a str,
             password: &'a str,
         }
-        let resp: dto::UserResponse = Self::send(
-                self.http
-                    .post(self.url("/api/v1/auth/login"))
-                    .json(&Body { username, password }),
-            )
-            .await?;
-        Ok(resp.user)
+        let (resp, cookie): (dto::UserResponse, Option<String>) = Self::send_with_session(
+            self.http
+                .post(self.url("/api/v1/auth/login"))
+                .json(&Body { username, password }),
+        )
+        .await?;
+        Ok((resp.user, cookie))
     }
 
     #[allow(dead_code)] // used by the CLI milestone
@@ -668,6 +729,20 @@ impl Client {
             .await?;
         Ok(resp.get("ok").and_then(|v| v.as_bool()).unwrap_or(false))
     }
+}
+
+fn response_session_cookie(response: &reqwest::Response) -> Option<String> {
+    let cookies: Vec<String> = response
+        .headers()
+        .get_all(reqwest::header::SET_COOKIE)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .filter_map(|value| value.split(';').next())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .collect();
+    (!cookies.is_empty()).then(|| cookies.join("; "))
 }
 
 fn network_error(e: reqwest::Error) -> ApiError {

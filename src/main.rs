@@ -11,7 +11,7 @@ mod ui;
 
 use app::XWikiApp;
 
-actions!(app_actions, [TogglePalette, ToggleTheme, QuickOpen]);
+actions!(app_actions, [TogglePalette, ToggleTheme, QuickOpen, SaveEditor]);
 
 fn main() {
     // WSLg: the native-Wayland + swiftshader Vulkan path renders a blank
@@ -77,6 +77,8 @@ fn main() {
             KeyBinding::new("ctrl-p", QuickOpen, None),
             KeyBinding::new("cmd-shift-t", ToggleTheme, None),
             KeyBinding::new("ctrl-shift-t", ToggleTheme, None),
+            KeyBinding::new("cmd-s", SaveEditor, None),
+            KeyBinding::new("ctrl-s", SaveEditor, None),
         ]);
 
         cx.spawn(async move |cx| {

@@ -7,4 +7,5 @@ pub mod editor;
 pub mod history;
 pub mod login;
 pub mod settings;
+pub mod shell;
 pub mod workspace;

@@ -1,336 +1,340 @@
-//! Login (plan §5): render methods for this screen/region; state and logic
-//! stay in `crate::app` (mod.rs).
+//! Login and password-reset view.
+//! State and network operations stay in `crate::app` (mod.rs).
 
 use gpui::*;
-use gpui_component::{button::*, input::Input, *};
+use gpui_component::{button::*, input::Input, scroll::ScrollableElement as _, *};
 
 use crate::app::XWikiApp;
-use crate::ui::tokens;
+use crate::ui::{body, mono_label, tokens};
 
 impl XWikiApp {
     pub(crate) fn render_login(&self, cx: &mut Context<Self>) -> Div {
-        let theme = cx.theme();
-        let cobalt = tokens::Cobalt::from_theme(theme);
-        let graphite = cobalt.graphite;
-        let graphite_soft = cobalt.graphite_soft;
+        let theme = cx.theme().clone();
+        let server = self.server_input.read(cx).value().to_string();
+        let reset_failed = self
+            .reset_status
+            .as_ref()
+            .map(|(ok, _)| !*ok)
+            .unwrap_or(false);
+        let status_label = if self.loading {
+            "连接中 · 正在验证会话"
+        } else if self.login_error.is_some() || reset_failed {
+            "连接失败 · 请检查输入"
+        } else {
+            "待连接 · 登录以继续"
+        };
+        let status_color = if self.loading {
+            theme.accent
+        } else if self.login_error.is_some() || reset_failed {
+            theme.danger
+        } else {
+            theme.muted_foreground
+        };
+
+        let login_feedback = if let Some(err) = &self.login_error {
+            div()
+                .w_full()
+                .flex()
+                .items_start()
+                .gap_2()
+                .p_3()
+                .rounded(px(tokens::RADIUS_SMALL))
+                .border_1()
+                .border_color(theme.danger)
+                .bg(theme.danger.opacity(0.1))
+                .child(Icon::new(IconName::CircleX).text_color(theme.danger))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w(px(0.0))
+                        .whitespace_normal()
+                        .text_xs()
+                        .text_color(theme.danger)
+                        .child(err.clone()),
+                )
+        } else if let Some((true, msg)) = &self.reset_status {
+            div()
+                .w_full()
+                .flex()
+                .items_start()
+                .gap_2()
+                .p_3()
+                .rounded(px(tokens::RADIUS_SMALL))
+                .border_1()
+                .border_color(theme.success)
+                .bg(theme.success.opacity(0.1))
+                .child(Icon::new(IconName::CircleCheck).text_color(theme.success))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w(px(0.0))
+                        .whitespace_normal()
+                        .text_xs()
+                        .text_color(theme.success)
+                        .child(msg.clone()),
+                )
+        } else {
+            div()
+        };
+
+        let reset_feedback = if let Some((ok, msg)) = &self.reset_status {
+            let color = if *ok { theme.success } else { theme.danger };
+            div()
+                .w_full()
+                .flex()
+                .items_start()
+                .gap_2()
+                .p_3()
+                .rounded(px(tokens::RADIUS_SMALL))
+                .border_1()
+                .border_color(color)
+                .bg(color.opacity(0.1))
+                .child(
+                    Icon::new(if *ok {
+                        IconName::CircleCheck
+                    } else {
+                        IconName::CircleX
+                    })
+                    .text_color(color),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w(px(0.0))
+                        .whitespace_normal()
+                        .text_xs()
+                        .text_color(color)
+                        .child(msg.clone()),
+                )
+        } else {
+            div()
+        };
+
+        let form = if self.reset_mode {
+            div()
+                .w_full()
+                .v_flex()
+                .gap_3()
+                .child(mono_label("步骤 1 · 请求一次性 token").text_color(theme.muted_foreground))
+                .child(
+                    Button::new("request-reset")
+                        .secondary()
+                        .w_full()
+                        .rounded(px(tokens::RADIUS))
+                        .icon(IconName::ArrowRight)
+                        .label(if self.loading {
+                            "请求中…"
+                        } else {
+                            "请求 token"
+                        })
+                        .loading(self.loading)
+                        .disabled(self.loading)
+                        .on_click(cx.listener(|this, _, _, cx| this.request_reset(cx))),
+                )
+                .child(reset_feedback)
+                .child(
+                    div()
+                        .v_flex()
+                        .gap_1()
+                        .child(mono_label("一次性 token").text_color(theme.muted_foreground))
+                        .child(Input::new(&self.reset_token_input).w_full()),
+                )
+                .child(
+                    div()
+                        .v_flex()
+                        .gap_1()
+                        .child(mono_label("新密码（至少 8 位）").text_color(theme.muted_foreground))
+                        .child(Input::new(&self.reset_password_input).w_full()),
+                )
+                .child(
+                    Button::new("submit-reset")
+                        .primary()
+                        .w_full()
+                        .rounded(px(tokens::RADIUS))
+                        .icon(IconName::Check)
+                        .label(if self.loading {
+                            "提交中…"
+                        } else {
+                            "重置密码"
+                        })
+                        .loading(self.loading)
+                        .disabled(self.loading)
+                        .on_click(cx.listener(|this, _, _, cx| this.submit_reset(cx))),
+                )
+                .child(
+                    Button::new("back-to-login")
+                        .ghost()
+                        .w_full()
+                        .rounded(px(tokens::RADIUS))
+                        .icon(IconName::ArrowLeft)
+                        .label("返回登录")
+                        .on_click(cx.listener(|this, _, _, cx| this.toggle_reset_mode(cx))),
+                )
+        } else {
+            div()
+                .w_full()
+                .v_flex()
+                .gap_4()
+                .child(
+                    div()
+                        .v_flex()
+                        .gap_1()
+                        .child(mono_label("服务地址").text_color(theme.muted_foreground))
+                        .child(Input::new(&self.server_input).w_full()),
+                )
+                .child(
+                    div()
+                        .v_flex()
+                        .gap_1()
+                        .child(mono_label("用户名").text_color(theme.muted_foreground))
+                        .child(Input::new(&self.user_input).w_full()),
+                )
+                .child(
+                    div()
+                        .w_full()
+                        .v_flex()
+                        .gap_1()
+                        .child(mono_label("密码").text_color(theme.muted_foreground))
+                        .child(Input::new(&self.password_input).w_full()),
+                )
+                .child(login_feedback)
+                .child(
+                    Button::new("login")
+                        .primary()
+                        .w_full()
+                        .rounded(px(tokens::RADIUS))
+                        .label(if self.loading {
+                            "登录中…"
+                        } else {
+                            "登录"
+                        })
+                        .loading(self.loading)
+                        .disabled(self.loading)
+                        .on_click(cx.listener(|this, _, window, cx| this.do_login(window, cx))),
+                )
+        };
+
         div()
             .size_full()
             .flex()
             .flex_col()
-            .items_center()
-            .justify_center()
+            .bg(theme.background)
             .child(
                 div()
+                    .flex_1()
+                    .min_h(px(0.0))
+                    .w_full()
+                    .overflow_y_scrollbar()
                     .flex()
-                    .w(px(tokens::LOGIN_WIDTH))
-                    .gap(px(tokens::LOGIN_GAP))
                     .items_center()
+                    .justify_center()
+                    .px_4()
+                    .py_6()
                     .child(
-                        // Left — brand statement + terminal card.
                         div()
-                            .flex_1()
+                            .w_full()
+                            .max_w(px(tokens::LOGIN_PANEL + 56.0))
                             .v_flex()
-                            .gap_5()
+                            .gap_4()
                             .child(
                                 div()
-                                    .v_flex()
-                                    .gap_3()
+                                    .w_full()
+                                    .flex()
+                                    .items_center()
+                                    .justify_between()
                                     .child(
                                         div()
                                             .font_family(tokens::FONT_MONO)
                                             .text_xs()
                                             .text_color(theme.accent)
-                                            .child("Git-backed documentation"),
+                                            .child("AGENTDOCS"),
                                     )
                                     .child(
                                         div()
-                                            .text_2xl()
-                                            .font_weight(FontWeight::SEMIBOLD)
-                                            .font_family(tokens::FONT_DISPLAY)
-                                            .text_color(theme.foreground)
-                                            .child("AgentDocs"),
-                                    )
+                                            .font_family(tokens::FONT_MONO)
+                                            .text_xs()
+                                            .text_color(theme.muted_foreground)
+                                            .child(if self.reset_mode {
+                                                "PASSWORD RESET"
+                                            } else {
+                                                "SECURE SIGN-IN"
+                                            }),
+                                    ),
+                            )
+                            .child(
+                                div()
+                                    .w_full()
+                                    .max_w(px(tokens::LOGIN_PANEL))
+                                    .self_center()
+                                    .p_8()
+                                    .rounded(px(tokens::RADIUS))
+                                    .border_1()
+                                    .border_color(theme.border)
+                                    .bg(theme.sidebar)
+                                    .v_flex()
+                                    .gap_5()
                                     .child(
                                         div()
-                                            .w(px(tokens::LOGIN_TEXT))
+                                            .w_full()
+                                            .v_flex()
+                                            .gap_1()
                                             .child(
-                                                crate::ui::body(
-                                                    "面向人类与 AI Agent 的轻量文档管理系统。一项目一 Git 仓库，文档即版本，ChangeSet 原子提交。",
-                                                )
+                                                div()
+                                                    .text_2xl()
+                                                    .font_weight(FontWeight::SEMIBOLD)
+                                                    .font_family(tokens::FONT_DISPLAY)
+                                                    .text_color(theme.foreground)
+                                                    .child(if self.reset_mode {
+                                                        "重置密码"
+                                                    } else {
+                                                        "登录以继续"
+                                                    }),
+                                            )
+                                            .child(
+                                                body(if self.reset_mode {
+                                                    "请求一次性 token 后设置新的登录密码"
+                                                } else {
+                                                    "使用管理员账号访问你的文档工作台"
+                                                })
                                                 .text_color(theme.muted_foreground),
                                             ),
-                                    ),
-                            )
-                            .child(
-                                // The graphite code card — one dark beat.
-                                div()
-                                    .w_full()
-                                    .rounded(px(tokens::RADIUS))
-                                    .overflow_hidden()
-                                    .bg(graphite)
-                                    .child(
-                                        div()
-                                            .flex()
-                                            .items_center()
-                                            .justify_between()
-                                            .px_4()
-                                            .py_2()
-                                            .border_b_1()
-                                            .border_color(tokens::card_rule())
-                                            .child(
-                                                div()
-                                                    .flex()
-                                                    .gap_1_5()
-                                                    .child(div().size_2_5().rounded_full().bg(tokens::card_dot()))
-                                                    .child(div().size_2_5().rounded_full().bg(tokens::card_dot()))
-                                                    .child(div().size_2_5().rounded_full().bg(tokens::card_dot())),
-                                            )
-                                            .child(
-                                                div()
-                                                    .font_family(tokens::FONT_MONO)
-                                                    .text_xs()
-                                                    .text_color(tokens::card_muted())
-                                                    .child("agentdocs — session"),
-                                            ),
                                     )
-                                    .child(
-                                        div()
-                                            .v_flex()
-                                            .gap_1_5()
-                                            .px_4()
-                                            .py_4()
-                                            .child(
-                                                div()
-                                                    .font_family(tokens::FONT_MONO)
-                                                    .text_sm()
-                                                    .child(
-                                                        div().flex().gap_2().child(
-                                                            div().text_color(theme.accent).child("$"),
-                                                        ).child(
-                                                            div().text_color(tokens::card_title()).child("agentdocs admin create -username admin"),
-                                                        ),
-                                                    ),
-                                            )
-                                            .child(
-                                                div()
-                                                    .font_family(tokens::FONT_MONO)
-                                                    .text_sm()
-                                                    .text_color(graphite_soft)
-                                                    .child("› argon2id · session persisted to sqlite"),
-                                            )
-                                            .child(
-                                                div()
-                                                    .font_family(tokens::FONT_MONO)
-                                                    .text_sm()
-                                                    .text_color(tokens::card_ok())
-                                                    .child("✓ 200 OK — agentdocs_session set (HttpOnly)"),
-                                            ),
-                                    ),
-                            )
-                            .child(
-                                div()
-                                    .font_family(tokens::FONT_MONO)
-                                    .text_xs()
-                                    .text_color(theme.muted_foreground)
-                                    .child("phase 01 · skeleton · serve / admin create"),
+                                    .child(form),
                             ),
-                    )
+                    ),
+            )
+            .child(
+                div()
+                    .h(px(tokens::STATUS_H))
+                    .px_4()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .border_t_1()
+                    .border_color(theme.border)
+                    .bg(theme.sidebar)
+                    .child(div().size_2().rounded_full().bg(status_color))
                     .child(
-                        // Right — sign-in panel (hairline).
                         div()
-                            .w(px(tokens::LOGIN_PANEL))
-                            .p_8()
-                            .rounded(px(tokens::RADIUS))
-                            .border_1()
-                            .border_color(theme.border)
-                            .bg(theme.sidebar)
-                            .v_flex()
-                            .gap_4()
-                            .child(
-                                div()
-                                    .v_flex()
-                                    .gap_1()
-                                    .child(
-                                        div()
-                                            .text_xl()
-                                            .font_weight(FontWeight::SEMIBOLD)
-                                            .text_color(theme.foreground)
-                                            .child("登录以继续"),
-                                    )
-                                    .child(
-                                        div()
-                                            .text_sm()
-                                            .text_color(theme.muted_foreground)
-                                            .child("使用管理员账号访问你的文档工作台"),
-                                    ),
-                            )
-                            .child(
-                                div()
-                                    .font_family(tokens::FONT_MONO)
-                                    .text_xs()
-                                    .text_color(theme.muted_foreground)
-                                    .child("服务地址"),
-                            )
-                            .child(Input::new(&self.server_input).w_full())
-                            .child(
-                                div()
-                                    .font_family(tokens::FONT_MONO)
-                                    .text_xs()
-                                    .text_color(theme.muted_foreground)
-                                    .child("用户名"),
-                            )
-                            .child(Input::new(&self.user_input).w_full())
-                            .child(
-                                div()
-                                    .font_family(tokens::FONT_MONO)
-                                    .text_xs()
-                                    .text_color(theme.muted_foreground)
-                                    .child("密码"),
-                            )
-                            .child(Input::new(&self.password_input).w_full())
-                            .child(if self.reset_mode {
-                                // Forgot-password form: token + new password.
-                                div().v_flex().gap_3().w_full()
-                                .child(
-                                    div()
-                                        .font_family(tokens::FONT_MONO)
-                                        .text_xs()
-                                        .text_color(theme.muted_foreground)
-                                        .child("重置密码"),
-                                )
-                                .child(
-                                    div()
-                                        .font_family(tokens::FONT_MONO)
-                                        .text_xs()
-                                        .text_color(theme.muted_foreground)
-                                        .child("1 · 请求一次性 token（发往服务端日志）"),
-                                )
-                                .child(
-                                    Button::new("request-reset")
-                                        .rounded(px(tokens::RADIUS))
-                                        .icon(IconName::ArrowRight)
-                                        .label(if self.loading { "请求中…" } else { "请求 token" })
-                                        .disabled(self.loading)
-                                        .on_click(cx.listener(|this, _, _, cx| {
-                                            this.request_reset(cx)
-                                        })),
-                                )
-                                .child(
-                                    div()
-                                        .font_family(tokens::FONT_MONO)
-                                        .text_xs()
-                                        .text_color(theme.muted_foreground)
-                                        .child("2 · 输入 token 与新密码"),
-                                )
-                                .child(
-                                    div()
-                                        .font_family(tokens::FONT_MONO)
-                                        .text_xs()
-                                        .text_color(theme.muted_foreground)
-                                        .child("一次性 token"),
-                                ).child(Input::new(&self.reset_token_input).w_full())
-                                .child(
-                                    div()
-                                        .font_family(tokens::FONT_MONO)
-                                        .text_xs()
-                                        .text_color(theme.muted_foreground)
-                                        .child("新密码（至少 8 位）"),
-                                )
-                                .child(Input::new(&self.reset_password_input).w_full())
-                                .child(if let Some((ok, msg)) = &self.reset_status {
-                                    div()
-                                        .font_family(tokens::FONT_MONO)
-                                        .text_xs()
-                                        .text_color(if *ok { theme.success_foreground } else { theme.danger })
-                                        .child(msg.clone())
-                                } else {
-                                    div()
-                                })
-                                .child(
-                                    Button::new("submit-reset")
-                                        .primary()
-                                        .w_full()
-                                        .rounded(px(tokens::RADIUS))
-                                        .icon(IconName::Check)
-                                        .label(if self.loading { "提交中…" } else { "重置密码" })
-                                        .disabled(self.loading)
-                                        .on_click(cx.listener(|this, _, _, cx| {
-                                            this.submit_reset(cx)
-                                        })),
-                                )
-                                .child(
-                                    div()
-                                        .id("back-to-login")
-                                        .text_xs()
-                                        .text_color(theme.muted_foreground)
-                                        .hover(|s| s.text_color(theme.accent))
-                                        .cursor_pointer()
-                                        .child("← 返回登录")
-                                        .on_click(cx.listener(|this, _, _, cx| {
-                                            this.toggle_reset_mode(cx)
-                                        })),
-                                )
+                            .font_family(tokens::FONT_MONO)
+                            .text_xs()
+                            .text_color(status_color)
+                            .child(status_label),
+                    )
+                    .child(div().flex_1())
+                    .child(
+                        div()
+                            .max_w(px(360.0))
+                            .overflow_x_hidden()
+                            .text_ellipsis()
+                            .whitespace_nowrap()
+                            .font_family(tokens::FONT_MONO)
+                            .text_xs()
+                            .text_color(theme.muted_foreground)
+                            .child(if server.trim().is_empty() {
+                                "未设置服务地址".to_string()
                             } else {
-                                // Sign-in form.
-                                div().v_flex().gap_3().w_full().child(
-                                    div()
-                                        .flex()
-                                        .justify_between()
-                                        .items_center()
-                                        .child(
-                                            div()
-                                                .font_family(tokens::FONT_MONO)
-                                                .text_xs()
-                                                .text_color(theme.muted_foreground)
-                                                .child("密码"),
-                                        )
-                                        .child(
-                                            div()
-                                                .id("forgot-password-link")
-                                                .text_xs()
-                                                .text_color(theme.muted_foreground)
-                                                .hover(|s| s.text_color(theme.accent))
-                                                .cursor_pointer()
-                                                .child("忘记密码？")
-                                                .on_click(cx.listener(|this, _, _, cx| {
-                                                    this.toggle_reset_mode(cx)
-                                                })),
-                                        ),
-                                )
-                            })
-                            .child(if let Some(err) = &self.login_error {
-                                div()
-                                    .font_family(tokens::FONT_MONO)
-                                    .text_xs()
-                                    .text_color(theme.danger)
-                                    .child(err.clone())
-                            } else {
-                                div()
-                            })
-                            .child(
-                                Button::new("login")
-                                    .primary()
-                                    .w_full()
-                                    .rounded(px(tokens::RADIUS))
-                                    .icon(IconName::ArrowRight)
-                                    .label(if self.loading { "登录中…" } else { "登录" })
-                                    .disabled(self.loading)
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.do_login(window, cx)
-                                    })),
-                            )
-                            .child(if self.loading {
-                                div()
-                                    .font_family(tokens::FONT_MONO)
-                                    .text_xs()
-                                    .text_color(theme.accent)
-                                    .child("正在连接服务器并验证会话…")
-                            } else {
-                                div()
-                                    .font_family(tokens::FONT_MONO)
-                                    .text_xs()
-                                    .text_color(theme.muted_foreground)
-                                    .child("session · argon2id · http-only cookie")
+                                tokens::truncate(&server, 72)
                             }),
                     ),
             )

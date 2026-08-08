@@ -39,14 +39,25 @@ impl XWikiApp {
                     .mx_3()
                     .my_4()
                     .px_4()
-                    .py_6()
+                    .py_5()
                     .rounded(px(tokens::RADIUS))
                     .border_1()
                     .border_color(theme.border)
+                    .v_flex()
+                    .items_center()
+                    .gap_3()
                     .text_center()
                     .text_sm()
                     .text_color(theme.muted_foreground)
-                    .child(mono_label("空目录")),
+                    .child(Icon::new(IconName::FolderOpen).text_color(theme.muted_foreground))
+                    .child(mono_label("此目录没有文档"))
+                    .child(
+                        Button::new("empty-tree-back")
+                            .rounded(px(tokens::RADIUS))
+                            .icon(IconName::ArrowLeft)
+                            .label("返回项目")
+                            .on_click(cx.listener(|this, _, _, cx| this.back_to_projects(cx))),
+                    ),
             );
             return list.into_any_element();
         }
@@ -78,17 +89,17 @@ impl XWikiApp {
                         }),
                 )
                 .child(
-                    div()
-                        .w(px(16.0))
-                        .text_center()
-                        .font_family(tokens::FONT_MONO)
-                        .text_xs()
-                        .text_color(if is_dir_owned {
-                            theme.accent
-                        } else {
-                            theme.muted_foreground
-                        })
-                        .child(if is_dir_owned { "▸" } else { "·" }),
+                    Icon::new(if is_dir_owned {
+                        IconName::Folder
+                    } else {
+                        IconName::File
+                    })
+                    .with_size(px(16.0))
+                    .text_color(if is_dir_owned {
+                        theme.accent
+                    } else {
+                        theme.muted_foreground
+                    }),
                 )
                 .child(
                     div()
@@ -100,11 +111,17 @@ impl XWikiApp {
                         } else {
                             theme.muted_foreground
                         })
-                        .child(path_owned.split('/').next_back().unwrap_or("").to_string()),
+                        .child(tokens::truncate(
+                            path_owned.split('/').next_back().unwrap_or(""),
+                            48,
+                        )),
                 )
                 .on_click({
                     let click_path = path_owned.clone();
                     cx.listener(move |this, _, _, cx| {
+                        if this.editing {
+                            return;
+                        }
                         this.tree_focus = Some(i);
                         if is_dir_owned {
                             this.load_tree(&click_path, cx);
@@ -153,6 +170,9 @@ impl XWikiApp {
             .w_full()
             .focusable()
             .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _w, cx| {
+                if this.editing {
+                    return;
+                }
                 let n = items_clone.len();
                 if n == 0 {
                     return;
@@ -225,7 +245,6 @@ impl XWikiApp {
                     });
                 },
             ))
-            .child(self.render_status_bar(cx))
     }
 
     pub(crate) fn render_doc_rail(&self, cx: &mut Context<Self>) -> Div {
@@ -254,6 +273,7 @@ impl XWikiApp {
                             .rounded(px(tokens::RADIUS))
                             .icon(IconName::ArrowLeft)
                             .label("项目")
+                            .disabled(self.editing)
                             .on_click(cx.listener(|this, _, _, cx| this.back_to_projects(cx))),
                     ),
             )
@@ -276,7 +296,9 @@ impl XWikiApp {
                             .cursor_pointer()
                             .child("docs")
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.load_tree("", cx);
+                                if !this.editing {
+                                    this.load_tree("", cx);
+                                }
                             })),
                     )
                     .children({
@@ -313,7 +335,7 @@ impl XWikiApp {
                                         .font_family(tokens::FONT_MONO)
                                         .text_xs()
                                         .text_color(theme.foreground)
-                                        .child(name)
+                                        .child(tokens::truncate(&name, 32))
                                         .into_any_element(),
                                 );
                             } else {
@@ -325,9 +347,11 @@ impl XWikiApp {
                                         .text_color(theme.muted_foreground)
                                         .hover(|s| s.text_color(theme.accent))
                                         .cursor_pointer()
-                                        .child(name)
+                                        .child(tokens::truncate(&name, 32))
                                         .on_click(cx.listener(move |this, _, _, cx| {
-                                            this.load_tree(&target, cx);
+                                            if !this.editing {
+                                                this.load_tree(&target, cx);
+                                            }
                                         }))
                                         .into_any_element(),
                                 );
@@ -336,7 +360,22 @@ impl XWikiApp {
                         out
                     }),
             )
-            .child(if let Some(err) = &self.tree_error {
+            .child(if self.tree_loading {
+                div()
+                    .flex_1()
+                    .p_3()
+                    .v_flex()
+                    .gap_3()
+                    .children((0..6).map(|i| {
+                        div()
+                            .id(format!("tree-skeleton-{i}"))
+                            .h(px(28.0))
+                            .w_full()
+                            .rounded(px(tokens::RADIUS_SMALL))
+                            .bg(theme.skeleton)
+                    }))
+                    .into_any_element()
+            } else if let Some(err) = &self.tree_error {
                 div()
                     .flex_1()
                     .p_3()
@@ -409,11 +448,11 @@ impl XWikiApp {
 
     pub(crate) fn render_main_pane(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = cx.theme().clone();
-        if let Some(c) = &self.conflict {
-            return self.render_conflict_panel(c, cx).into_any_element();
-        }
         if self.editing {
             return self.render_editor_view(cx).into_any_element();
+        }
+        if let Some(c) = &self.conflict {
+            return self.render_conflict_panel(c, cx).into_any_element();
         }
         div()
             .flex_1()
@@ -498,9 +537,14 @@ impl XWikiApp {
                             .justify_between()
                             .child(
                                 div()
+                                    .flex_1()
+                                    .min_w(px(0.0))
                                     .font_family(tokens::FONT_MONO)
                                     .text_xs()
                                     .text_color(theme.muted_foreground)
+                                    .overflow_x_hidden()
+                                    .text_ellipsis()
+                                    .whitespace_nowrap()
                                     .child(path.clone()),
                             )
                             .child(
@@ -527,14 +571,52 @@ impl XWikiApp {
                                     ),
                             ),
                     )
-                    .child(
-                        div().w_full().flex().justify_center().child(
-                            div().w(px(tokens::MEASURE)).child(crate::ui::markdown(
+                    .child(if self.doc_content.trim().is_empty() {
+                        div()
+                            .flex_1()
+                            .flex()
+                            .flex_col()
+                            .items_center()
+                            .justify_center()
+                            .gap_3()
+                            .text_center()
+                            .child(
+                                Icon::new(IconName::File)
+                                    .with_size(px(24.0))
+                                    .text_color(theme.muted_foreground),
+                            )
+                            .child(
+                                div()
+                                    .text_lg()
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .text_color(theme.foreground)
+                                    .child("文档内容为空"),
+                            )
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .text_color(theme.muted_foreground)
+                                    .child("可以直接开始编辑，保存后会创建一个新的版本。"),
+                            )
+                            .child(
+                                Button::new("empty-doc-edit")
+                                    .rounded(px(tokens::RADIUS))
+                                    .icon(IconName::File)
+                                    .label("开始编辑")
+                                    .on_click(cx.listener(|this, _, _, cx| this.start_edit(cx))),
+                            )
+                            .into_any_element()
+                    } else {
+                        div()
+                            .w_full()
+                            .flex()
+                            .justify_center()
+                            .child(div().w(px(tokens::MEASURE)).child(crate::ui::markdown(
                                 "doc-content",
                                 self.doc_content.clone(),
-                            )),
-                        ),
-                    )
+                            )))
+                            .into_any_element()
+                    })
             } else {
                 div()
                     .flex_1()

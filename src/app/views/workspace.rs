@@ -7,9 +7,7 @@ use gpui_component::{
     button::*, input::Input, menu::ContextMenuExt, scroll::ScrollableElement as _, *,
 };
 
-use crate::app::{
-    ProjectArchiveAction, ProjectContextAction, ProjectFilter, ProjectRow, Screen, XWikiApp,
-};
+use crate::app::{ProjectArchiveAction, ProjectContextAction, ProjectFilter, ProjectRow, XWikiApp};
 use crate::config;
 use crate::ui::{mono_label, split_pane, tokens};
 
@@ -36,6 +34,17 @@ impl XWikiApp {
             .cloned()
             .collect();
         if projects.is_empty() {
+            let (empty_title, empty_description) = if !q.is_empty() {
+                ("没有匹配的项目", "没有项目符合当前搜索条件。")
+            } else {
+                match self.project_filter {
+                    ProjectFilter::All => ("还没有项目", "创建第一个项目，开始组织你的文档。"),
+                    ProjectFilter::Active => {
+                        ("还没有活跃项目", "新建项目或取消归档后，项目会显示在这里。")
+                    }
+                    ProjectFilter::Archived => ("还没有归档项目", "归档项目会显示在这里。"),
+                }
+            };
             let empty = div()
                 .flex_1()
                 .flex()
@@ -49,36 +58,46 @@ impl XWikiApp {
                         .text_xl()
                         .font_weight(FontWeight::SEMIBOLD)
                         .text_color(theme.foreground)
-                        .child(if q.is_empty() {
-                            "还没有项目"
-                        } else {
-                            "没有匹配的项目"
-                        }),
+                        .child(empty_title),
                 )
                 .child(
                     div()
                         .font_family(tokens::FONT_BODY)
                         .text_sm()
                         .text_color(theme.muted_foreground)
-                        .child(if q.is_empty() {
-                            "创建第一个项目，开始组织你的文档。"
-                        } else {
-                            "换一个关键词，或清空搜索条件。"
-                        }),
+                        .child(empty_description),
                 );
-            return if q.is_empty() {
-                empty.child(
+            return match (q.is_empty(), self.project_filter) {
+                (true, ProjectFilter::Archived) => empty,
+                (true, _) => empty.child(
                     Button::new("empty-new-project")
                         .primary()
                         .rounded(px(tokens::RADIUS))
                         .icon(IconName::Plus)
-                        .label("新建项目")
+                        .label(if self.project_action.is_some() {
+                            "创建中…"
+                        } else {
+                            "新建项目"
+                        })
+                        .loading(self.project_action.is_some())
+                        .disabled(self.project_action.is_some())
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.open_new_project_dialog(window, cx)
                         })),
-                )
-            } else {
-                empty
+                ),
+                (false, _) => empty.child(
+                    Button::new("empty-clear-project-search")
+                        .rounded(px(tokens::RADIUS))
+                        .icon(IconName::Close)
+                        .label("清空搜索")
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            let input = this.filter_input.clone();
+                            input.update(cx, |state, cx| {
+                                state.set_value(String::new(), window, cx);
+                            });
+                            cx.notify();
+                        })),
+                ),
             };
         }
 
@@ -95,7 +114,10 @@ impl XWikiApp {
             .max_w(px(tokens::PROJECT_GRID_MAX));
         for p in projects {
             let id = p.id.clone();
-            let status_color = if p.archived {
+            let archived = p.archived;
+            let action_id = id.clone();
+            let action_busy = self.project_action.as_deref() == Some(id.as_str());
+            let status_color = if archived {
                 theme.muted_foreground
             } else {
                 theme.accent
@@ -114,7 +136,7 @@ impl XWikiApp {
                     s.bg(theme.list_hover).shadow(vec![BoxShadow::new(
                         px(0.0),
                         px(2.0),
-                        gpui::rgba(0x1920291a).into(),
+                        theme.foreground.opacity(0.1),
                     )
                     .blur_radius(px(8.0))])
                 })
@@ -139,14 +161,40 @@ impl XWikiApp {
                         )
                         .child(
                             div()
-                                .font_family(tokens::FONT_MONO)
-                                .text_xs()
-                                .text_color(theme.muted_foreground)
-                                .child(p.updated.clone()),
+                                .flex()
+                                .items_center()
+                                .gap_2()
+                                .child(
+                                    div()
+                                        .font_family(tokens::FONT_MONO)
+                                        .text_xs()
+                                        .text_color(theme.muted_foreground)
+                                        .child(tokens::truncate(&p.updated, 16)),
+                                )
+                                .child(
+                                    Button::new(format!("project-actions-{}", id))
+                                        .ghost()
+                                        .compact()
+                                        .icon(IconName::EllipsisVertical)
+                                        .tooltip(if archived {
+                                            "项目操作：恢复"
+                                        } else {
+                                            "项目操作：归档"
+                                        })
+                                        .disabled(action_busy)
+                                        .on_click(cx.listener(move |this, _, window, cx| {
+                                            this.confirm_archive_project(
+                                                window,
+                                                cx,
+                                                action_id.clone(),
+                                                !archived,
+                                            );
+                                        })),
+                                ),
                         ),
                 )
                 .child(
-                    crate::ui::display(p.name.clone())
+                    crate::ui::display(tokens::truncate(&p.name, 42))
                         .text_xl()
                         .font_weight(FontWeight::SEMIBOLD)
                         .text_color(theme.foreground),
@@ -161,7 +209,7 @@ impl XWikiApp {
                         .child(if p.description.is_empty() {
                             "暂无项目描述".to_string()
                         } else {
-                            p.description.clone()
+                            tokens::truncate(&p.description, 120)
                         }),
                 )
                 .child(
@@ -200,7 +248,6 @@ impl XWikiApp {
                     cx.listener(move |this, _, _, cx| this.open_project(&click_id, cx))
                 });
             let card = card.context_menu(move |menu, _window, _cx| {
-                let archived = p.archived;
                 let mut m = menu.menu(
                     "打开项目",
                     Box::new(ProjectContextAction {
@@ -244,8 +291,11 @@ impl XWikiApp {
         let selected = self.project_filter == filter;
         let row = div()
             .id(id)
+            .h_full()
+            .flex()
+            .items_center()
+            .justify_center()
             .px_3()
-            .py_1_5()
             .rounded(px(tokens::RADIUS_SMALL))
             .font_family(tokens::FONT_MONO)
             .text_xs()
@@ -270,16 +320,12 @@ impl XWikiApp {
     pub(crate) fn render_workspace(&self, window: &mut Window, cx: &mut Context<Self>) -> Div {
         let theme = cx.theme().clone();
         let app_handle = cx.entity();
-        let window_width = f32::from(window.bounds().size.width);
-        let compact_rail = window_width < 1160.0;
-        let rail_width = if compact_rail {
-            tokens::PROJECTS_RAIL_COMPACT
-        } else {
-            self.layout
-                .projects_rail
-                .clamp(tokens::PROJECTS_RAIL_MIN, tokens::PROJECTS_RAIL_MAX)
-        };
-        let content_width = (window_width - rail_width - tokens::SPLITTER_HIT - 64.0).max(1.0);
+        let window_width = f32::from(window.bounds().size.width).max(1.0);
+        let rail_width = self
+            .layout
+            .projects_rail
+            .clamp(tokens::PROJECTS_RAIL_MIN, tokens::PROJECTS_RAIL_MAX);
+        let content_width = (window_width - rail_width - tokens::SPLITTER_HIT).max(1.0);
         let columns = if content_width >= 1450.0 {
             4
         } else if content_width >= 900.0 {
@@ -298,459 +344,319 @@ impl XWikiApp {
                 projects.iter().filter(|project| !project.archived).count(),
             )
         };
-        div()
-            .flex()
-            .flex_col()
-            .size_full()
-            .child(
-                // Top bar: flush, hairline bottom border, mono labels.
+        div().flex().size_full().child(
+            // Project panel (resizable) + project content inside the shared shell.
+            split_pane::horizontal(
+                "projects-rail-split",
+                rail_width,
+                tokens::PROJECTS_RAIL_MIN,
+                tokens::PROJECTS_RAIL_MAX,
+                tokens::PROJECTS_RAIL,
+                window,
+                theme.border,
+                theme.list_hover,
                 div()
-                    .h(px(tokens::TOOLBAR_H))
-                    .px_4()
+                    .h_full()
                     .flex()
-                    .items_center()
-                    .justify_between()
-                    .border_b_1()
-                    .border_color(theme.border)
+                    .flex_col()
                     .bg(theme.sidebar)
                     .child(
                         div()
+                            .h(px(52.0))
+                            .px_4()
                             .flex()
                             .items_center()
-                            .gap_3()
-                            .child(self.eyebrow("AgentDocs", cx))
-                            .child(div().w(px(1.0)).h(px(16.0)).bg(theme.border))
+                            .justify_between()
+                            .border_b_1()
+                            .border_color(theme.border)
+                            .child(mono_label("PROJECTS").text_color(theme.muted_foreground))
+                            .child(
+                                mono_label(format!("{:02}", project_count))
+                                    .text_color(theme.muted_foreground),
+                            ),
+                    )
+                    .child({
+                        let projects = self.projects.read().unwrap();
+                        let items: Vec<AnyElement> = projects
+                            .iter()
+                            .map(|p| {
+                                let id = p.id.clone();
+                                let theme2 = theme.clone();
+                                let is_selected =
+                                    self.selected_project.as_deref() == Some(p.id.as_str());
+                                let row = div()
+                                    .id(format!("nav-{}", p.name))
+                                    .flex()
+                                    .flex_none()
+                                    .items_center()
+                                    .px_4()
+                                    .py_2()
+                                    .cursor_pointer()
+                                    .gap_2()
+                                    .child(
+                                        Icon::new(IconName::Folder).with_size(px(16.0)).text_color(
+                                            if is_selected {
+                                                theme2.accent
+                                            } else if p.archived {
+                                                theme2.muted_foreground
+                                            } else {
+                                                theme2.muted_foreground
+                                            },
+                                        ),
+                                    )
+                                    .child(
+                                        div()
+                                            .flex_1()
+                                            .min_w(px(0.0))
+                                            .overflow_x_hidden()
+                                            .text_ellipsis()
+                                            .whitespace_nowrap()
+                                            .font_family(tokens::FONT_MONO)
+                                            .text_xs()
+                                            .text_color(if is_selected {
+                                                theme2.foreground
+                                            } else if p.archived {
+                                                theme2.muted_foreground
+                                            } else {
+                                                theme2.foreground
+                                            })
+                                            .child(tokens::truncate(p.name.trim(), 40)),
+                                    )
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.open_project(&id, cx)
+                                    }));
+                                let row = if is_selected {
+                                    row.bg(theme2.list_active)
+                                } else {
+                                    row.hover(|s| s.bg(theme2.list_hover))
+                                };
+                                row.into_any_element()
+                            })
+                            .collect();
+                        div()
+                            .flex_1()
+                            .min_h(px(0.0))
+                            .flex_col()
+                            .overflow_y_scrollbar()
+                            .children(items)
+                    }),
+                div()
+                    .flex_1()
+                    .min_w(px(0.0))
+                    .h_full()
+                    .flex()
+                    .flex_col()
+                    .gap_5()
+                    .p_6()
+                    .child(
+                        div()
+                            .flex()
+                            .items_end()
+                            .justify_between()
+                            .gap_6()
                             .child(
                                 div()
-                                    .font_family(tokens::FONT_MONO)
-                                    .text_xs()
-                                    .text_color(theme.muted_foreground)
+                                    .v_flex()
+                                    .gap_1()
+                                    .child(self.eyebrow("WORKSPACE / PROJECTS", cx))
                                     .child(
-                                        self.projects
-                                            .read()
-                                            .unwrap()
-                                            .iter()
-                                            .find(|p| Some(&p.id) == self.selected_project.as_ref())
-                                            .map(|p| p.name.clone())
-                                            .unwrap_or_else(|| "workspace".into()),
+                                        crate::ui::display("项目工作台")
+                                            .text_2xl()
+                                            .font_weight(FontWeight::SEMIBOLD)
+                                            .text_color(theme.foreground),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_sm()
+                                            .text_color(theme.muted_foreground)
+                                            .font_family(tokens::FONT_BODY)
+                                            .child("选择一个项目，开始阅读、编辑或查看历史。"),
+                                    ),
+                            )
+                            .child(
+                                div()
+                                    .v_flex()
+                                    .items_end()
+                                    .gap_1()
+                                    .child(
+                                        mono_label(format!(
+                                            "{} 个项目 · {} 个活跃",
+                                            project_count, active_count
+                                        ))
+                                        .text_color(theme.muted_foreground),
+                                    )
+                                    .child(
+                                        mono_label("DESKTOP WORKSPACE").text_color(theme.accent),
                                     ),
                             ),
                     )
                     .child(
                         div()
                             .flex()
-                            .items_center()
+                            .flex_wrap()
+                            .items_end()
                             .gap_3()
                             .child(
-                                // Bordered ⌘K affordance — the command palette
-                                // wires in with the desktop feature set.
                                 div()
+                                    .h(px(34.0))
                                     .flex()
+                                    .flex_none()
                                     .items_center()
                                     .gap_1()
-                                    .px_2()
-                                    .py_1()
+                                    .px_1()
                                     .rounded(px(tokens::RADIUS))
                                     .border_1()
                                     .border_color(theme.border)
-                                    .font_family(tokens::FONT_MONO)
-                                    .text_xs()
-                                    .text_color(theme.muted_foreground)
-                                    .child(format!("{} K", tokens::MOD_KEY)),
+                                    .child(self.project_filter_button(
+                                        "filter-all",
+                                        "全部",
+                                        ProjectFilter::All,
+                                        cx,
+                                    ))
+                                    .child(self.project_filter_button(
+                                        "filter-active",
+                                        "活跃",
+                                        ProjectFilter::Active,
+                                        cx,
+                                    ))
+                                    .child(self.project_filter_button(
+                                        "filter-archived",
+                                        "已归档",
+                                        ProjectFilter::Archived,
+                                        cx,
+                                    )),
                             )
                             .child(
                                 div()
-                                    .font_family(tokens::FONT_MONO)
-                                    .text_xs()
-                                    .text_color(theme.muted_foreground)
-                                    .child(self.username.clone()),
+                                    .flex_1()
+                                    .min_w(px(180.0))
+                                    .max_w(px(420.0))
+                                    .v_flex()
+                                    .gap_1()
+                                    .child(
+                                        mono_label("搜索项目").text_color(theme.muted_foreground),
+                                    )
+                                    .child(Input::new(&self.filter_input).w_full()),
                             )
-                            .child(if let Some(v) = &self.meta_version {
-                                div()
-                                    .font_family(tokens::FONT_MONO)
-                                    .text_xs()
-                                    .text_color(theme.muted_foreground)
-                                    .child(format!("v{v}"))
-                            } else {
-                                div()
-                            })
                             .child(
-                                Button::new("toggle-theme")
+                                Button::new("workspace-quick-open")
+                                    .secondary()
+                                    .outline()
+                                    .compact()
                                     .rounded(px(tokens::RADIUS))
-                                    .icon(if cx.theme().is_dark() {
-                                        IconName::Sun
-                                    } else {
-                                        IconName::Moon
-                                    })
-                                    .label(if cx.theme().is_dark() {
-                                        "浅色"
-                                    } else {
-                                        "深色"
-                                    })
-                                    .tooltip(format!("切换主题 ({} Shift T)", tokens::MOD_KEY))
-                                    .on_click(cx.listener(|this, _, _, cx| this.toggle_theme(cx))),
-                            )
-                            .child(
-                                Button::new("settings")
-                                    .rounded(px(tokens::RADIUS))
-                                    .icon(IconName::Settings)
-                                    .label("设置")
-                                    .tooltip("打开设置")
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.screen = Screen::Settings;
-                                        cx.notify();
+                                    .icon(IconName::Search)
+                                    .label("快速打开")
+                                    .tooltip(format!("快速打开 ({} P)", tokens::MOD_KEY))
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.toggle_quick_open(window, cx)
                                     })),
                             )
                             .child(
-                                Button::new("logout")
+                                Button::new("new-project")
+                                    .primary()
                                     .rounded(px(tokens::RADIUS))
-                                    .icon(IconName::ArrowLeft)
-                                    .label("退出")
-                                    .tooltip("退出登录")
-                                    .on_click(cx.listener(|this, _, _, cx| this.logout(cx))),
+                                    .icon(IconName::Plus)
+                                    .label(if self.project_action.is_some() {
+                                        "创建中…"
+                                    } else {
+                                        "新建项目"
+                                    })
+                                    .loading(self.project_action.is_some())
+                                    .disabled(self.project_action.is_some())
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.open_new_project_dialog(window, cx)
+                                    })),
                             ),
-                    ),
-            )
-            .child(
-                // Project rail (resizable) + project content.
-                split_pane::horizontal(
-                    "projects-rail-split",
-                    rail_width,
-                    if compact_rail {
-                        tokens::PROJECTS_RAIL_COMPACT
+                    )
+                    .child(if self.loading {
+                        div()
+                            .flex_1()
+                            .min_h(px(0.0))
+                            .overflow_y_scrollbar()
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_wrap()
+                                    .content_start()
+                                    .items_start()
+                                    .gap_3()
+                                    .children((0..3).map(|i| {
+                                        div()
+                                            .id(format!("skeleton-card-{i}"))
+                                            .flex_none()
+                                            .w(px(card_width))
+                                            .h(px(tokens::CARD_HEIGHT))
+                                            .p_4()
+                                            .rounded(px(tokens::RADIUS))
+                                            .border_1()
+                                            .border_color(theme.border)
+                                            .v_flex()
+                                            .gap_3()
+                                            .child(
+                                                div()
+                                                    .w(px(180.0))
+                                                    .h(px(16.0))
+                                                    .rounded(px(tokens::RADIUS_SMALL))
+                                                    .bg(theme.skeleton),
+                                            )
+                                            .child(
+                                                div()
+                                                    .w_full()
+                                                    .h(px(12.0))
+                                                    .rounded(px(tokens::RADIUS_SMALL))
+                                                    .bg(theme.skeleton),
+                                            )
+                                            .child(
+                                                div()
+                                                    .w(px(120.0))
+                                                    .h(px(12.0))
+                                                    .rounded(px(tokens::RADIUS_SMALL))
+                                                    .bg(theme.skeleton),
+                                            )
+                                    })),
+                            )
+                            .into_any_element()
+                    } else if let Some(err) = &self.projects_error {
+                        div()
+                            .flex_1()
+                            .flex()
+                            .flex_col()
+                            .items_center()
+                            .justify_center()
+                            .gap_4()
+                            .child(mono_label("加载失败").text_color(theme.danger))
+                            .child(
+                                div()
+                                    .px_4()
+                                    .text_center()
+                                    .text_sm()
+                                    .text_color(theme.muted_foreground)
+                                    .child(err.clone()),
+                            )
+                            .child(
+                                Button::new("retry-projects")
+                                    .rounded(px(tokens::RADIUS))
+                                    .icon(IconName::Redo2)
+                                    .label("重试")
+                                    .on_click(cx.listener(|this, _, _, cx| this.load_projects(cx))),
+                            )
+                            .into_any_element()
                     } else {
-                        tokens::PROJECTS_RAIL_MIN
-                    },
-                    if compact_rail {
-                        tokens::PROJECTS_RAIL_COMPACT
-                    } else {
-                        tokens::PROJECTS_RAIL_MAX
-                    },
-                    if compact_rail {
-                        tokens::PROJECTS_RAIL_COMPACT
-                    } else {
-                        tokens::PROJECTS_RAIL
-                    },
-                    window,
-                    theme.border,
-                    theme.list_hover,
-                    div()
-                        .h_full()
-                        .flex()
-                        .flex_col()
-                        .bg(theme.sidebar)
-                        .child(if compact_rail {
-                            div()
-                                .h(px(52.0))
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .border_b_1()
-                                .border_color(theme.border)
-                                .child(mono_label("P").text_color(theme.accent))
-                        } else {
-                            div()
-                                .h(px(52.0))
-                                .px_4()
-                                .flex()
-                                .items_center()
-                                .justify_between()
-                                .border_b_1()
-                                .border_color(theme.border)
-                                .child(mono_label("PROJECTS").text_color(theme.muted_foreground))
-                                .child(
-                                    mono_label(format!("{:02}", project_count))
-                                        .text_color(theme.muted_foreground),
-                                )
-                        })
-                        .child({
-                            let projects = self.projects.read().unwrap();
-                            let items: Vec<AnyElement> = projects
-                                .iter()
-                                .map(|p| {
-                                    let id = p.id.clone();
-                                    let theme2 = theme.clone();
-                                    let is_selected =
-                                        self.selected_project.as_deref() == Some(p.id.as_str());
-                                    let row = div()
-                                        .id(format!("nav-{}", p.name))
-                                        .flex()
-                                        .flex_none()
-                                        .items_center()
-                                        .gap_2_5()
-                                        .px_3()
-                                        .py_2()
-                                        .cursor_pointer()
-                                        .child(if compact_rail {
-                                            Icon::new(IconName::Folder)
-                                                .with_size(px(18.0))
-                                                .text_color(if is_selected {
-                                                    theme2.accent
-                                                } else {
-                                                    theme2.muted_foreground
-                                                })
-                                                .into_any_element()
-                                        } else {
-                                            div()
-                                                .w(px(2.0))
-                                                .self_stretch()
-                                                .bg(if is_selected {
-                                                    theme2.accent
-                                                } else {
-                                                    gpui::transparent_black()
-                                                })
-                                                .into_any_element()
-                                        })
-                                        .child(if compact_rail {
-                                            div()
-                                        } else {
-                                            div()
-                                                .font_family(tokens::FONT_MONO)
-                                                .text_xs()
-                                                .text_color(if is_selected {
-                                                    theme2.foreground
-                                                } else if p.archived {
-                                                    theme2.muted_foreground
-                                                } else {
-                                                    theme2.foreground
-                                                })
-                                                .child(p.name.clone())
-                                        })
-                                        .on_click(cx.listener(move |this, _, _, cx| {
-                                            this.open_project(&id, cx)
-                                        }));
-                                    let row = if compact_rail {
-                                        row.justify_center().gap_0()
-                                    } else {
-                                        row
-                                    };
-                                    let row = if is_selected {
-                                        row.bg(theme2.list_active)
-                                    } else {
-                                        row.hover(|s| s.bg(theme2.list_hover))
-                                    };
-                                    row.into_any_element()
-                                })
-                                .collect();
-                            div()
-                                .flex_1()
-                                .min_h(px(0.0))
-                                .flex_col()
-                                .overflow_y_scrollbar()
-                                .children(items)
-                        }),
-                    div()
-                        .flex_1()
-                        .min_w(px(0.0))
-                        .h_full()
-                        .flex()
-                        .flex_col()
-                        .gap_5()
-                        .p_6()
-                        .child(
-                            div()
-                                .flex()
-                                .items_end()
-                                .justify_between()
-                                .gap_6()
-                                .child(
-                                    div()
-                                        .v_flex()
-                                        .gap_1()
-                                        .child(self.eyebrow("WORKSPACE / PROJECTS", cx))
-                                        .child(
-                                            crate::ui::display("项目工作台")
-                                                .text_2xl()
-                                                .font_weight(FontWeight::SEMIBOLD)
-                                                .text_color(theme.foreground),
-                                        )
-                                        .child(
-                                            div()
-                                                .text_sm()
-                                                .text_color(theme.muted_foreground)
-                                                .font_family(tokens::FONT_BODY)
-                                                .child("选择一个项目，开始阅读、编辑或查看历史。"),
-                                        ),
-                                )
-                                .child(
-                                    div()
-                                        .v_flex()
-                                        .items_end()
-                                        .gap_1()
-                                        .child(
-                                            mono_label(format!(
-                                                "{} 个项目 · {} 个活跃",
-                                                project_count, active_count
-                                            ))
-                                            .text_color(theme.muted_foreground),
-                                        )
-                                        .child(
-                                            mono_label("DESKTOP WORKSPACE")
-                                                .text_color(theme.accent),
-                                        ),
-                                ),
-                        )
-                        .child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap_3()
-                                .child(
-                                    div()
-                                        .flex()
-                                        .items_center()
-                                        .gap_1()
-                                        .px_1()
-                                        .py_1()
-                                        .rounded(px(tokens::RADIUS))
-                                        .border_1()
-                                        .border_color(theme.border)
-                                        .child(self.project_filter_button(
-                                            "filter-all",
-                                            "全部",
-                                            ProjectFilter::All,
-                                            cx,
-                                        ))
-                                        .child(self.project_filter_button(
-                                            "filter-active",
-                                            "活跃",
-                                            ProjectFilter::Active,
-                                            cx,
-                                        ))
-                                        .child(self.project_filter_button(
-                                            "filter-archived",
-                                            "已归档",
-                                            ProjectFilter::Archived,
-                                            cx,
-                                        )),
-                                )
-                                .child(
-                                    div()
-                                        .flex_1()
-                                        .max_w(px(420.0))
-                                        .child(Input::new(&self.filter_input).w_full()),
-                                )
-                                .child(
-                                    div()
-                                        .flex()
-                                        .items_center()
-                                        .gap_2()
-                                        .px_3()
-                                        .py_2()
-                                        .rounded(px(tokens::RADIUS))
-                                        .border_1()
-                                        .border_color(theme.border)
-                                        .text_xs()
-                                        .font_family(tokens::FONT_MONO)
-                                        .text_color(theme.muted_foreground)
-                                        .child(format!("{} P", tokens::MOD_KEY))
-                                        .child("快速打开"),
-                                )
-                                .child(
-                                    Button::new("new-project")
-                                        .primary()
-                                        .rounded(px(tokens::RADIUS))
-                                        .icon(IconName::Plus)
-                                        .label("新建项目")
-                                        .on_click(cx.listener(|this, _, window, cx| {
-                                            this.open_new_project_dialog(window, cx)
-                                        })),
-                                ),
-                        )
-                        .child(if self.loading {
-                            div()
-                                .flex_1()
-                                .min_h(px(0.0))
-                                .overflow_y_scrollbar()
-                                .child(
-                                    div()
-                                        .flex()
-                                        .flex_wrap()
-                                        .content_start()
-                                        .items_start()
-                                        .gap_3()
-                                        .children((0..3).map(|i| {
-                                            div()
-                                                .id(format!("skeleton-card-{i}"))
-                                                .flex_none()
-                                                .w(px(card_width))
-                                                .h(px(tokens::CARD_HEIGHT))
-                                                .p_4()
-                                                .rounded(px(tokens::RADIUS))
-                                                .border_1()
-                                                .border_color(theme.border)
-                                                .v_flex()
-                                                .gap_3()
-                                                .child(
-                                                    div()
-                                                        .w(px(180.0))
-                                                        .h(px(16.0))
-                                                        .rounded(px(tokens::RADIUS_SMALL))
-                                                        .bg(theme.skeleton),
-                                                )
-                                                .child(
-                                                    div()
-                                                        .w_full()
-                                                        .h(px(12.0))
-                                                        .rounded(px(tokens::RADIUS_SMALL))
-                                                        .bg(theme.skeleton),
-                                                )
-                                                .child(
-                                                    div()
-                                                        .w(px(120.0))
-                                                        .h(px(12.0))
-                                                        .rounded(px(tokens::RADIUS_SMALL))
-                                                        .bg(theme.skeleton),
-                                                )
-                                        })),
-                                )
-                                .into_any_element()
-                        } else if let Some(err) = &self.projects_error {
-                            div()
-                                .flex_1()
-                                .flex()
-                                .flex_col()
-                                .items_center()
-                                .justify_center()
-                                .gap_4()
-                                .child(mono_label("加载失败").text_color(theme.danger))
-                                .child(
-                                    div()
-                                        .px_4()
-                                        .text_center()
-                                        .text_sm()
-                                        .text_color(theme.muted_foreground)
-                                        .child(err.clone()),
-                                )
-                                .child(
-                                    Button::new("retry-projects")
-                                        .rounded(px(tokens::RADIUS))
-                                        .icon(IconName::Redo2)
-                                        .label("重试")
-                                        .on_click(
-                                            cx.listener(|this, _, _, cx| this.load_projects(cx)),
-                                        ),
-                                )
-                                .into_any_element()
-                        } else {
-                            div()
-                                .flex_1()
-                                .min_h(px(0.0))
-                                .overflow_y_scrollbar()
-                                .child(self.render_project_cards(card_width, cx))
-                                .into_any_element()
-                        }),
-                    move |w, _window, cx| {
-                        if !compact_rail {
-                            app_handle.update(cx, |app, cx| {
-                                app.layout.projects_rail = w;
-                                config::save_layout(&app.layout);
-                                cx.notify();
-                            });
-                        }
-                    },
-                ),
-            )
-            .child(self.render_status_bar(cx))
+                        div()
+                            .flex_1()
+                            .min_h(px(0.0))
+                            .overflow_y_scrollbar()
+                            .child(self.render_project_cards(card_width, cx))
+                            .into_any_element()
+                    }),
+                move |w, _window, cx| {
+                    app_handle.update(cx, |app, cx| {
+                        app.layout.projects_rail = w;
+                        config::save_layout(&app.layout);
+                        cx.notify();
+                    });
+                },
+            ),
+        )
     }
 }

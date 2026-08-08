@@ -89,18 +89,21 @@ pub const CARD_HEIGHT: f32 = 176.0;
 pub const CARD_MIN_WIDTH: f32 = 280.0;
 pub const CARD_MAX_WIDTH: f32 = 380.0;
 pub const PROJECT_GRID_MAX: f32 = 1560.0;
-/// Compact project rail used below the desktop workspace breakpoint.
-pub const PROJECTS_RAIL_COMPACT: f32 = 72.0;
 /// Reading measure (web `max-w` for prose).
 pub const MEASURE: f32 = 720.0;
-/// Mono meta column (numstat).
-pub const NUMSTAT_W: f32 = 56.0;
+/// Keep paths and user-provided labels from expanding fixed desktop regions.
+pub fn truncate(text: &str, max_chars: usize) -> String {
+    let mut chars = text.chars();
+    let value: String = chars.by_ref().take(max_chars).collect();
+    if chars.next().is_some() {
+        format!("{value}…")
+    } else {
+        value
+    }
+}
 
 // ---- Login geometry ----
-pub const LOGIN_WIDTH: f32 = 1024.0;
-pub const LOGIN_GAP: f32 = 64.0;
 pub const LOGIN_PANEL: f32 = 380.0;
-pub const LOGIN_TEXT: f32 = 420.0;
 
 /// Semantic Cobalt palette mapped from the active gpui-component theme.
 ///
@@ -141,6 +144,7 @@ pub struct Cobalt {
     pub danger_ink: Hsla,
 }
 
+#[allow(dead_code)]
 impl Cobalt {
     pub fn from_theme(theme: &Theme) -> Self {
         let dark = theme.is_dark();
@@ -169,19 +173,11 @@ impl Cobalt {
 }
 
 /// White-tinted reads used on the graphite code card (mode-independent).
+#[allow(dead_code)]
 pub fn card_title() -> Rgba {
     rgba(0xffffffd9)
 }
+#[allow(dead_code)]
 pub fn card_muted() -> Rgba {
     rgba(0xffffff66)
-}
-pub fn card_dot() -> Rgba {
-    rgba(0xffffff26)
-}
-pub fn card_rule() -> Rgba {
-    rgba(0xffffff1a)
-}
-/// Success green on the graphite card (web `#4ade80`).
-pub fn card_ok() -> Rgba {
-    rgb(0x4ade80)
 }

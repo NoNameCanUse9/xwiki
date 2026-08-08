@@ -1,116 +1,427 @@
-//! History context panel (plan §5): render methods for this screen/region; state and logic
-//! stay in `crate::app` (mod.rs).
-//!
-//! Layout matches `docs/agentdocs-code/history.html`:
-//!   Left 50%: document content (icon + title + subtitle + rendered markdown)
-//!   Right 50%: revision list with avatars + diff stats panel
+//! History context panel: timeline, commit detail and diff recovery controls.
+//! State and network operations stay in `crate::app` (mod.rs).
 
 use gpui::*;
 use gpui_component::{button::*, input::Input, scroll::ScrollableElement as _, *};
 
 use crate::app::XWikiApp;
-use crate::ui::{markdown, mono_label, tokens};
+use crate::ui::{mono_label, tokens};
 
 impl XWikiApp {
     pub(crate) fn render_history_view(&self, cx: &mut Context<Self>) -> Div {
         let theme = cx.theme().clone();
+        let query = self.history_input.read(cx).value().to_lowercase();
+        let visible_indices: Vec<usize> = self
+            .commits
+            .iter()
+            .enumerate()
+            .filter(|(_, commit)| {
+                query.is_empty()
+                    || commit.message.to_lowercase().contains(&query)
+                    || commit.author.to_lowercase().contains(&query)
+                    || commit.sha.to_lowercase().starts_with(&query)
+            })
+            .map(|(index, _)| index)
+            .collect();
         let added: u32 = self.diff_stats.iter().map(|stat| stat.added).sum();
         let deleted: u32 = self.diff_stats.iter().map(|stat| stat.deleted).sum();
-        let query = self.history_input.read(cx).value().to_lowercase();
-        div()
-            .h_full()
-            .flex()
-            .size_full()
-            // ── Left 50%: Document content ──────────────────────
-            // Matches demo: [icon + title + subtitle] [markdown content]
+        let selected_sha = self.selected_sha.as_deref();
+
+        let timeline_content = if self.history_loading {
+            div()
+                .v_flex()
+                .gap_2()
+                .p_3()
+                .children((0..6).map(|i| {
+                    div()
+                        .id(format!("history-skeleton-{i}"))
+                        .h(px(48.0))
+                        .w_full()
+                        .rounded(px(tokens::RADIUS_SMALL))
+                        .bg(theme.skeleton)
+                }))
+                .into_any_element()
+        } else if self.commits.is_empty() && self.history_error.is_some() {
+            let error = self.history_error.clone().unwrap_or_default();
+            div()
+                .flex()
+                .flex_col()
+                .items_center()
+                .justify_center()
+                .gap_3()
+                .p_4()
+                .child(Icon::new(IconName::CircleX).text_color(theme.danger))
+                .child(mono_label("历史加载失败").text_color(theme.danger))
+                .child(
+                    div()
+                        .text_center()
+                        .text_xs()
+                        .text_color(theme.muted_foreground)
+                        .child(error),
+                )
+                .child(
+                    Button::new("retry-history")
+                        .rounded(px(tokens::RADIUS))
+                        .icon(IconName::Redo2)
+                        .label("重试")
+                        .on_click(cx.listener(|this, _, _, cx| this.load_commits(cx))),
+                )
+                .into_any_element()
+        } else if self.commits.is_empty() {
+            div()
+                .flex()
+                .flex_col()
+                .items_center()
+                .justify_center()
+                .gap_3()
+                .p_4()
+                .child(Icon::new(IconName::Undo2).text_color(theme.muted_foreground))
+                .child(mono_label("暂无版本历史").text_color(theme.muted_foreground))
+                .child(
+                    div()
+                        .text_center()
+                        .text_xs()
+                        .text_color(theme.muted_foreground)
+                        .child("文档保存后，版本会出现在这里。"),
+                )
+                .into_any_element()
+        } else if visible_indices.is_empty() {
+            div()
+                .flex()
+                .flex_col()
+                .items_center()
+                .justify_center()
+                .gap_3()
+                .p_4()
+                .child(Icon::new(IconName::Search).text_color(theme.muted_foreground))
+                .child(mono_label("没有匹配的版本").text_color(theme.muted_foreground))
+                .child(
+                    Button::new("clear-history-search")
+                        .rounded(px(tokens::RADIUS))
+                        .icon(IconName::Close)
+                        .label("清空搜索")
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            let input = this.history_input.clone();
+                            input.update(cx, |state, cx| {
+                                state.set_value(String::new(), window, cx);
+                            });
+                            cx.notify();
+                        })),
+                )
+                .into_any_element()
+        } else {
+            let rows: Vec<AnyElement> = visible_indices
+                .iter()
+                .map(|index| {
+                    let commit = &self.commits[*index];
+                    let commit_index = *index;
+                    let sha = commit.sha.clone();
+                    let short: String = commit.sha.chars().take(7).collect();
+                    let initials: String = commit
+                        .author
+                        .chars()
+                        .take(2)
+                        .collect::<String>()
+                        .to_uppercase();
+                    let selected = selected_sha == Some(commit.sha.as_str());
+                    let focused = self.history_focus == Some(commit_index);
+                    let is_current = commit_index == 0;
+                    div()
+                        .id(format!("rev-{short}"))
+                        .px_3()
+                        .py_2()
+                        .border_b_1()
+                        .border_color(theme.border)
+                        .border_l_3()
+                        .border_color(if selected || focused {
+                            theme.accent
+                        } else {
+                            gpui::transparent_black()
+                        })
+                        .bg(if selected {
+                            theme.list_active
+                        } else if focused {
+                            theme.list_hover
+                        } else {
+                            theme.sidebar
+                        })
+                        .hover(|s| s.bg(theme.list_hover))
+                        .cursor_pointer()
+                        .flex()
+                        .items_start()
+                        .gap_2()
+                        .child(
+                            div()
+                                .size(px(28.0))
+                                .rounded_full()
+                                .bg(if is_current {
+                                    theme.accent
+                                } else {
+                                    theme.list_hover
+                                })
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .font_family(tokens::FONT_MONO)
+                                .text_xs()
+                                .text_color(if is_current {
+                                    theme.accent_foreground
+                                } else {
+                                    theme.foreground
+                                })
+                                .child(initials),
+                        )
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w(px(0.0))
+                                .v_flex()
+                                .gap_1()
+                                .child(
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .gap_2()
+                                        .child(
+                                            div()
+                                                .flex_1()
+                                                .min_w(px(0.0))
+                                                .overflow_x_hidden()
+                                                .text_ellipsis()
+                                                .whitespace_nowrap()
+                                                .text_sm()
+                                                .font_weight(FontWeight::MEDIUM)
+                                                .text_color(theme.foreground)
+                                                .child(commit.message.clone()),
+                                        )
+                                        .child(
+                                            mono_label(if is_current {
+                                                "CURRENT"
+                                            } else {
+                                                "REVISION"
+                                            })
+                                            .text_color(if is_current {
+                                                theme.accent
+                                            } else {
+                                                theme.muted_foreground
+                                            }),
+                                        ),
+                                )
+                                .child(
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .gap_2()
+                                        .font_family(tokens::FONT_MONO)
+                                        .text_xs()
+                                        .text_color(theme.muted_foreground)
+                                        .child(short)
+                                        .child(format!("{} · {}", commit.author, commit.date)),
+                                ),
+                        )
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.history_focus = Some(commit_index);
+                            this.select_commit(&sha, cx);
+                        }))
+                        .into_any_element()
+                })
+                .collect();
+            div().v_flex().children(rows).into_any_element()
+        };
+
+        let keyboard_indices = visible_indices.clone();
+        let timeline_scroll = div()
+            .flex_1()
+            .min_h(px(0.0))
+            .overflow_y_scrollbar()
+            .child(timeline_content);
+        let timeline = div()
+            .id("history-keyboard")
+            .flex_1()
+            .min_h(px(0.0))
+            .focusable()
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _window, cx| {
+                if keyboard_indices.is_empty() {
+                    return;
+                }
+                let current_position = this
+                    .history_focus
+                    .and_then(|focus| keyboard_indices.iter().position(|index| *index == focus))
+                    .unwrap_or(0);
+                let next_position = match event.keystroke.key.as_str() {
+                    "up" => {
+                        (current_position + keyboard_indices.len() - 1) % keyboard_indices.len()
+                    }
+                    "down" => (current_position + 1) % keyboard_indices.len(),
+                    "enter" => current_position,
+                    _ => return,
+                };
+                let index = keyboard_indices[next_position];
+                this.history_focus = Some(index);
+                if event.keystroke.key == "enter" {
+                    if let Some(commit) = this.commits.get(index) {
+                        let sha = commit.sha.clone();
+                        this.select_commit(&sha, cx);
+                    }
+                }
+                cx.notify();
+            }))
+            .child(timeline_scroll);
+
+        let detail = if self.history_detail_loading {
+            div()
+                .px_3()
+                .py_2()
+                .border_b_1()
+                .border_color(theme.border)
+                .child(mono_label("加载版本详情…").text_color(theme.muted_foreground))
+        } else if let Some(commit) = &self.commit_detail {
+            div()
+                .px_3()
+                .py_2()
+                .border_b_1()
+                .border_color(theme.border)
+                .v_flex()
+                .gap_1()
+                .child(
+                    div()
+                        .text_sm()
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(theme.foreground)
+                        .child(commit.message.clone()),
+                )
+                .child(
+                    div()
+                        .font_family(tokens::FONT_MONO)
+                        .text_xs()
+                        .text_color(theme.muted_foreground)
+                        .child(format!(
+                            "{} · {} · {}",
+                            commit.author, commit.date, commit.sha
+                        )),
+                )
+                .child(
+                    div()
+                        .font_family(tokens::FONT_MONO)
+                        .text_xs()
+                        .text_color(theme.muted_foreground)
+                        .child(format!("{} 个文件变更", commit.files.len())),
+                )
+        } else {
+            div()
+        };
+
+        let stat_rows: Vec<AnyElement> = if let Some(commit) = &self.commit_detail {
+            commit
+                .files
+                .iter()
+                .map(|file| {
+                    let status_color = match file.status.as_str() {
+                        "A" => theme.success,
+                        "D" => theme.danger,
+                        _ => theme.accent,
+                    };
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .child(mono_label(file.status.clone()).text_color(status_color))
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w(px(0.0))
+                                .overflow_x_hidden()
+                                .text_ellipsis()
+                                .whitespace_nowrap()
+                                .font_family(tokens::FONT_MONO)
+                                .text_xs()
+                                .text_color(theme.muted_foreground)
+                                .child(file.path.clone()),
+                        )
+                        .into_any_element()
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let stats = div()
+            .max_h(px(160.0))
+            .overflow_y_scrollbar()
+            .border_t_1()
+            .border_color(theme.border)
+            .p_3()
+            .v_flex()
+            .gap_2()
             .child(
                 div()
-                    .w_1_2()
                     .flex()
-                    .flex_col()
-                    .bg(theme.background)
-                    .border_r_1()
+                    .items_center()
+                    .gap_2()
+                    .child(mono_label("DIFF").text_color(theme.muted_foreground))
+                    .child(div().flex_1())
+                    .child(
+                        mono_label(format!("+{} / -{}", added, deleted))
+                            .text_color(theme.muted_foreground),
+                    ),
+            )
+            .children(stat_rows);
+
+        let patch = if self.history_compare_open {
+            let lines: Vec<String> = self
+                .commit_patch
+                .as_deref()
+                .unwrap_or("")
+                .lines()
+                .map(ToOwned::to_owned)
+                .collect();
+            div()
+                .max_h(px(220.0))
+                .border_t_1()
+                .border_color(theme.border)
+                .overflow_y_scrollbar()
+                .child(
+                    div()
+                        .w(px(760.0))
+                        .overflow_x_scrollbar()
+                        .font_family(tokens::FONT_MONO)
+                        .text_xs()
+                        .children(lines.into_iter().map(|line| {
+                            let (color, bg) = if line.starts_with('+') && !line.starts_with("+++") {
+                                (theme.success, theme.success.opacity(0.1))
+                            } else if line.starts_with('-') && !line.starts_with("---") {
+                                (theme.danger, theme.danger.opacity(0.1))
+                            } else if line.starts_with('@') {
+                                (theme.accent, theme.accent.opacity(0.08))
+                            } else {
+                                (theme.muted_foreground, theme.transparent)
+                            };
+                            div().px_3().py_1().bg(bg).text_color(color).child(line)
+                        })),
+                )
+                .into_any_element()
+        } else {
+            div().into_any_element()
+        };
+
+        div()
+            .h_full()
+            .min_w(px(0.0))
+            .flex()
+            .flex_col()
+            .bg(theme.sidebar)
+            .child(
+                div()
+                    .px_3()
+                    .py_2()
+                    .v_flex()
+                    .gap_2()
+                    .border_b_1()
                     .border_color(theme.border)
                     .child(
                         div()
-                            .p_6()
-                            .border_b_1()
-                            .border_color(theme.border)
-                            .v_flex()
-                            .gap_2()
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap_3()
-                                    .child(
-                                        div()
-                                            .flex()
-                                            .items_center()
-                                            .justify_center()
-                                            .w(px(36.0))
-                                            .h(px(36.0))
-                                            .rounded(px(tokens::RADIUS))
-                                            .bg(theme.accent)
-                                            .child(
-                                                Icon::new(IconName::File)
-                                                    .with_size(px(18.0))
-                                                    .text_color(theme.accent_foreground),
-                                            ),
-                                    )
-                                    .child(
-                                        div()
-                                            .font_family(tokens::FONT_DISPLAY)
-                                            .text_xl()
-                                            .font_weight(FontWeight::SEMIBOLD)
-                                            .text_color(theme.foreground)
-                                            .child(
-                                                self.doc_path
-                                                    .clone()
-                                                    .unwrap_or_else(|| {
-                                                        "System Architecture V2".into()
-                                                    })
-                                                    .rsplit('/')
-                                                    .next()
-                                                    .unwrap_or("")
-                                                    .to_string(),
-                                            ),
-                                    ),
-                            )
-                            .child(div().text_sm().text_color(theme.muted_foreground).child(
-                                if let Some(p) = &self.doc_path {
-                                    format!("Last updated · {p}")
-                                } else {
-                                    "Last updated · 2 hours ago by John Doe".into()
-                                },
-                            )),
-                    )
-                    .child(
-                        div().flex_1().overflow_y_scrollbar().p_6().child(
-                            div()
-                                .max_w(px(tokens::MEASURE))
-                                .child(markdown("history-doc-preview", self.doc_content.clone())),
-                        ),
-                    ),
-            )
-            // ── Right 50%: Revision history ─────────────────────
-            // Matches demo: [toolbar] [revision list] [diff stats]
-            .child(
-                div()
-                    .w_1_2()
-                    .flex()
-                    .flex_col()
-                    .bg(theme.sidebar)
-                    // ── Toolbar ──────────────────────────────────
-                    .child(
-                        div()
-                            .h(px(tokens::TOOLBAR_H))
-                            .px_4()
                             .flex()
                             .items_center()
-                            .gap_3()
-                            .border_b_1()
-                            .border_color(theme.border)
+                            .gap_2()
                             .child(mono_label("REVISIONS").text_color(theme.accent))
                             .child(
                                 div()
@@ -120,18 +431,45 @@ impl XWikiApp {
                                     .child(format!("{} revisions", self.commits.len())),
                             )
                             .child(div().flex_1())
-                            .child(div().w(px(132.0)).child(Input::new(&self.history_input)))
+                            .child(
+                                Button::new("close-history")
+                                    .ghost()
+                                    .compact()
+                                    .icon(IconName::Close)
+                                    .label("关闭")
+                                    .tooltip("关闭历史 (Esc)")
+                                    .on_click(cx.listener(|this, _, _, cx| this.close_history(cx))),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w(px(0.0))
+                                    .v_flex()
+                                    .gap_1()
+                                    .child(
+                                        mono_label("搜索版本").text_color(theme.muted_foreground),
+                                    )
+                                    .child(Input::new(&self.history_input).w_full()),
+                            )
                             .child(
                                 Button::new("compare-revisions")
+                                    .compact()
                                     .rounded(px(tokens::RADIUS))
                                     .icon(IconName::Search)
                                     .label(if self.history_compare_open {
-                                        "收起"
+                                        "收起 Diff"
                                     } else {
                                         "Compare"
                                     })
                                     .tooltip("对比版本差异")
-                                    .disabled(self.commit_patch.is_none())
+                                    .disabled(
+                                        self.commit_patch.is_none() || self.history_detail_loading,
+                                    )
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.history_compare_open = !this.history_compare_open;
                                         cx.notify();
@@ -139,224 +477,70 @@ impl XWikiApp {
                             )
                             .child(
                                 Button::new("restore-revision")
+                                    .danger()
+                                    .compact()
                                     .rounded(px(tokens::RADIUS))
                                     .icon(IconName::Redo2)
-                                    .label("Restore")
+                                    .label(if self.restoring {
+                                        "恢复中…"
+                                    } else {
+                                        "Restore"
+                                    })
+                                    .loading(self.restoring)
                                     .tooltip("恢复到此版本（生成新提交）")
-                                    .disabled(self.selected_sha.is_none())
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.revert_selected(cx);
+                                    .disabled(
+                                        self.selected_sha.is_none()
+                                            || self.restoring
+                                            || self.history_detail_loading,
+                                    )
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.confirm_revert_selected(window, cx);
                                     })),
                             ),
-                    )
-                    // ── Revision list ────────────────────────────
-                    .child(
-                        div().flex_1().overflow_y_scrollbar().children(
-                            self.commits
-                                .iter()
-                                .enumerate()
-                                .filter(|(_, c)| {
-                                    query.is_empty()
-                                        || c.message.to_lowercase().contains(&query)
-                                        || c.author.to_lowercase().contains(&query)
-                                        || c.sha.to_lowercase().starts_with(&query)
-                                })
-                                .map(|(index, c)| {
-                                    let sha = c.sha.clone();
-                                    let short: String = c.sha.chars().take(7).collect();
-                                    let initials: String =
-                                        c.author.chars().take(2).collect::<String>().to_uppercase();
-                                    let selected =
-                                        self.selected_sha.as_deref() == Some(c.sha.as_str());
-                                    let is_first = index == 0;
-
-                                    let row = div()
-                                        .id(format!("rev-{short}"))
-                                        .px_4()
-                                        .py_3()
-                                        .border_b_1()
-                                        .border_color(theme.border)
-                                        .border_l_3()
-                                        .border_color(if selected {
-                                            theme.accent
-                                        } else {
-                                            gpui::transparent_black()
-                                        })
-                                        .bg(if selected {
-                                            theme.list_active
-                                        } else {
-                                            theme.background
-                                        })
-                                        .hover(|s| s.bg(theme.list_hover))
-                                        .cursor_pointer()
-                                        .flex()
-                                        .items_start()
-                                        .gap_3()
-                                        .child(
-                                            // Avatar circle
-                                            div()
-                                                .size(px(32.0))
-                                                .rounded_full()
-                                                .bg(if is_first {
-                                                    theme.accent
-                                                } else {
-                                                    theme.list_hover
-                                                })
-                                                .flex()
-                                                .items_center()
-                                                .justify_center()
-                                                .font_family(tokens::FONT_MONO)
-                                                .text_xs()
-                                                .text_color(if is_first {
-                                                    theme.accent_foreground
-                                                } else {
-                                                    theme.foreground
-                                                })
-                                                .child(initials),
-                                        )
-                                        .child(
-                                            div()
-                                                .flex_1()
-                                                .min_w(px(0.0))
-                                                .v_flex()
-                                                .gap_1()
-                                                .child(
-                                                    div()
-                                                        .flex()
-                                                        .items_center()
-                                                        .gap_2()
-                                                        .child(
-                                                            div()
-                                                                .text_sm()
-                                                                .font_weight(FontWeight::MEDIUM)
-                                                                .text_color(theme.foreground)
-                                                                .child(c.message.clone()),
-                                                        )
-                                                        .child(if is_first {
-                                                            mono_label("CURRENT")
-                                                                .text_color(theme.accent)
-                                                        } else {
-                                                            mono_label(format!(
-                                                                "v{}",
-                                                                self.commits
-                                                                    .len()
-                                                                    .saturating_sub(index)
-                                                            ))
-                                                            .text_color(theme.muted_foreground)
-                                                        }),
-                                                )
-                                                .child(
-                                                    div()
-                                                        .flex()
-                                                        .items_center()
-                                                        .gap_2()
-                                                        .font_family(tokens::FONT_MONO)
-                                                        .text_xs()
-                                                        .text_color(theme.muted_foreground)
-                                                        .child(short)
-                                                        .child(format!(
-                                                            "{} · {}",
-                                                            c.author, c.date
-                                                        )),
-                                                ),
-                                        )
-                                        .on_click(cx.listener(move |this, _, _, cx| {
-                                            this.select_commit(&sha, cx);
-                                        }));
-                                    row
-                                }),
-                        ),
-                    )
-                    // ── Diff stats panel ─────────────────────────
-                    .child(
-                        div()
-                            .border_t_1()
-                            .border_color(theme.border)
-                            .p_4()
-                            .v_flex()
-                            .gap_3()
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap_2()
-                                    .child(mono_label("DIFF").text_color(theme.muted_foreground))
-                                    .child(div().flex_1())
-                                    .child(
-                                        mono_label(format!("+{} / -{}", added, deleted))
-                                            .text_color(theme.muted_foreground),
-                                    ),
-                            )
-                            .child(div().w_full().h(px(1.0)).bg(theme.border))
-                            .children(self.diff_stats.iter().map(|s| {
-                                div()
-                                    .flex()
-                                    .gap_3()
-                                    .items_center()
-                                    .child(
-                                        div()
-                                            .w(px(tokens::NUMSTAT_W))
-                                            .text_right()
-                                            .font_family(tokens::FONT_MONO)
-                                            .text_xs()
-                                            .text_color(theme.foreground)
-                                            .child(format!("+{}", s.added)),
-                                    )
-                                    .child(
-                                        div()
-                                            .w(px(tokens::NUMSTAT_W))
-                                            .text_right()
-                                            .font_family(tokens::FONT_MONO)
-                                            .text_xs()
-                                            .text_color(theme.danger)
-                                            .child(format!("-{}", s.deleted)),
-                                    )
-                                    .child(
-                                        div()
-                                            .font_family(tokens::FONT_MONO)
-                                            .text_xs()
-                                            .text_color(theme.muted_foreground)
-                                            .child(s.path.clone()),
-                                    )
-                            })),
-                    )
-                    // ── Patch view (Compare) ─────────────────────
-                    // Expanded via the Compare button; renders the unified
-                    // diff with +/− color coding, matching the demo diff.
-                    .child(if self.history_compare_open {
-                        let patch = self.commit_patch.clone().unwrap_or_default();
-                        let lines: Vec<&str> = patch.lines().collect();
-                        div()
-                            .border_t_1()
-                            .border_color(theme.border)
-                            .max_h(px(220.0))
-                            .overflow_y_scrollbar()
-                            .font_family(tokens::FONT_MONO)
-                            .text_xs()
-                            .children(lines.into_iter().map(|line| {
-                                let (color, bg) =
-                                    if line.starts_with('+') && !line.starts_with("+++") {
-                                        (theme.success_foreground, gpui::rgba(0x16a34a14).into())
-                                    } else if line.starts_with('-') && !line.starts_with("---") {
-                                        (theme.danger, gpui::rgba(0xdc262614).into())
-                                    } else if line.starts_with('@') {
-                                        (theme.accent, gpui::transparent_black())
-                                    } else {
-                                        (theme.muted_foreground, gpui::transparent_black())
-                                    };
-                                div()
-                                    .px_3()
-                                    .py_1()
-                                    .bg(bg)
-                                    .text_color(color)
-                                    .child(line.to_string())
-                            }))
-                            .into_any_element()
-                    } else {
-                        div().into_any_element()
-                    }),
+                    ),
             )
+            .child(detail)
+            .child(if !self.commits.is_empty() {
+                if let Some(error) = &self.history_error {
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .px_3()
+                        .py_2()
+                        .border_b_1()
+                        .border_color(theme.danger)
+                        .bg(theme.danger.opacity(0.1))
+                        .child(Icon::new(IconName::CircleX).text_color(theme.danger))
+                        .child(
+                            div()
+                                .flex_1()
+                                .text_xs()
+                                .text_color(theme.danger)
+                                .child(error.clone()),
+                        )
+                        .child(
+                            Button::new("retry-history-detail")
+                                .compact()
+                                .rounded(px(tokens::RADIUS_SMALL))
+                                .icon(IconName::Redo2)
+                                .label("重试")
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    if let Some(sha) = this.selected_sha.clone() {
+                                        this.select_commit(&sha, cx);
+                                    } else {
+                                        this.load_commits(cx);
+                                    }
+                                })),
+                        )
+                } else {
+                    div()
+                }
+            } else {
+                div()
+            })
+            .child(timeline)
+            .child(stats)
+            .child(patch)
     }
-
-    // ----- Command palette (⌘K), theme toggle, notifications -----
 }

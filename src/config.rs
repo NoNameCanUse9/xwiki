@@ -1,5 +1,5 @@
-//! Client-side persistent settings (theme etc). Credentials never go here —
-//! sessions live in the reqwest cookie jar for the process lifetime.
+//! Client-side persistent settings (theme etc.). Passwords are never
+//! persisted; a server-issued session cookie may survive an app restart.
 
 use std::path::PathBuf;
 
@@ -28,6 +28,70 @@ pub fn save_server(url: &str) {
     let dir = config_path();
     let _ = std::fs::create_dir_all(&dir);
     let _ = std::fs::write(dir.join("server"), url);
+}
+
+/// Saved username for login convenience. Passwords are never persisted.
+pub fn load_username() -> String {
+    std::fs::read_to_string(config_path().join("username"))
+        .map(|s| s.trim().to_string())
+        .unwrap_or_default()
+}
+
+pub fn save_username(username: &str) {
+    let username = username.trim();
+    if username.is_empty() {
+        return;
+    }
+    let dir = config_path();
+    let _ = std::fs::create_dir_all(&dir);
+    let _ = std::fs::write(dir.join("username"), username);
+}
+
+/// A persisted server session. This contains a server-issued cookie, never a
+/// username/password pair; the file is restricted to the current user on Unix.
+#[derive(Serialize, Deserialize, Clone)]
+pub struct Session {
+    pub server: String,
+    pub username: String,
+    pub cookie: String,
+}
+
+pub fn load_session() -> Option<Session> {
+    let session = std::fs::read_to_string(config_path().join("session.json"))
+        .ok()
+        .and_then(|json| serde_json::from_str::<Session>(&json).ok())?;
+    if session.server.trim().is_empty() || session.cookie.trim().is_empty() {
+        None
+    } else {
+        Some(session)
+    }
+}
+
+pub fn save_session(server: &str, username: &str, cookie: &str) {
+    if server.trim().is_empty() || cookie.trim().is_empty() {
+        return;
+    }
+    let dir = config_path();
+    let _ = std::fs::create_dir_all(&dir);
+    let session = Session {
+        server: server.trim().to_string(),
+        username: username.trim().to_string(),
+        cookie: cookie.trim().to_string(),
+    };
+    if let Ok(json) = serde_json::to_string(&session) {
+        let path = dir.join("session.json");
+        if std::fs::write(&path, json).is_ok() {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+            }
+        }
+    }
+}
+
+pub fn clear_session() {
+    let _ = std::fs::remove_file(config_path().join("session.json"));
 }
 
 /// Returns the persisted theme mode, defaulting to System.
@@ -115,5 +179,15 @@ mod tests {
         let d = load_layout();
         assert_eq!(d.doc_rail, crate::ui::tokens::DOC_RAIL);
         assert!(!d.history_open);
+
+        save_session("http://server", "alice", "session=abc");
+        let session = load_session().unwrap();
+        assert_eq!(session.server, "http://server");
+        assert_eq!(session.username, "alice");
+        assert_eq!(session.cookie, "session=abc");
+        save_username("alice");
+        assert_eq!(load_username(), "alice");
+        clear_session();
+        assert!(load_session().is_none());
     }
 }
