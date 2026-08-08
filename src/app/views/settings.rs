@@ -39,27 +39,15 @@ impl XWikiApp {
         let theme = cx.theme().clone();
         div()
             .flex()
-            .items_start()
+            .items_center()
             .justify_between()
             .gap_4()
             .child(
                 div()
-                    .v_flex()
-                    .gap_1()
-                    .child(mono_label("SETTINGS").text_color(theme.accent))
-                    .child(
-                        div()
-                            .text_2xl()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(theme.foreground)
-                            .child("设置"),
-                    )
-                    .child(
-                        div()
-                            .text_sm()
-                            .text_color(theme.muted_foreground)
-                            .child("管理服务连接、访问凭证和桌面工作区。"),
-                    ),
+                    .text_2xl()
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(theme.foreground)
+                    .child("设置"),
             )
             .child(
                 Button::new("settings-back")
@@ -117,12 +105,11 @@ impl XWikiApp {
             .border_1()
             .border_color(theme.border)
             .bg(theme.sidebar)
-            .child(mono_label("SERVICE").text_color(theme.muted_foreground))
             .child(
                 div()
-                    .font_family(tokens::FONT_MONO)
-                    .text_xs()
-                    .text_color(theme.muted_foreground)
+                    .text_sm()
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme.foreground)
                     .child("服务地址"),
             )
             .child(
@@ -400,7 +387,13 @@ impl XWikiApp {
                     .items_center()
                     .justify_between()
                     .gap_3()
-                    .child(mono_label("ACCESS CONTROL").text_color(theme.muted_foreground))
+                    .child(
+                        div()
+                            .text_sm()
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme.foreground)
+                            .child("访问管理"),
+                    )
                     .child(
                         div()
                             .flex()
@@ -451,25 +444,32 @@ impl XWikiApp {
             .child(status)
             .child(
                 div()
-                    .flex()
-                    .flex_wrap()
+                    .v_flex()
                     .gap_4()
                     .child(
                         div()
-                            .flex_1()
-                            .min_w(px(320.0))
                             .v_flex()
                             .gap_2()
-                            .child(mono_label("TOKENS").text_color(theme.muted_foreground))
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(theme.muted_foreground)
+                                    .child("访问 Token"),
+                            )
                             .child(token_content),
                     )
                     .child(
                         div()
-                            .flex_1()
-                            .min_w(px(320.0))
                             .v_flex()
                             .gap_2()
-                            .child(mono_label("USERS").text_color(theme.muted_foreground))
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(theme.muted_foreground)
+                                    .child("用户"),
+                            )
                             .child(user_content),
                     ),
             )
@@ -480,99 +480,78 @@ impl XWikiApp {
         let dark = cx.theme().is_dark();
         div()
             .v_flex()
-            .gap_3()
+            .gap_4()
             .p_4()
             .rounded(px(tokens::RADIUS))
             .border_1()
             .border_color(theme.border)
             .bg(theme.sidebar)
-            .child(mono_label("WORKSPACE").text_color(theme.muted_foreground))
             .child(
                 div()
-                    .flex()
-                    .flex_wrap()
-                    .gap_4()
+                    .v_flex()
+                    .gap_1()
+                    .pb_3()
+                    .border_b_1()
+                    .border_color(theme.border)
                     .child(
                         div()
-                            .flex_1()
-                            .min_w(px(280.0))
-                            .v_flex()
-                            .gap_1()
-                            .child(mono_label("CURRENT USER").text_color(theme.muted_foreground))
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .text_color(theme.foreground)
-                                    .child(self.username.clone()),
-                            ),
+                            .text_xs()
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme.muted_foreground)
+                            .child("当前用户"),
                     )
                     .child(
                         div()
-                            .flex_1()
-                            .min_w(px(280.0))
-                            .v_flex()
-                            .gap_1()
-                            .child(mono_label("THEME").text_color(theme.muted_foreground))
-                            .child(
-                                Button::new("settings-theme")
-                                    .rounded(px(tokens::RADIUS))
-                                    .icon(if dark { IconName::Sun } else { IconName::Moon })
-                                    .label(if dark {
-                                        "深色 · 切换为浅色"
-                                    } else {
-                                        "浅色 · 切换为深色"
-                                    })
-                                    .on_click(cx.listener(|this, _, _, cx| this.toggle_theme(cx))),
-                            ),
-                    )
+                            .text_sm()
+                            .text_color(theme.foreground)
+                            .child(self.username.clone()),
+                    ),
+            )
+            .child(
+                div()
+                    .v_flex()
+                    .gap_1()
+                    .pb_3()
+                    .border_b_1()
+                    .border_color(theme.border)
                     .child(
                         div()
-                            .flex_1()
-                            .min_w(px(280.0))
-                            .v_flex()
-                            .gap_1()
-                            .child(mono_label("LAYOUT").text_color(theme.muted_foreground))
-                            .child(div().text_sm().text_color(theme.muted_foreground).child(
-                                format!(
-                                    "项目侧栏 {}px · 文档树 {}px · 历史面板 {}px",
-                                    self.layout.projects_rail as i32,
-                                    self.layout.doc_rail as i32,
-                                    self.layout.history as i32,
-                                ),
-                            )),
+                            .text_xs()
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme.muted_foreground)
+                            .child("主题"),
                     )
                     .child(
+                        Button::new("settings-theme")
+                            .w_full()
+                            .rounded(px(tokens::RADIUS))
+                            .icon(if dark { IconName::Sun } else { IconName::Moon })
+                            .label(if dark { "浅色" } else { "深色" })
+                            .on_click(cx.listener(|this, _, _, cx| this.toggle_theme(cx))),
+                    ),
+            )
+            .child(
+                div()
+                    .v_flex()
+                    .gap_1()
+                    .child(
                         div()
-                            .flex_1()
-                            .min_w(px(280.0))
-                            .v_flex()
-                            .gap_1()
-                            .child(mono_label("SESSION").text_color(theme.muted_foreground))
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .justify_between()
-                                    .gap_2()
-                                    .child(
-                                        div()
-                                            .text_sm()
-                                            .text_color(theme.muted_foreground)
-                                            .child("退出当前登录会话"),
-                                    )
-                                    .child(
-                                        Button::new("settings-logout")
-                                            .danger()
-                                            .compact()
-                                            .icon(IconName::ArrowLeft)
-                                            .label("退出登录")
-                                            .tooltip("退出登录")
-                                            .disabled(self.editing || self.saving)
-                                            .on_click(
-                                                cx.listener(|this, _, _, cx| this.logout(cx)),
-                                            ),
-                                    ),
-                            ),
+                            .text_xs()
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme.muted_foreground)
+                            .child("会话"),
+                    )
+                    .child(
+                        div().flex().justify_end().child(
+                            Button::new("settings-logout")
+                                .danger()
+                                .compact()
+                                .icon(IconName::ArrowLeft)
+                                .label("退出登录")
+                                .tooltip("退出登录")
+                                .disabled(self.editing || self.saving)
+                                .on_click(cx.listener(|this, _, _, cx| this.logout(cx))),
+                        ),
                     ),
             )
     }
