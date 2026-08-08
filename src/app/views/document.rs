@@ -566,6 +566,15 @@ impl XWikiApp {
                                     .flex()
                                     .gap_2()
                                     .child(
+                                        Button::new("open-search")
+                                            .rounded(px(tokens::RADIUS))
+                                            .icon(IconName::Search)
+                                            .label("搜索")
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                this.open_project_search(cx)
+                                            })),
+                                    )
+                                    .child(
                                         Button::new("open-history")
                                             .rounded(px(tokens::RADIUS))
                                             .icon(IconName::Undo2)

@@ -209,6 +209,16 @@ pub struct XWikiApp {
     /// ⌘P quick-open overlay state.
     quick_open: bool,
     quick_input: Entity<InputState>,
+    /// Project-wide full-text search overlay state.
+    search_open: bool,
+    search_input: Entity<InputState>,
+    search_results: Vec<dto::SearchResult>,
+    search_loading: bool,
+    search_error: Option<String>,
+    /// Audit log for the current project (settings page).
+    audit_entries: Vec<dto::AuditEntry>,
+    audit_loading: bool,
+    audit_error: Option<String>,
     /// Edit requested from a context menu while the doc is still loading.
     pending_edit: Option<String>,
     /// Cached window title; `set_window_title` only on change.
@@ -287,6 +297,7 @@ impl XWikiApp {
             state
         });
         let quick_input = cx.new(|cx| InputState::new(window, cx).placeholder("项目 / 文档…"));
+        let search_input = cx.new(|cx| InputState::new(window, cx).placeholder("搜索文档内容…"));
         let mut subs = Vec::new();
         for state in [&server_input, &user_input, &password_input] {
             subs.push(
@@ -327,6 +338,26 @@ impl XWikiApp {
                     cx.notify();
                 }),
             );
+        }
+        // Project search keystrokes re-render the results and trigger a live
+        // search once a query is present.
+        {
+            let search = search_input.clone();
+            subs.push(cx.subscribe_in(
+                &search_input,
+                window,
+                move |app, _, _: &InputEvent, _, cx| {
+                    let q = search.read(cx).value().trim().to_string();
+                    if q.is_empty() {
+                        app.search_results.clear();
+                        app.search_error = None;
+                    } else if !app.search_loading {
+                        app.run_project_search(cx);
+                    } else {
+                        cx.notify();
+                    }
+                },
+            ));
         }
         // Preview mode renders the current editor buffer, so changes need to
         // invalidate the app even while the editor is open.
@@ -445,6 +476,14 @@ impl XWikiApp {
             settings_access_loading: false,
             quick_open: false,
             quick_input,
+            search_open: false,
+            search_input,
+            search_results: Vec::new(),
+            search_loading: false,
+            search_error: None,
+            audit_entries: Vec::new(),
+            audit_loading: false,
+            audit_error: None,
             pending_edit: None,
             last_title: String::new(),
             _subscriptions: subs,
@@ -2509,6 +2548,170 @@ impl XWikiApp {
         cx.notify();
     }
 
+    /// Open the project-wide search overlay (document view toolbar).
+    fn open_project_search(&mut self, cx: &mut Context<Self>) {
+        if self.editing || self.selected_project.is_none() {
+            return;
+        }
+        self.search_open = true;
+        self.search_results.clear();
+        self.search_error = None;
+        let input = self.search_input.clone();
+        if let Some(h) = cx.active_window() {
+            let _ = cx.update_window(h, move |_v, window, cx| {
+                input.update(cx, |s, cx| s.set_value(String::new(), window, cx));
+            });
+        }
+        cx.notify();
+    }
+
+    /// Live search against the current project (debounced by the input
+    /// subscription: only fires when the query changes and no request is
+    /// in flight).
+    fn run_project_search(&mut self, cx: &mut Context<Self>) {
+        let (Some(client), Some(project)) = (self.client.clone(), self.selected_project.clone())
+        else {
+            return;
+        };
+        let q = self.search_input.read(cx).value().trim().to_string();
+        if q.is_empty() {
+            return;
+        }
+        self.search_loading = true;
+        self.search_error = None;
+        cx.notify();
+        cx.spawn(
+            async move |this, cx| match client.search(&project, &q).await {
+                Ok(results) => {
+                    let _ = this.update(cx, |app, cx| {
+                        app.search_loading = false;
+                        app.search_results = results;
+                        cx.notify();
+                    });
+                }
+                Err(e) => {
+                    let _ = this.update(cx, |app, cx| {
+                        app.search_loading = false;
+                        app.search_error = Some(format!("搜索失败: {e}"));
+                        cx.notify();
+                    });
+                }
+            },
+        )
+        .detach();
+    }
+
+    /// Project search overlay: query input + clickable result list.
+    fn render_project_search(&self, cx: &Context<Self>) -> impl IntoElement {
+        let theme = cx.theme().clone();
+        let q = self.search_input.read(cx).value().trim().to_string();
+        let content: AnyElement = if self.search_loading {
+            div()
+                .px_4()
+                .py_3()
+                .text_sm()
+                .text_color(theme.muted_foreground)
+                .child("搜索中…")
+                .into_any_element()
+        } else if let Some(err) = &self.search_error {
+            div()
+                .px_4()
+                .py_3()
+                .text_sm()
+                .text_color(theme.danger)
+                .child(err.clone())
+                .into_any_element()
+        } else if q.is_empty() {
+            div()
+                .px_4()
+                .py_3()
+                .text_sm()
+                .text_color(theme.muted_foreground)
+                .child("输入关键词，搜索当前项目全部文档内容。")
+                .into_any_element()
+        } else if self.search_results.is_empty() {
+            div()
+                .px_4()
+                .py_3()
+                .text_sm()
+                .text_color(theme.muted_foreground)
+                .child("没有匹配的文档。")
+                .into_any_element()
+        } else {
+            let mut list = div().v_flex().w_full();
+            for r in &self.search_results {
+                let path = r.path.clone();
+                let snippet = r.snippet.clone();
+                list = list.child(
+                    div()
+                        .id(format!("search-result-{}", path))
+                        .flex()
+                        .flex_col()
+                        .gap_1()
+                        .px_4()
+                        .py_2()
+                        .hover(|s| s.bg(theme.list_hover))
+                        .cursor_pointer()
+                        .child(
+                            div()
+                                .font_family(tokens::FONT_MONO)
+                                .text_xs()
+                                .text_color(theme.accent)
+                                .child(path.clone()),
+                        )
+                        .child(div().text_sm().text_color(theme.foreground).child(snippet))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.search_open = false;
+                            this.open_doc(&path, cx);
+                            cx.notify();
+                        })),
+                );
+            }
+            list.into_any_element()
+        };
+        div()
+            .id("project-search-overlay")
+            .absolute()
+            .top(px(48.0))
+            .right(px(16.0))
+            .w(px(480.0))
+            .max_h(px(420.0))
+            .rounded(px(tokens::RADIUS))
+            .border_1()
+            .border_color(theme.border)
+            .bg(theme.sidebar)
+            .shadow(vec![BoxShadow::new(
+                px(0.0),
+                px(4.0),
+                theme.foreground.opacity(0.15),
+            )
+            .blur_radius(px(16.0))])
+            .v_flex()
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .px_3()
+                    .py_2()
+                    .border_b_1()
+                    .border_color(theme.border)
+                    .child(Icon::new(IconName::Search).text_color(theme.muted_foreground))
+                    .child(
+                        div()
+                            .flex_1()
+                            .child(Input::new(&self.search_input).w_full()),
+                    ),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_h(px(0.0))
+                    .overflow_y_scrollbar()
+                    .child(content),
+            )
+    }
+
     /// Quick-open overlay: filterable list of projects + current tree docs.
     fn render_quick_open(&self, cx: &Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
@@ -2671,6 +2874,41 @@ impl XWikiApp {
                 }
                 cx.notify();
             });
+        })
+        .detach();
+    }
+
+    /// Load the audit log for the currently selected project (settings
+    /// page). No-op when no project is open.
+    fn load_audit(&mut self, cx: &mut Context<Self>) {
+        let (Some(client), Some(project)) = (self.client.clone(), self.selected_project.clone())
+        else {
+            self.audit_entries.clear();
+            self.audit_error = Some("未打开项目，无法查看审计日志。".into());
+            cx.notify();
+            return;
+        };
+        self.audit_loading = true;
+        self.audit_error = None;
+        cx.notify();
+        cx.spawn(async move |this, cx| match client.audit(&project).await {
+            Ok(entries) => {
+                let _ = this.update(cx, |app, cx| {
+                    app.audit_loading = false;
+                    app.audit_entries = entries;
+                    cx.notify();
+                });
+            }
+            Err(e) => {
+                let _ = this.update(cx, |app, cx| {
+                    app.audit_loading = false;
+                    app.audit_error = Some(format!(
+                        "审计日志加载失败：{}",
+                        Self::friendly_api_error(&e)
+                    ));
+                    cx.notify();
+                });
+            }
         })
         .detach();
     }
@@ -3185,6 +3423,9 @@ impl Render for XWikiApp {
                 if this.quick_open {
                     this.quick_open = false;
                     cx.notify();
+                } else if this.search_open {
+                    this.search_open = false;
+                    cx.notify();
                 } else if this.history_open {
                     this.close_history(cx);
                 } else if this.editing {
@@ -3288,6 +3529,11 @@ impl Render for XWikiApp {
                     })
                     .child(if self.quick_open {
                         self.render_quick_open(cx).into_any_element()
+                    } else {
+                        div().into_any_element()
+                    })
+                    .child(if self.search_open {
+                        self.render_project_search(cx).into_any_element()
                     } else {
                         div().into_any_element()
                     }),

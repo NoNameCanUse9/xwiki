@@ -125,6 +125,7 @@ impl XWikiApp {
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.screen = Screen::Settings;
                                 this.load_settings_access(cx);
+                                this.load_audit(cx);
                                 cx.notify();
                             })),
                     )
