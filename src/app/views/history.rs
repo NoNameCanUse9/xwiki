@@ -125,15 +125,28 @@ impl XWikiApp {
                                 Button::new("compare-revisions")
                                     .rounded(px(tokens::RADIUS))
                                     .icon(IconName::Search)
-                                    .label("Compare")
-                                    .tooltip("对比版本差异"),
+                                    .label(if self.history_compare_open {
+                                        "收起"
+                                    } else {
+                                        "Compare"
+                                    })
+                                    .tooltip("对比版本差异")
+                                    .disabled(self.commit_patch.is_none())
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.history_compare_open = !this.history_compare_open;
+                                        cx.notify();
+                                    })),
                             )
                             .child(
                                 Button::new("restore-revision")
                                     .rounded(px(tokens::RADIUS))
                                     .icon(IconName::Redo2)
                                     .label("Restore")
-                                    .tooltip("恢复到此版本"),
+                                    .tooltip("恢复到此版本（生成新提交）")
+                                    .disabled(self.selected_sha.is_none())
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.revert_selected(cx);
+                                    })),
                             ),
                     )
                     // ── Revision list ────────────────────────────
@@ -306,7 +319,42 @@ impl XWikiApp {
                                             .child(s.path.clone()),
                                     )
                             })),
-                    ),
+                    )
+                    // ── Patch view (Compare) ─────────────────────
+                    // Expanded via the Compare button; renders the unified
+                    // diff with +/− color coding, matching the demo diff.
+                    .child(if self.history_compare_open {
+                        let patch = self.commit_patch.clone().unwrap_or_default();
+                        let lines: Vec<&str> = patch.lines().collect();
+                        div()
+                            .border_t_1()
+                            .border_color(theme.border)
+                            .max_h(px(220.0))
+                            .overflow_y_scrollbar()
+                            .font_family(tokens::FONT_MONO)
+                            .text_xs()
+                            .children(lines.into_iter().map(|line| {
+                                let (color, bg) =
+                                    if line.starts_with('+') && !line.starts_with("+++") {
+                                        (theme.success_foreground, gpui::rgba(0x16a34a14).into())
+                                    } else if line.starts_with('-') && !line.starts_with("---") {
+                                        (theme.danger, gpui::rgba(0xdc262614).into())
+                                    } else if line.starts_with('@') {
+                                        (theme.accent, gpui::transparent_black())
+                                    } else {
+                                        (theme.muted_foreground, gpui::transparent_black())
+                                    };
+                                div()
+                                    .px_3()
+                                    .py_1()
+                                    .bg(bg)
+                                    .text_color(color)
+                                    .child(line.to_string())
+                            }))
+                            .into_any_element()
+                    } else {
+                        div().into_any_element()
+                    }),
             )
     }
 

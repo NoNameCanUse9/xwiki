@@ -60,6 +60,14 @@ pub(crate) struct ProjectContextAction {
     pub project_id: String,
 }
 
+/// Right-click archive/unarchive toggle for a project card.
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = app_actions, no_json)]
+pub(crate) struct ProjectArchiveAction {
+    pub project_id: String,
+    pub archived: bool,
+}
+
 /// Right-click "edit" action: loads the doc, then acquires the lock.
 #[derive(Clone, PartialEq, gpui::Action)]
 #[action(namespace = app_actions, no_json)]
@@ -92,6 +100,11 @@ pub struct XWikiApp {
     username: String,
     login_error: Option<String>,
     loading: bool,
+    /// Forgot-password flow: true swaps the login panel for the reset form.
+    reset_mode: bool,
+    reset_status: Option<(bool, String)>,
+    reset_token_input: Entity<InputState>,
+    reset_password_input: Entity<InputState>,
     meta_version: Option<String>,
     server_input: Entity<InputState>,
     user_input: Entity<InputState>,
@@ -122,6 +135,10 @@ pub struct XWikiApp {
     commits: Vec<dto::Commit>,
     commit_detail: Option<dto::CommitDetail>,
     diff_stats: Vec<dto::DiffStat>,
+    /// Unified-diff patch for the selected commit (`format=patch`).
+    commit_patch: Option<String>,
+    /// Whether the patch/diff panel is expanded (Compare toggle).
+    history_compare_open: bool,
     /// Selected commit sha (highlight in the history list).
     selected_sha: Option<String>,
     /// Panel layout (widths + history visibility), persisted via config.
@@ -186,6 +203,10 @@ impl XWikiApp {
             cx.new(|cx| InputState::new(window, cx).placeholder("用户名"));
         let password_input =
             cx.new(|cx| InputState::new(window, cx).placeholder("密码").masked(true));
+        let reset_token_input =
+            cx.new(|cx| InputState::new(window, cx).placeholder("一次性 token"));
+        let reset_password_input =
+            cx.new(|cx| InputState::new(window, cx).placeholder("新密码（至少 8 位）").masked(true));
 
         // ponytail: rows are loaded from GET /api/v1/projects on login; this
         // starts empty.
@@ -278,6 +299,10 @@ impl XWikiApp {
             username: String::new(),
             login_error: None,
             loading: false,
+            reset_mode: false,
+            reset_status: None,
+            reset_token_input,
+            reset_password_input,
             meta_version: None,
             server_input,
             user_input,
@@ -305,6 +330,8 @@ impl XWikiApp {
             commits: Vec::new(),
             commit_detail: None,
             diff_stats: Vec::new(),
+            commit_patch: None,
+            history_compare_open: false,
             selected_sha: None,
             layout: config::load_layout(),
             server_url: config::load_server(),
@@ -644,9 +671,11 @@ impl XWikiApp {
         self.selected_sha = Some(sha.clone());
         self.commit_detail = None;
         self.diff_stats.clear();
+        self.commit_patch = None;
         cx.spawn(async move |this, cx| {
             let detail = client.commit_detail(&project, &sha).await;
             let stats = client.diff_stats(&project, &sha).await;
+            let patch = client.commit_patch(&project, &sha).await;
             let _ = this.update(cx, |app, cx| {
                 if let Ok(d) = detail {
                     app.commit_detail = Some(d);
@@ -654,8 +683,82 @@ impl XWikiApp {
                 if let Ok(s) = stats {
                     app.diff_stats = s;
                 }
+                if let Ok(p) = patch {
+                    app.commit_patch = Some(p.patch);
+                }
                 cx.notify();
             });
+        })
+        .detach();
+    }
+
+    /// Restore the selected commit by reverting it server-side (new commit).
+    fn revert_selected(&mut self, cx: &mut Context<Self>) {
+        let (Some(client), Some(project), Some(sha)) = (
+            self.client.clone(),
+            self.selected_project.clone(),
+            self.selected_sha.clone(),
+        ) else {
+            return;
+        };
+        cx.spawn(async move |this, cx| {
+            match client.revert_commit(&project, &sha, "").await {
+                Ok(c) => {
+                    let short: String = c.sha.chars().take(7).collect();
+                    let _ = this.update(cx, |app, cx| {
+                        app.notify(format!("已恢复提交 {short} · {}", c.message), cx);
+                        app.load_commits(cx);
+                        let path = app.doc_path.clone().unwrap_or_default();
+                        if !path.is_empty() {
+                            app.open_doc(&path, cx);
+                        }
+                    });
+                }
+                Err(e) => {
+                    let _ = this.update(cx, |app, cx| {
+                        app.status_msg = Some(format!("恢复失败: {e}"));
+                        cx.notify();
+                    });
+                }
+            }
+        })
+        .detach();
+    }
+
+    /// Archive or unarchive the given project (right-click context menu).
+    fn set_project_archived(&mut self, project_id: &str, archived: bool, cx: &mut Context<Self>) {
+        let Some(client) = self.client.clone() else {
+            return;
+        };
+        let id = project_id.to_string();
+        cx.spawn(async move |this, cx| {
+            match client.set_archived(&id, archived).await {
+                Ok(p) => {
+                    let _ = this.update(cx, |app, cx| {
+                        {
+                            let mut projects = app.projects.write().unwrap();
+                            if let Some(row) = projects.iter_mut().find(|r| r.id == p.id) {
+                                row.archived = p.archived;
+                            }
+                        }
+                        app.notify(
+                            if p.archived {
+                                "项目已归档".into()
+                            } else {
+                                "项目已恢复".into()
+                            },
+                            cx,
+                        );
+                        cx.notify();
+                    });
+                }
+                Err(e) => {
+                    let _ = this.update(cx, |app, cx| {
+                        app.status_msg = Some(format!("操作失败: {e}"));
+                        cx.notify();
+                    });
+                }
+            }
         })
         .detach();
     }
@@ -867,6 +970,114 @@ impl XWikiApp {
         self.load_projects(cx);
     }
 
+    /// Toggle the login panel between sign-in and forgot-password forms.
+    fn toggle_reset_mode(&mut self, cx: &mut Context<Self>) {
+        self.reset_mode = !self.reset_mode;
+        self.reset_status = None;
+        self.login_error = None;
+        cx.notify();
+    }
+
+    /// Request a reset token for the username in the form. Self-hosted:
+    /// the token is written to the server log; the UI tells the user to
+    /// ask the operator for it.
+    fn request_reset(&mut self, cx: &mut Context<Self>) {
+        let server = {
+            let v = self.server_input.read(cx).value().to_string();
+            if v.trim().is_empty() {
+                config::load_server()
+            } else {
+                v.trim().to_string()
+            }
+        };
+        let username = self.user_input.read(cx).value().to_string();
+        if username.trim().is_empty() {
+            self.reset_status = Some((false, "请输入用户名".into()));
+            cx.notify();
+            return;
+        }
+        let client = Client::new(&server);
+        self.loading = true;
+        self.reset_status = None;
+        cx.spawn(async move |this, cx| {
+            let result = client.forgot_password(username.trim()).await;
+            let _ = this.update(cx, |app, cx| {
+                app.loading = false;
+                match result {
+                    Ok(true) => {
+                        app.reset_status = Some((
+                            true,
+                            "已请求重置。请联系服务器运维获取一次性 token（已写入服务端日志）。".into(),
+                        ));
+                    }
+                    Ok(_) => {
+                        app.reset_status = Some((false, "服务器未返回确认，请稍后重试".into()));
+                    }
+                    Err(e) => {
+                        app.reset_status = Some((false, format!("请求失败: {e}")));
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// Submit token + new password to complete the reset.
+    fn submit_reset(&mut self, cx: &mut Context<Self>) {
+        let server = {
+            let v = self.server_input.read(cx).value().to_string();
+            if v.trim().is_empty() {
+                config::load_server()
+            } else {
+                v.trim().to_string()
+            }
+        };
+        let token = self.reset_token_input.read(cx).value().to_string();
+        let new_password = self.reset_password_input.read(cx).value().to_string();
+        if token.trim().is_empty() || new_password.len() < 8 {
+            self.reset_status =
+                Some((false, "需要 token 且新密码至少 8 个字符".into()));
+            cx.notify();
+            return;
+        }
+        let client = Client::new(&server);
+        self.loading = true;
+        self.reset_status = None;
+        cx.spawn(async move |this, cx| {
+            let result = client.reset_password(token.trim(), &new_password).await;
+            let _ = this.update(cx, |app, cx| {
+                app.loading = false;
+                match result {
+                    Ok(true) => {
+                        app.reset_status = Some((true, "密码已重置，请使用新密码登录".into()));
+                        app.reset_mode = false;
+                        let token_input = app.reset_token_input.clone();
+                        let password_input = app.reset_password_input.clone();
+                        if let Some(window) = cx.active_window() {
+                            let _ = cx.update_window(window, |_v, window, cx| {
+                                token_input.update(cx, |s, cx| {
+                                    s.set_value(String::new(), window, cx);
+                                });
+                                password_input.update(cx, |s, cx| {
+                                    s.set_value(String::new(), window, cx);
+                                });
+                            });
+                        }
+                    }
+                    Ok(_) => {
+                        app.reset_status = Some((false, "服务器未确认，请重试".into()));
+                    }
+                    Err(e) => {
+                        app.reset_status = Some((false, format!("重置失败: {e}")));
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
     fn load_projects(&mut self, cx: &mut Context<Self>) {
         let Some(client) = self.client.clone() else {
             return;
@@ -914,6 +1125,124 @@ impl XWikiApp {
         };
         let handle = cx.entity();
         open_new_project_dialog_window(window, cx, Some(client), handle);
+    }
+
+    /// Rename / move the doc currently being edited via a dialog.
+    fn open_rename_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let (Some(client), Some(project), Some(path)) = (
+            self.client.clone(),
+            self.selected_project.clone(),
+            self.edit_path.clone(),
+        ) else {
+            return;
+        };
+        let handle = cx.entity();
+        let default_name = path.rsplit('/').next().unwrap_or(&path).to_string();
+        let current_path = path.clone();
+        let project_id_outer = project.clone();
+        let client_outer = client.clone();
+        window.open_dialog(cx, move |dialog, window, cx| {
+            // Fresh locals per invocation: safe to move into inner closures.
+            let content_path = current_path.clone();
+            let submit_path = current_path.clone();
+            let new_path_state = cx.new(|cx| {
+                let mut s = InputState::new(window, cx).placeholder("docs/new-name.md");
+                s.set_value(default_name.clone(), window, cx);
+                s
+            });
+
+            let content_state = new_path_state.clone();
+            let content_builder =
+                move |content: DialogContent, _: &mut Window, cx: &mut App| {
+                    let theme = cx.theme();
+                    content
+                        .child(
+                            div()
+                                .v_flex()
+                                .gap_2()
+                                .w_full()
+                                .child(
+                                    div()
+                                        .font_family(tokens::FONT_MONO)
+                                        .text_xs()
+                                        .text_color(theme.muted_foreground)
+                                        .child(format!("当前路径 · {content_path}")),
+                                )
+                                .child(
+                                    div()
+                                        .font_family(tokens::FONT_MONO)
+                                        .text_xs()
+                                        .text_color(theme.muted_foreground)
+                                        .child("新路径"),
+                                )
+                                .child(Input::new(&content_state).w_full()),
+                        )
+                };
+
+            let cancel = Button::new("cancel-rename")
+                .rounded(px(tokens::RADIUS))
+                .icon(IconName::Close)
+                .label("取消")
+                .on_click(move |_, window, cx| window.close_dialog(cx));
+
+            let submit_state = new_path_state.clone();
+            let submit_client = client_outer.clone();
+            let app_handle = handle.clone();
+            let project_id = project_id_outer.clone();
+            let rename = Button::new("confirm-rename")
+                .primary()
+                .rounded(px(tokens::RADIUS))
+                .icon(IconName::Check)
+                .label("重命名")
+                .on_click(move |_, window, cx| {
+                    let new_path = submit_state.read(cx).value().to_string();
+                    if new_path.trim().is_empty() {
+                        return;
+                    }
+                    let c = submit_client.clone();
+                    let h = app_handle.clone();
+                    let pid = project_id.clone();
+                    let to = new_path.trim().to_string();
+                    let from = submit_path.clone();
+                    cx.spawn(async move |cx| {
+                        match c.move_doc(&pid, &from, &to, "重命名文档").await {
+                            Ok(_) => {
+                                h.update(cx, |app, cx| {
+                                    app.notify(format!("已重命名为 {to}"), cx);
+                                    app.edit_path = Some(to.clone());
+                                    app.doc_path = Some(to.clone());
+                                    cx.notify();
+                                });
+                            }
+                            Err(e) => {
+                                h.update(cx, |app, cx| {
+                                    app.status_msg = Some(format!("重命名失败: {e}"));
+                                    cx.notify();
+                                });
+                            }
+                        }
+                    })
+                    .detach();
+                    window.close_dialog(cx);
+                });
+
+            dialog
+                .title(
+                    div()
+                        .text_lg()
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .child("重命名文档"),
+                )
+                .content(content_builder)
+                .footer(
+                    h_flex()
+                        .gap_2()
+                        .justify_end()
+                        .w_full()
+                        .child(cancel)
+                        .child(rename),
+                )
+        });
     }
 
     fn render_status_bar(&self, cx: &Context<Self>) -> Div {
@@ -1267,6 +1596,7 @@ impl Render for XWikiApp {
         let theme_weak = cx.weak_entity();
         let ctx_weak = cx.weak_entity();
         let proj_weak = cx.weak_entity();
+        let archive_weak = cx.weak_entity();
         let edit_weak = cx.weak_entity();
 
         // Plan §3.1 keyboard model — Esc closes the innermost layer first.
@@ -1319,6 +1649,11 @@ impl Render for XWikiApp {
             .on_action(move |action: &ProjectContextAction, _window, cx| {
                 let _ = proj_weak.update(cx, |app, cx| {
                     app.open_project(&action.project_id, cx);
+                });
+            })
+            .on_action(move |action: &ProjectArchiveAction, _window, cx| {
+                let _ = archive_weak.update(cx, |app, cx| {
+                    app.set_project_archived(&action.project_id, action.archived, cx);
                 });
             })
             .on_action(move |action: &EditDocAction, _window, cx| {

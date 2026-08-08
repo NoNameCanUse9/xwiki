@@ -188,6 +188,116 @@ impl XWikiApp {
                                     .child("密码"),
                             )
                             .child(Input::new(&self.password_input).w_full())
+                            .child(if self.reset_mode {
+                                // Forgot-password form: token + new password.
+                                div().v_flex().gap_3().w_full()
+                                .child(
+                                    div()
+                                        .font_family(tokens::FONT_MONO)
+                                        .text_xs()
+                                        .text_color(theme.muted_foreground)
+                                        .child("重置密码"),
+                                )
+                                .child(
+                                    div()
+                                        .font_family(tokens::FONT_MONO)
+                                        .text_xs()
+                                        .text_color(theme.muted_foreground)
+                                        .child("1 · 请求一次性 token（发往服务端日志）"),
+                                )
+                                .child(
+                                    Button::new("request-reset")
+                                        .rounded(px(tokens::RADIUS))
+                                        .icon(IconName::ArrowRight)
+                                        .label(if self.loading { "请求中…" } else { "请求 token" })
+                                        .disabled(self.loading)
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            this.request_reset(cx)
+                                        })),
+                                )
+                                .child(
+                                    div()
+                                        .font_family(tokens::FONT_MONO)
+                                        .text_xs()
+                                        .text_color(theme.muted_foreground)
+                                        .child("2 · 输入 token 与新密码"),
+                                )
+                                .child(
+                                    div()
+                                        .font_family(tokens::FONT_MONO)
+                                        .text_xs()
+                                        .text_color(theme.muted_foreground)
+                                        .child("一次性 token"),
+                                ).child(Input::new(&self.reset_token_input).w_full())
+                                .child(
+                                    div()
+                                        .font_family(tokens::FONT_MONO)
+                                        .text_xs()
+                                        .text_color(theme.muted_foreground)
+                                        .child("新密码（至少 8 位）"),
+                                )
+                                .child(Input::new(&self.reset_password_input).w_full())
+                                .child(if let Some((ok, msg)) = &self.reset_status {
+                                    div()
+                                        .font_family(tokens::FONT_MONO)
+                                        .text_xs()
+                                        .text_color(if *ok { theme.success_foreground } else { theme.danger })
+                                        .child(msg.clone())
+                                } else {
+                                    div()
+                                })
+                                .child(
+                                    Button::new("submit-reset")
+                                        .primary()
+                                        .w_full()
+                                        .rounded(px(tokens::RADIUS))
+                                        .icon(IconName::Check)
+                                        .label(if self.loading { "提交中…" } else { "重置密码" })
+                                        .disabled(self.loading)
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            this.submit_reset(cx)
+                                        })),
+                                )
+                                .child(
+                                    div()
+                                        .id("back-to-login")
+                                        .text_xs()
+                                        .text_color(theme.muted_foreground)
+                                        .hover(|s| s.text_color(theme.accent))
+                                        .cursor_pointer()
+                                        .child("← 返回登录")
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            this.toggle_reset_mode(cx)
+                                        })),
+                                )
+                            } else {
+                                // Sign-in form.
+                                div().v_flex().gap_3().w_full().child(
+                                    div()
+                                        .flex()
+                                        .justify_between()
+                                        .items_center()
+                                        .child(
+                                            div()
+                                                .font_family(tokens::FONT_MONO)
+                                                .text_xs()
+                                                .text_color(theme.muted_foreground)
+                                                .child("密码"),
+                                        )
+                                        .child(
+                                            div()
+                                                .id("forgot-password-link")
+                                                .text_xs()
+                                                .text_color(theme.muted_foreground)
+                                                .hover(|s| s.text_color(theme.accent))
+                                                .cursor_pointer()
+                                                .child("忘记密码？")
+                                                .on_click(cx.listener(|this, _, _, cx| {
+                                                    this.toggle_reset_mode(cx)
+                                                })),
+                                        ),
+                                )
+                            })
                             .child(if let Some(err) = &self.login_error {
                                 div()
                                     .font_family(tokens::FONT_MONO)

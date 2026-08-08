@@ -61,6 +61,16 @@ impl XWikiApp {
                             .tooltip("打开版本历史")
                             .on_click(cx.listener(|this, _, _, cx| this.open_history(cx))),
                     )
+                    .child(
+                        Button::new("rename-doc")
+                            .rounded(px(tokens::RADIUS))
+                            .icon(IconName::Replace)
+                            .label("重命名")
+                            .tooltip("移动 / 重命名当前文档")
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.open_rename_dialog(window, cx)
+                            })),
+                    )
                     .child(div().w(px(280.0)).child(Input::new(&self.commit_msg)))
                     .child(
                         Button::new("save-edit")

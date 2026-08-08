@@ -590,6 +590,84 @@ impl Client {
             .await?;
         Ok(resp.stats)
     }
+
+    /// Full patch diff for a commit (file-level unified diff lines).
+    pub async fn commit_patch(
+        &self,
+        project_id: &str,
+        sha: &str,
+    ) -> Result<dto::CommitPatch, ApiError> {
+        let resp: dto::CommitPatchResponse = Self::send(
+                self.http
+                    .get(self.url(&format!(
+                        "/api/v1/projects/{}/commits/{}/diff",
+                        project_id, sha
+                    )))
+                    .query(&[("format", "patch")]),
+            )
+            .await?;
+        Ok(dto::CommitPatch {
+            sha: resp.sha,
+            format: resp.format,
+            patch: resp.patch,
+        })
+    }
+
+    /// Revert a commit with a new changeset commit (server-side).
+    pub async fn revert_commit(
+        &self,
+        project_id: &str,
+        sha: &str,
+        message: &str,
+    ) -> Result<dto::Commit, ApiError> {
+        #[derive(Serialize)]
+        struct Body<'a> {
+            #[serde(skip_serializing_if = "str::is_empty")]
+            message: &'a str,
+        }
+        let resp: dto::CommitResponse = Self::send(
+                self.http
+                    .post(self.url(&format!(
+                        "/api/v1/projects/{}/commits/{}/revert",
+                        project_id, sha
+                    )))
+                    .json(&Body { message }),
+            )
+            .await?;
+        Ok(resp.commit)
+    }
+
+    /// Request a password-reset token (self-hosted: token goes to the
+    /// server log; response is identical for unknown accounts).
+    pub async fn forgot_password(&self, username: &str) -> Result<bool, ApiError> {
+        #[derive(Serialize)]
+        struct Body<'a> {
+            username: &'a str,
+        }
+        let resp: serde_json::Value = Self::send(
+                self.http
+                    .post(self.url("/api/v1/auth/forgot-password"))
+                    .json(&Body { username }),
+            )
+            .await?;
+        Ok(resp.get("ok").and_then(|v| v.as_bool()).unwrap_or(false))
+    }
+
+    /// Reset a password with a one-time token.
+    pub async fn reset_password(&self, token: &str, new_password: &str) -> Result<bool, ApiError> {
+        #[derive(Serialize)]
+        struct Body<'a> {
+            token: &'a str,
+            new_password: &'a str,
+        }
+        let resp: serde_json::Value = Self::send(
+                self.http
+                    .post(self.url("/api/v1/auth/reset-password"))
+                    .json(&Body { token, new_password }),
+            )
+            .await?;
+        Ok(resp.get("ok").and_then(|v| v.as_bool()).unwrap_or(false))
+    }
 }
 
 fn network_error(e: reqwest::Error) -> ApiError {
@@ -791,6 +869,28 @@ pub mod dto {
         pub format: String,
         #[serde(default, deserialize_with = "crate::api::de_null_default")]
         pub stats: Vec<DiffStat>,
+    }
+
+    /// Patch diff for one commit (`format=patch`): server returns the
+    /// unified diff as a single text block.
+    #[derive(Debug, Deserialize)]
+    pub struct CommitPatchResponse {
+        pub sha: String,
+        pub format: String,
+        #[serde(default)]
+        pub patch: String,
+    }
+
+    #[derive(Debug, Clone)]
+    pub struct CommitPatch {
+        pub sha: String,
+        pub format: String,
+        pub patch: String,
+    }
+
+    #[derive(Debug, Deserialize)]
+    pub struct CommitResponse {
+        pub commit: Commit,
     }
 
     #[derive(Debug, Deserialize)]

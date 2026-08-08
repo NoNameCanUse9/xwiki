@@ -7,7 +7,9 @@ use gpui_component::{
     button::*, input::Input, menu::ContextMenuExt, scroll::ScrollableElement as _, *,
 };
 
-use crate::app::{ProjectContextAction, ProjectFilter, ProjectRow, Screen, XWikiApp};
+use crate::app::{
+    ProjectArchiveAction, ProjectContextAction, ProjectFilter, ProjectRow, Screen, XWikiApp,
+};
 use crate::config;
 use crate::ui::{mono_label, split_pane, tokens};
 
@@ -198,12 +200,25 @@ impl XWikiApp {
                     cx.listener(move |this, _, _, cx| this.open_project(&click_id, cx))
                 });
             let card = card.context_menu(move |menu, _window, _cx| {
-                menu.menu(
+                let archived = p.archived;
+                let mut m = menu.menu(
                     "打开项目",
                     Box::new(ProjectContextAction {
                         project_id: id.clone(),
                     }),
-                )
+                );
+                m = m.menu(
+                    if archived {
+                        "取消归档"
+                    } else {
+                        "归档项目"
+                    },
+                    Box::new(ProjectArchiveAction {
+                        project_id: id.clone(),
+                        archived: !archived,
+                    }),
+                );
+                m
             });
             grid = grid.child(card);
         }
