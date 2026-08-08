@@ -36,7 +36,14 @@ fn usage_returns_2() {
 #[test]
 fn config_set_and_show() {
     let _h = isolated_home();
-    assert_eq!(run(vec!["config".into(), "set-server".into(), "http://x:1".into()]), 0);
+    assert_eq!(
+        run(vec![
+            "config".into(),
+            "set-server".into(),
+            "http://x:1".into()
+        ]),
+        0
+    );
     assert_eq!(config::load_server(), "http://x:1");
 }
 
@@ -44,7 +51,12 @@ fn config_set_and_show() {
 fn server_status_network_error_is_6() {
     let _h = isolated_home();
     let code = rt().block_on(async {
-        cmd_server(&["status".into(), "--server".into(), "http://127.0.0.1:1".into()]).await
+        cmd_server(&[
+            "status".into(),
+            "--server".into(),
+            "http://127.0.0.1:1".into(),
+        ])
+        .await
     });
     assert_eq!(code, 6);
 }

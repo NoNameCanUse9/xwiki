@@ -4,7 +4,7 @@
 use gpui::*;
 use gpui_component::{button::*, menu::ContextMenuExt, scroll::ScrollableElement as _, *};
 
-use crate::app::{EditDocAction, TreeContextAction, XWikiApp};
+use crate::app::{DocDeleteAction, DocRenameAction, EditDocAction, TreeContextAction, XWikiApp};
 use crate::config;
 use crate::ui::{mono_label, split_pane, tokens};
 
@@ -154,6 +154,20 @@ impl XWikiApp {
                         }),
                     );
                 }
+                m = m.menu(
+                    "重命名",
+                    Box::new(DocRenameAction {
+                        path: ctx_path.clone(),
+                        is_dir: ctx_dir,
+                    }),
+                );
+                m = m.menu(
+                    "删除",
+                    Box::new(DocDeleteAction {
+                        path: ctx_path.clone(),
+                        is_dir: ctx_dir,
+                    }),
+                );
                 m
             });
             list = list.child(row);

@@ -7,7 +7,10 @@ use gpui_component::{
     button::*, input::Input, menu::ContextMenuExt, scroll::ScrollableElement as _, *,
 };
 
-use crate::app::{ProjectArchiveAction, ProjectContextAction, ProjectFilter, ProjectRow, XWikiApp};
+use crate::app::{
+    ProjectArchiveAction, ProjectContextAction, ProjectDeleteAction, ProjectFilter,
+    ProjectRenameAction, ProjectRow, XWikiApp,
+};
 use crate::config;
 use crate::ui::{mono_label, split_pane, tokens};
 
@@ -173,6 +176,7 @@ impl XWikiApp {
                                 )
                                 .child({
                                     let menu_id = id.clone();
+                                    let menu_name = p.name.clone();
                                     let menu_archived = archived;
                                     div()
                                         .id(format!("project-menu-{}", id))
@@ -189,7 +193,13 @@ impl XWikiApp {
                                                 .text_color(theme.muted_foreground),
                                         )
                                         .context_menu(move |menu, _window, _cx| {
-                                            menu.menu(
+                                            let mut m = menu.menu(
+                                                "打开项目",
+                                                Box::new(ProjectContextAction {
+                                                    project_id: menu_id.clone(),
+                                                }),
+                                            );
+                                            m = m.menu(
                                                 if menu_archived {
                                                     "取消归档"
                                                 } else {
@@ -199,7 +209,22 @@ impl XWikiApp {
                                                     project_id: menu_id.clone(),
                                                     archived: !menu_archived,
                                                 }),
-                                            )
+                                            );
+                                            m = m.menu(
+                                                "重命名",
+                                                Box::new(ProjectRenameAction {
+                                                    project_id: menu_id.clone(),
+                                                    current_name: menu_name.clone(),
+                                                }),
+                                            );
+                                            m = m.menu(
+                                                "删除项目",
+                                                Box::new(ProjectDeleteAction {
+                                                    project_id: menu_id.clone(),
+                                                    project_name: menu_name.clone(),
+                                                }),
+                                            );
+                                            m
                                         })
                                 }),
                         ),

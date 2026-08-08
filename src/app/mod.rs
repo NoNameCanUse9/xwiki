@@ -68,11 +68,43 @@ pub(crate) struct ProjectArchiveAction {
     pub archived: bool,
 }
 
+/// Context-menu rename for a project card.
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = app_actions, no_json)]
+pub(crate) struct ProjectRenameAction {
+    pub project_id: String,
+    pub current_name: String,
+}
+
+/// Context-menu delete for a project card.
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = app_actions, no_json)]
+pub(crate) struct ProjectDeleteAction {
+    pub project_id: String,
+    pub project_name: String,
+}
+
 /// Right-click "edit" action: loads the doc, then acquires the lock.
 #[derive(Clone, PartialEq, gpui::Action)]
 #[action(namespace = app_actions, no_json)]
 pub(crate) struct EditDocAction {
     pub path: String,
+}
+
+/// Right-click rename for a doc or directory in the tree.
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = app_actions, no_json)]
+pub(crate) struct DocRenameAction {
+    pub path: String,
+    pub is_dir: bool,
+}
+
+/// Right-click delete for a doc or directory in the tree.
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = app_actions, no_json)]
+pub(crate) struct DocDeleteAction {
+    pub path: String,
+    pub is_dir: bool,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -1187,6 +1219,605 @@ impl XWikiApp {
                 }
             },
         )
+        .detach();
+    }
+
+    /// Open the rename dialog for a project (three-dot menu -> 重命名).
+    fn rename_project(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        project_id: String,
+        current_name: String,
+    ) {
+        if self.project_action.is_some() {
+            return;
+        }
+        let handle = cx.entity();
+        let confirm_handle = handle.clone();
+        let project_id_for_dialog = project_id.clone();
+        let default_name = current_name.clone();
+        window.open_dialog(cx, move |dialog, window, cx| {
+            let name_state = cx.new(|cx| {
+                let mut s = InputState::new(window, cx).placeholder("project-name");
+                s.set_value(default_name.clone(), window, cx);
+                s
+            });
+            let content_state = name_state.clone();
+            let content_theme = cx.theme().clone();
+            let content_builder = move |content: DialogContent, _: &mut Window, _cx: &mut App| {
+                content.child(
+                    div()
+                        .v_flex()
+                        .gap_2()
+                        .w_full()
+                        .child(mono_label("新名称").text_color(content_theme.muted_foreground))
+                        .child(Input::new(&content_state).w_full()),
+                )
+            };
+            let cancel = Button::new("cancel-rename-project")
+                .rounded(px(tokens::RADIUS))
+                .icon(IconName::Close)
+                .label("取消")
+                .on_click(|_, window, cx| window.close_dialog(cx));
+            let submit_state = name_state.clone();
+            let submit_handle = confirm_handle.clone();
+            let submit_project = project_id_for_dialog.clone();
+            let rename = Button::new("confirm-rename-project")
+                .primary()
+                .rounded(px(tokens::RADIUS))
+                .icon(IconName::Check)
+                .label("重命名")
+                .on_click(move |_, window, cx| {
+                    let new_name = submit_state.read(cx).value().trim().to_string();
+                    if new_name.is_empty() {
+                        return;
+                    }
+                    let handle = submit_handle.clone();
+                    let project_id = submit_project.clone();
+                    handle.update(cx, |app, cx| {
+                        app.do_rename_project(&project_id, new_name, cx);
+                    });
+                    window.close_dialog(cx);
+                });
+            dialog
+                .title(
+                    div()
+                        .text_lg()
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .child("重命名项目"),
+                )
+                .content(content_builder)
+                .footer(
+                    h_flex()
+                        .gap_2()
+                        .justify_end()
+                        .w_full()
+                        .child(cancel)
+                        .child(rename),
+                )
+        });
+    }
+
+    /// Perform the project rename against the API and refresh the list.
+    fn do_rename_project(&mut self, project_id: &str, new_name: String, cx: &mut Context<Self>) {
+        let Some(client) = self.client.clone() else {
+            return;
+        };
+        if self.project_action.is_some() {
+            return;
+        }
+        self.project_action = Some(project_id.to_string());
+        self.status_msg = None;
+        let id = project_id.to_string();
+        cx.spawn(
+            async move |this, cx| match client.rename_project(&id, &new_name).await {
+                Ok(p) => {
+                    let _ = this.update(cx, |app, cx| {
+                        {
+                            let mut projects = app.projects.write().unwrap();
+                            if let Some(row) = projects.iter_mut().find(|r| r.id == p.id) {
+                                row.name = p.name.clone();
+                            }
+                        }
+                        app.project_action = None;
+                        app.notify(format!("已重命名为 {}", p.name), cx);
+                        cx.notify();
+                    });
+                }
+                Err(e) => {
+                    let _ = this.update(cx, |app, cx| {
+                        app.project_action = None;
+                        app.status_msg = Some(format!("重命名失败: {e}"));
+                        cx.notify();
+                    });
+                }
+            },
+        )
+        .detach();
+    }
+
+    /// Two-step delete confirmation for a project (three-dot menu -> 删除).
+    fn confirm_delete_project(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        project_id: String,
+        project_name: String,
+    ) {
+        if self.project_action.is_some() {
+            return;
+        }
+        let handle = cx.entity();
+        let action_handle = handle.clone();
+        let confirm_project = project_id.clone();
+        let confirm_name = project_name.clone();
+        window.open_dialog(cx, move |dialog, _window, cx| {
+            let theme = cx.theme().clone();
+            let content_theme = theme.clone();
+            let confirm_handle = action_handle.clone();
+            let delete_id = confirm_project.clone();
+            let delete_name = confirm_name.clone();
+            let content_delete_name = delete_name.clone();
+            let cancel = Button::new("cancel-project-delete")
+                .rounded(px(tokens::RADIUS))
+                .icon(IconName::Close)
+                .label("取消")
+                .on_click(|_, window, cx| window.close_dialog(cx));
+            let confirm = Button::new("confirm-project-delete")
+                .danger()
+                .rounded(px(tokens::RADIUS))
+                .icon(IconName::Delete)
+                .label("删除项目")
+                .on_click(move |_, window, cx| {
+                    let handle = confirm_handle.clone();
+                    let id = delete_id.clone();
+                    let name = delete_name.clone();
+                    handle.update(cx, |app, cx| app.do_delete_project(&id, &name, cx));
+                    window.close_dialog(cx);
+                });
+            dialog
+                .title(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .child(Icon::new(IconName::TriangleAlert).text_color(theme.danger))
+                        .child("删除项目？"),
+                )
+                .content(move |content, _window, _cx| {
+                    content.child(
+                        div()
+                            .text_sm()
+                            .text_color(content_theme.muted_foreground)
+                            .child(format!(
+                                "项目「{content_delete_name}」及其全部 Git 历史将被彻底删除，无法恢复。"
+                            )),
+                    )
+                })
+                .footer(
+                    h_flex()
+                        .gap_2()
+                        .justify_end()
+                        .w_full()
+                        .child(cancel)
+                        .child(confirm),
+                )
+        });
+    }
+
+    /// Perform the project delete and refresh the list.
+    fn do_delete_project(&mut self, project_id: &str, _name: &str, cx: &mut Context<Self>) {
+        let Some(client) = self.client.clone() else {
+            return;
+        };
+        if self.project_action.is_some() {
+            return;
+        }
+        self.project_action = Some(project_id.to_string());
+        self.status_msg = None;
+        let id = project_id.to_string();
+        cx.spawn(
+            async move |this, cx| match client.delete_project(&id).await {
+                Ok(()) => {
+                    let _ = this.update(cx, |app, cx| {
+                        app.projects.write().unwrap().retain(|r| r.id != id);
+                        if app.selected_project.as_deref() == Some(id.as_str()) {
+                            app.selected_project = None;
+                        }
+                        app.project_action = None;
+                        app.notify("项目已删除".into(), cx);
+                        cx.notify();
+                    });
+                }
+                Err(e) => {
+                    let _ = this.update(cx, |app, cx| {
+                        app.project_action = None;
+                        app.status_msg = Some(format!("删除失败: {e}"));
+                        cx.notify();
+                    });
+                }
+            },
+        )
+        .detach();
+    }
+
+    /// Open the rename dialog for a doc or directory in the tree.
+    fn confirm_rename_doc(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        path: String,
+        is_dir: bool,
+    ) {
+        let Some(client) = self.client.clone() else {
+            return;
+        };
+        let Some(project) = self.selected_project.clone() else {
+            return;
+        };
+        if self.editing {
+            return;
+        }
+        let handle = cx.entity();
+        let confirm_handle = handle.clone();
+        let current_path = path.clone();
+        let project_for_dialog = project.clone();
+        let client_for_dialog = client.clone();
+        let default_name = path.rsplit('/').next().unwrap_or(&path).to_string();
+        window.open_dialog(cx, move |dialog, window, cx| {
+            let name_state = cx.new(|cx| {
+                let mut s = InputState::new(window, cx).placeholder("新名称");
+                s.set_value(default_name.clone(), window, cx);
+                s
+            });
+            let content_state = name_state.clone();
+            let content_theme = cx.theme().clone();
+            let content_builder = move |content: DialogContent, _: &mut Window, _cx: &mut App| {
+                content.child(
+                    div()
+                        .v_flex()
+                        .gap_2()
+                        .w_full()
+                        .child(mono_label("新名称").text_color(content_theme.muted_foreground))
+                        .child(Input::new(&content_state).w_full()),
+                )
+            };
+            let cancel = Button::new("cancel-rename-doc")
+                .rounded(px(tokens::RADIUS))
+                .icon(IconName::Close)
+                .label("取消")
+                .on_click(|_, window, cx| window.close_dialog(cx));
+            let submit_state = name_state.clone();
+            let submit_handle = confirm_handle.clone();
+            let submit_project = project_for_dialog.clone();
+            let submit_client = client_for_dialog.clone();
+            let submit_path = current_path.clone();
+            let submit_dir = is_dir;
+            let rename = Button::new("confirm-rename-doc")
+                .primary()
+                .rounded(px(tokens::RADIUS))
+                .icon(IconName::Check)
+                .label("重命名")
+                .on_click(move |_, window, cx| {
+                    let new_name = submit_state.read(cx).value().trim().to_string();
+                    if new_name.is_empty() || new_name.contains('/') {
+                        window.push_notification(
+                            Notification::error("名称不能为空且不能包含斜杠"),
+                            cx,
+                        );
+                        return;
+                    }
+                    let from = submit_path.clone();
+                    let to = match from.rsplit_once('/') {
+                        Some((parent, _)) => format!("{parent}/{new_name}"),
+                        None => new_name.clone(),
+                    };
+                    let handle = submit_handle.clone();
+                    let project_id = submit_project.clone();
+                    let c = submit_client.clone();
+                    let from_move = from.clone();
+                    let to_move = to.clone();
+                    handle.update(cx, |app, cx| {
+                        app.move_tree_path(&c, &project_id, &from_move, &to_move, submit_dir, cx);
+                    });
+                    window.close_dialog(cx);
+                });
+            dialog
+                .title(
+                    div()
+                        .text_lg()
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .child(if is_dir {
+                            "重命名目录"
+                        } else {
+                            "重命名文档"
+                        }),
+                )
+                .content(content_builder)
+                .footer(
+                    h_flex()
+                        .gap_2()
+                        .justify_end()
+                        .w_full()
+                        .child(cancel)
+                        .child(rename),
+                )
+        });
+    }
+
+    /// Execute a tree move/rename and refresh the tree.
+    fn move_tree_path(
+        &mut self,
+        client: &Client,
+        project: &str,
+        from: &str,
+        to: &str,
+        is_dir: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let c = client.clone();
+        let project = project.to_string();
+        let from = from.to_string();
+        let to = to.to_string();
+        let message = format!("重命名{}", if is_dir { "目录" } else { "文档" });
+        self.tree_loading = true;
+        cx.notify();
+        cx.spawn(
+            async move |this, cx| match c.move_doc(&project, &from, &to, &message).await {
+                Ok(_) => {
+                    let _ = this.update(cx, |app, cx| {
+                        app.tree_loading = false;
+                        let tree_path = app.tree_path.clone();
+                        app.load_tree(&tree_path, cx);
+                        app.notify(format!("已重命名为 {to}"), cx);
+                    });
+                }
+                Err(e) => {
+                    let _ = this.update(cx, |app, cx| {
+                        app.tree_loading = false;
+                        app.status_msg = Some(format!("重命名失败: {e}"));
+                        cx.notify();
+                    });
+                }
+            },
+        )
+        .detach();
+    }
+
+    /// Two-step delete confirmation for a doc or directory.
+    fn confirm_delete_doc(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        path: String,
+        is_dir: bool,
+    ) {
+        let Some(client) = self.client.clone() else {
+            return;
+        };
+        let Some(project) = self.selected_project.clone() else {
+            return;
+        };
+        if self.editing {
+            return;
+        }
+        let handle = cx.entity();
+        let action_handle = handle.clone();
+        let confirm_project = project.clone();
+        let confirm_client = client.clone();
+        let confirm_path = path.clone();
+        let confirm_dir = is_dir;
+        let confirm_name = path.rsplit('/').next().unwrap_or(&path).to_string();
+        window.open_dialog(cx, move |dialog, window, cx| {
+            let theme = cx.theme().clone();
+            let content_theme = theme.clone();
+            let content_name = confirm_name.clone();
+            let content_dir = confirm_dir;
+            // Hard-delete gate: the user must type the full path to enable
+            // the irreversible purge button.
+            let confirm_input = cx.new(|cx| {
+                InputState::new(window, cx).placeholder("输入完整路径以确认")
+            });
+            let gate_state = confirm_input.clone();
+            let gate_handle = action_handle.clone();
+            let gate_client = confirm_client.clone();
+            let gate_project = confirm_project.clone();
+            let gate_path = confirm_path.clone();
+            let gate_dir = confirm_dir;
+            let hard_delete = Button::new("confirm-delete-doc-hard")
+                .danger()
+                .outline()
+                .compact()
+                .icon(IconName::CircleX)
+                .label("彻底删除（重写历史）")
+                .on_click(move |_, window, cx| {
+                    let typed = gate_state.read(cx).value().trim().to_string();
+                    if typed != gate_path {
+                        window.push_notification(
+                            Notification::error("请输入完整的路径以确认彻底删除"),
+                            cx,
+                        );
+                        return;
+                    }
+                    let handle = gate_handle.clone();
+                    let c = gate_client.clone();
+                    let project = gate_project.clone();
+                    let path = gate_path.clone();
+                    let dir = gate_dir;
+                    handle.update(cx, |app, cx| {
+                        app.purge_tree_path(&c, &project, &path, dir, cx);
+                    });
+                    window.close_dialog(cx);
+                });
+            let gate_input = confirm_input.clone();
+            let cancel = Button::new("cancel-delete-doc")
+                .rounded(px(tokens::RADIUS))
+                .icon(IconName::Close)
+                .label("取消")
+                .on_click(|_, window, cx| window.close_dialog(cx));
+            let confirm_handle = action_handle.clone();
+            let delete_client = confirm_client.clone();
+            let delete_project = confirm_project.clone();
+            let delete_path = confirm_path.clone();
+            let delete_dir = confirm_dir;
+            let confirm = Button::new("confirm-delete-doc")
+                .danger()
+                .rounded(px(tokens::RADIUS))
+                .icon(IconName::Delete)
+                .label("删除（保留历史）")
+                .on_click(move |_, window, cx| {
+                    let handle = confirm_handle.clone();
+                    let c = delete_client.clone();
+                    let project = delete_project.clone();
+                    let path = delete_path.clone();
+                    let dir = delete_dir;
+                    handle.update(cx, |app, cx| {
+                        app.delete_tree_path(&c, &project, &path, dir, cx);
+                    });
+                    window.close_dialog(cx);
+                });
+            let content_input = gate_input.clone();
+            dialog
+                .title(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .child(Icon::new(IconName::TriangleAlert).text_color(theme.danger))
+                        .child("删除？"),
+                )
+                .content(move |content, _window, _cx| {
+                    content.child(
+                        div()
+                            .v_flex()
+                            .gap_3()
+                            .w_full()
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .text_color(content_theme.muted_foreground)
+                                    .child(if content_dir {
+                                        format!(
+                                            "目录「{content_name}」及其全部内容将被删除。\n保留历史：可恢复；彻底删除：重写 Git 历史，不可恢复。"
+                                        )
+                                    } else {
+                                        format!(
+                                            "文档「{content_name}」将被删除。\n保留历史：可恢复；彻底删除：重写 Git 历史，不可恢复。"
+                                        )
+                                    }),
+                            )
+                            .child(
+                                div()
+                                    .v_flex()
+                                    .gap_1()
+                                    .w_full()
+                                    .child(
+                                        mono_label("彻底删除需输入完整路径").text_color(
+                                            content_theme.danger,
+                                        ),
+                                    )
+                                    .child(Input::new(&content_input).w_full()),
+                            ),
+                    )
+                })
+                .footer(
+                    h_flex()
+                        .flex_wrap()
+                        .gap_2()
+                        .justify_end()
+                        .w_full()
+                        .child(cancel)
+                        .child(hard_delete)
+                        .child(confirm),
+                )
+        });
+    }
+
+    /// Execute a tree delete (recursive for directories) and refresh.
+    fn delete_tree_path(
+        &mut self,
+        client: &Client,
+        project: &str,
+        path: &str,
+        is_dir: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let c = client.clone();
+        let project = project.to_string();
+        let path = path.to_string();
+        let message = format!("删除{}", if is_dir { "目录" } else { "文档" });
+        self.tree_loading = true;
+        cx.notify();
+        cx.spawn(
+            async move |this, cx| match c.delete_doc(&project, &path, &message).await {
+                Ok(_) => {
+                    let _ = this.update(cx, |app, cx| {
+                        app.tree_loading = false;
+                        if app.doc_path.as_deref() == Some(path.as_str()) {
+                            app.doc_path = None;
+                            app.doc_content.clear();
+                        }
+                        let tree_path = app.tree_path.clone();
+                        app.load_tree(&tree_path, cx);
+                        app.notify("已删除".into(), cx);
+                    });
+                }
+                Err(e) => {
+                    let _ = this.update(cx, |app, cx| {
+                        app.tree_loading = false;
+                        app.status_msg = Some(format!("删除失败: {e}"));
+                        cx.notify();
+                    });
+                }
+            },
+        )
+        .detach();
+    }
+
+    /// Execute a hard delete: rewrite git history to remove the path
+    /// completely (irreversible).
+    fn purge_tree_path(
+        &mut self,
+        client: &Client,
+        project: &str,
+        path: &str,
+        is_dir: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let c = client.clone();
+        let project = project.to_string();
+        let path = path.to_string();
+        let message = format!("彻底删除{}", if is_dir { "目录" } else { "文档" });
+        self.tree_loading = true;
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            match c
+                .purge_paths(&project, std::slice::from_ref(&path), &message)
+                .await
+            {
+                Ok(()) => {
+                    let _ = this.update(cx, |app, cx| {
+                        app.tree_loading = false;
+                        if app.doc_path.as_deref() == Some(path.as_str()) {
+                            app.doc_path = None;
+                            app.doc_content.clear();
+                        }
+                        let tree_path = app.tree_path.clone();
+                        app.load_tree(&tree_path, cx);
+                        app.load_revision(cx);
+                        app.notify("已从历史中彻底删除".into(), cx);
+                    });
+                }
+                Err(e) => {
+                    let _ = this.update(cx, |app, cx| {
+                        app.tree_loading = false;
+                        app.status_msg = Some(format!("彻底删除失败: {e}"));
+                        cx.notify();
+                    });
+                }
+            }
+        })
         .detach();
     }
 
@@ -2530,7 +3161,11 @@ impl Render for XWikiApp {
         let ctx_weak = cx.weak_entity();
         let proj_weak = cx.weak_entity();
         let archive_weak = cx.weak_entity();
+        let rename_weak = cx.weak_entity();
+        let delete_weak = cx.weak_entity();
         let edit_weak = cx.weak_entity();
+        let doc_rename_weak = cx.weak_entity();
+        let doc_delete_weak = cx.weak_entity();
 
         // Plan §3.1 keyboard model — Esc closes the innermost layer first.
         // Dialogs own their own Escape binding (gpui-component), so while a
@@ -2603,6 +3238,20 @@ impl Render for XWikiApp {
                     app.confirm_archive_project(window, cx, project_id, archived);
                 });
             })
+            .on_action(move |action: &ProjectRenameAction, window, cx| {
+                let project_id = action.project_id.clone();
+                let current_name = action.current_name.clone();
+                let _ = rename_weak.update(cx, |app, cx| {
+                    app.rename_project(window, cx, project_id, current_name);
+                });
+            })
+            .on_action(move |action: &ProjectDeleteAction, window, cx| {
+                let project_id = action.project_id.clone();
+                let project_name = action.project_name.clone();
+                let _ = delete_weak.update(cx, |app, cx| {
+                    app.confirm_delete_project(window, cx, project_id, project_name);
+                });
+            })
             .on_action(move |action: &EditDocAction, _window, cx| {
                 let _ = edit_weak.update(cx, |app, cx| {
                     if app.editing {
@@ -2610,6 +3259,20 @@ impl Render for XWikiApp {
                     }
                     app.pending_edit = Some(action.path.clone());
                     app.open_doc(&action.path, cx);
+                });
+            })
+            .on_action(move |action: &DocRenameAction, window, cx| {
+                let path = action.path.clone();
+                let is_dir = action.is_dir;
+                let _ = doc_rename_weak.update(cx, |app, cx| {
+                    app.confirm_rename_doc(window, cx, path, is_dir);
+                });
+            })
+            .on_action(move |action: &DocDeleteAction, window, cx| {
+                let path = action.path.clone();
+                let is_dir = action.is_dir;
+                let _ = doc_delete_weak.update(cx, |app, cx| {
+                    app.confirm_delete_doc(window, cx, path, is_dir);
                 });
             })
             .child(

@@ -55,12 +55,15 @@ fn wants_json(args: &[String]) -> bool {
 
 fn exit_code(err: &ApiError) -> i32 {
     match err.code.as_str() {
-        "authentication_required" | "invalid_credentials" | "invalid_token"
-        | "account_disabled" | "agent_forbidden" | "admin_required" => 3,
+        "authentication_required"
+        | "invalid_credentials"
+        | "invalid_token"
+        | "account_disabled"
+        | "agent_forbidden"
+        | "admin_required" => 3,
         "not_found" | "project_not_found" | "doc_not_found" | "commit_not_found"
         | "token_not_found" | "user_not_found" => 4,
-        "revision_conflict" | "page_locked" | "idempotency_conflict"
-        | "revert_conflict" => 5,
+        "revision_conflict" | "page_locked" | "idempotency_conflict" | "revert_conflict" => 5,
         "network_error" => 6,
         _ => 6,
     }
@@ -79,7 +82,7 @@ fn usage() -> i32 {
   config show|set-server <url>
   login [--username U] [--password P]
   whoami
-  project list|create|show|archive|restore
+  project list|create|show|archive|restore|rename|delete <args>
   doc tree|get|create|update|delete|move <args>
   search <query>
   history list|show|diff <args>
@@ -136,10 +139,12 @@ async fn cmd_server(args: &[String]) -> i32 {
             match c.meta().await {
                 Ok(m) => {
                     println!("version {} · api v{}", m.version, m.api_version);
-                    println!("limits: doc ≤ {} MiB · import ≤ {} MiB · diff ≤ {} MiB",
+                    println!(
+                        "limits: doc ≤ {} MiB · import ≤ {} MiB · diff ≤ {} MiB",
                         m.limits.max_doc_bytes / (1 << 20),
                         m.limits.max_import_bytes / (1 << 20),
-                        m.limits.max_diff_bytes / (1 << 20));
+                        m.limits.max_diff_bytes / (1 << 20)
+                    );
                     println!("capabilities: {}", m.capabilities.join(", "));
                     0
                 }
@@ -215,9 +220,7 @@ async fn cmd_login(args: &[String]) -> i32 {
                 .map(|ps| ps.into_iter().map(|p| p.id).collect())
                 .unwrap_or_default();
             if ids.is_empty() {
-                eprintln!(
-                    "note: no projects yet — create one first, then re-run login"
-                );
+                eprintln!("note: no projects yet — create one first, then re-run login");
             }
             let prefixes = token_prefixes(args);
             match c.create_token("cli-login", "write", ids, prefixes).await {
@@ -236,7 +239,10 @@ async fn cmd_whoami(args: &[String]) -> i32 {
     let c = client(args);
     match c.me().await {
         Ok(u) => {
-            println!("{} ({}) admin={} disabled={}", u.username, u.id, u.is_admin, u.disabled);
+            println!(
+                "{} ({}) admin={} disabled={}",
+                u.username, u.id, u.is_admin, u.disabled
+            );
             0
         }
         Err(e) => fail(&e),
@@ -299,6 +305,61 @@ async fn cmd_project(args: &[String]) -> i32 {
             match c.set_archived(id, verb == "archive").await {
                 Ok(p) => {
                     println!("{} archived={}", p.name, p.archived);
+                    0
+                }
+                Err(e) => fail(&e),
+            }
+        }
+        "rename" => {
+            let Some(id) = args.get(1) else {
+                return usage();
+            };
+            let Some(new_name) = args.get(2) else {
+                return usage();
+            };
+            match c.rename_project(id, new_name).await {
+                Ok(p) => {
+                    println!("renamed to {} ({})", p.name, p.id);
+                    0
+                }
+                Err(e) => fail(&e),
+            }
+        }
+        "delete" => {
+            let Some(id) = args.get(1) else {
+                return usage();
+            };
+            // Destructive: require interactive username + password
+            // confirmation. The credentials are verified against the server
+            // (/auth/login) before the project is removed.
+            let username = {
+                print!("confirm username: ");
+                std::io::Write::flush(&mut std::io::stdout()).ok();
+                let mut s = String::new();
+                std::io::stdin().read_line(&mut s).ok();
+                s.trim().to_string()
+            };
+            let password = {
+                print!("confirm password: ");
+                std::io::Write::flush(&mut std::io::stdout()).ok();
+                let mut s = String::new();
+                std::io::stdin().read_line(&mut s).ok();
+                s.trim().to_string()
+            };
+            if username.is_empty() || password.is_empty() {
+                eprintln!("aborted: empty credentials");
+                return 2;
+            }
+            match c.login(&username, &password).await {
+                Ok(_) => {}
+                Err(e) => {
+                    eprintln!("aborted: password verification failed: {e}");
+                    return 2;
+                }
+            }
+            match c.delete_project(id).await {
+                Ok(()) => {
+                    println!("deleted {id}");
                     0
                 }
                 Err(e) => fail(&e),
@@ -387,12 +448,14 @@ async fn cmd_doc(args: &[String]) -> i32 {
             }
         }
         "move" => {
-            let (Some(project), Some(from), Some(to)) =
-                (args.get(1), args.get(2), args.get(3))
+            let (Some(project), Some(from), Some(to)) = (args.get(1), args.get(2), args.get(3))
             else {
                 return usage();
             };
-            match c.move_doc(project, from, to, &format!("move {from} → {to}")).await {
+            match c
+                .move_doc(project, from, to, &format!("move {from} → {to}"))
+                .await
+            {
                 Ok(r) => {
                     println!("moved ({})", r.commit);
                     0
@@ -502,7 +565,10 @@ async fn cmd_lock(args: &[String]) -> i32 {
         "status" => match c.acquire_lock(project, path).await {
             // status uses the same shape; acquire is idempotent-ish for the holder
             Ok(l) => {
-                println!("{} · held by {} · expires {}", l.path, l.username, l.expires_at);
+                println!(
+                    "{} · held by {} · expires {}",
+                    l.path, l.username, l.expires_at
+                );
                 0
             }
             Err(e) => fail(&e),

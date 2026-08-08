@@ -436,6 +436,58 @@ impl Client {
         Ok(resp.project)
     }
 
+    /// Rename a project. The server updates metadata and refreshes the
+    /// repository README headline in one call.
+    pub async fn rename_project(
+        &self,
+        project_id: &str,
+        name: &str,
+    ) -> Result<dto::Project, ApiError> {
+        #[derive(Serialize)]
+        struct RenameBody<'a> {
+            name: &'a str,
+        }
+        let resp: dto::ProjectResponse = Self::send(
+            self.http
+                .patch(self.url(&format!("/api/v1/projects/{project_id}")))
+                .json(&RenameBody { name }),
+        )
+        .await?;
+        Ok(resp.project)
+    }
+
+    /// Delete a project completely: metadata + repository (irreversible).
+    pub async fn delete_project(&self, project_id: &str) -> Result<(), ApiError> {
+        let _: serde_json::Value = Self::send(
+            self.http
+                .delete(self.url(&format!("/api/v1/projects/{project_id}"))),
+        )
+        .await?;
+        Ok(())
+    }
+
+    /// Hard-delete paths from the project's git history (rewrites history,
+    /// irreversible).
+    pub async fn purge_paths(
+        &self,
+        project_id: &str,
+        paths: &[String],
+        message: &str,
+    ) -> Result<(), ApiError> {
+        #[derive(Serialize)]
+        struct PurgeBody<'a> {
+            paths: &'a [String],
+            message: &'a str,
+        }
+        let _: serde_json::Value = Self::send(
+            self.http
+                .post(self.url(&format!("/api/v1/projects/{project_id}/purge")))
+                .json(&PurgeBody { paths, message }),
+        )
+        .await?;
+        Ok(())
+    }
+
     async fn changeset_one(
         &self,
         project_id: &str,
