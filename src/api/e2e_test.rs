@@ -9,8 +9,8 @@ use super::Client;
 #[test]
 #[ignore]
 fn e2e_login_and_projects() {
-    let server = std::env::var("AGENTDOCS_TEST_SERVER")
-        .unwrap_or_else(|_| "http://127.0.0.1:9090".into());
+    let server =
+        std::env::var("AGENTDOCS_TEST_SERVER").unwrap_or_else(|_| "http://127.0.0.1:9090".into());
     let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
     rt.block_on(async {
         let client = Client::new(&server);

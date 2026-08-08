@@ -115,8 +115,8 @@ impl XWikiApp {
         for p in projects {
             let id = p.id.clone();
             let archived = p.archived;
-            let action_id = id.clone();
-            let action_busy = self.project_action.as_deref() == Some(id.as_str());
+            let _action_id = id.clone();
+            let _action_busy = self.project_action.as_deref() == Some(id.as_str());
             let status_color = if archived {
                 theme.muted_foreground
             } else {
@@ -171,26 +171,37 @@ impl XWikiApp {
                                         .text_color(theme.muted_foreground)
                                         .child(tokens::truncate(&p.updated, 16)),
                                 )
-                                .child(
-                                    Button::new(format!("project-actions-{}", id))
-                                        .ghost()
-                                        .compact()
-                                        .icon(IconName::EllipsisVertical)
-                                        .tooltip(if archived {
-                                            "项目操作：恢复"
-                                        } else {
-                                            "项目操作：归档"
+                                .child({
+                                    let menu_id = id.clone();
+                                    let menu_archived = archived;
+                                    div()
+                                        .id(format!("project-menu-{}", id))
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .cursor_pointer()
+                                        .rounded(px(tokens::RADIUS_SMALL))
+                                        .p_1()
+                                        .hover(|s| s.bg(theme.list_hover))
+                                        .child(
+                                            Icon::new(IconName::EllipsisVertical)
+                                                .with_size(px(16.0))
+                                                .text_color(theme.muted_foreground),
+                                        )
+                                        .context_menu(move |menu, _window, _cx| {
+                                            menu.menu(
+                                                if menu_archived {
+                                                    "取消归档"
+                                                } else {
+                                                    "归档项目"
+                                                },
+                                                Box::new(ProjectArchiveAction {
+                                                    project_id: menu_id.clone(),
+                                                    archived: !menu_archived,
+                                                }),
+                                            )
                                         })
-                                        .disabled(action_busy)
-                                        .on_click(cx.listener(move |this, _, window, cx| {
-                                            this.confirm_archive_project(
-                                                window,
-                                                cx,
-                                                action_id.clone(),
-                                                !archived,
-                                            );
-                                        })),
-                                ),
+                                }),
                         ),
                 )
                 .child(

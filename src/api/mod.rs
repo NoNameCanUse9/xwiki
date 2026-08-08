@@ -9,8 +9,8 @@ mod e2e_test;
 
 #[cfg(test)]
 mod tests {
-    use super::dto;
     use super::de_null_default;
+    use super::dto;
     use serde::Deserialize;
 
     #[derive(Deserialize)]
@@ -77,16 +77,12 @@ where
     F: Future<Output = Result<T, ApiError>> + Send + 'static,
     T: Send + 'static,
 {
-    runtime()
-        .handle()
-        .spawn(fut)
-        .await
-        .map_err(|e| ApiError {
-            code: "join_error".into(),
-            message: e.to_string(),
-            request_id: None,
-            status: 0,
-        })?
+    runtime().handle().spawn(fut).await.map_err(|e| ApiError {
+        code: "join_error".into(),
+        message: e.to_string(),
+        request_id: None,
+        status: 0,
+    })?
 }
 
 /// API error mapped from the server's uniform error envelope.
@@ -101,7 +97,11 @@ pub struct ApiError {
 impl std::fmt::Display for ApiError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match &self.request_id {
-            Some(id) => write!(f, "{} ({}): {} [{}]", self.code, self.status, self.message, id),
+            Some(id) => write!(
+                f,
+                "{} ({}): {} [{}]",
+                self.code, self.status, self.message, id
+            ),
             None => write!(f, "{} ({}): {}", self.code, self.status, self.message),
         }
     }
@@ -174,10 +174,19 @@ impl Client {
             if !resp.status().is_success() {
                 let body: Result<ErrorEnvelope, _> = resp.json().await;
                 let (code, message, request_id) = match body {
-                    Ok(env) => (env.error.code, env.error.message, Some(env.error.request_id)),
+                    Ok(env) => (
+                        env.error.code,
+                        env.error.message,
+                        Some(env.error.request_id),
+                    ),
                     Err(_) => ("http_error".into(), format!("HTTP {}", status), None),
                 };
-                return Err(ApiError { code, message, request_id, status });
+                return Err(ApiError {
+                    code,
+                    message,
+                    request_id,
+                    status,
+                });
             }
             resp.json().await.map_err(|e| ApiError {
                 code: "decode_error".into(),
@@ -256,14 +265,14 @@ impl Client {
 
     #[allow(dead_code)] // used by the CLI milestone
     pub async fn me(&self) -> Result<dto::User, ApiError> {
-        let resp: dto::UserResponse = Self::send(self.http.get(self.url("/api/v1/auth/me")))
-            .await?;
+        let resp: dto::UserResponse =
+            Self::send(self.http.get(self.url("/api/v1/auth/me"))).await?;
         Ok(resp.user)
     }
 
     pub async fn projects(&self) -> Result<Vec<dto::Project>, ApiError> {
-        let resp: dto::ProjectsResponse = Self::send(self.http.get(self.url("/api/v1/projects")))
-            .await?;
+        let resp: dto::ProjectsResponse =
+            Self::send(self.http.get(self.url("/api/v1/projects"))).await?;
         Ok(resp.projects)
     }
 
@@ -279,11 +288,11 @@ impl Client {
             description: &'a str,
         }
         let resp: dto::ProjectResponse = Self::send(
-                self.http
-                    .post(self.url("/api/v1/projects"))
-                    .json(&Body { name, description }),
-            )
-            .await?;
+            self.http
+                .post(self.url("/api/v1/projects"))
+                .json(&Body { name, description }),
+        )
+        .await?;
         Ok(resp.project)
     }
 
@@ -293,23 +302,16 @@ impl Client {
         path: &str,
     ) -> Result<Vec<dto::TreeEntry>, ApiError> {
         let resp: dto::TreeResponse = Self::send(
-                self.http
-                    .get(self.url(&format!(
-                        "/api/v1/projects/{}/docs/tree",
-                        project_id
-                    )))
-                    .query(&[("path", path)]),
-            )
-            .await?;
+            self.http
+                .get(self.url(&format!("/api/v1/projects/{}/docs/tree", project_id)))
+                .query(&[("path", path)]),
+        )
+        .await?;
         Ok(resp.tree)
     }
 
     /// Reads a doc as markdown source (format=raw).
-    pub async fn page(
-        &self,
-        project_id: &str,
-        path: &str,
-    ) -> Result<dto::DocPage, ApiError> {
+    pub async fn page(&self, project_id: &str, path: &str) -> Result<dto::DocPage, ApiError> {
         Self::send(
             self.http
                 .get(self.url(&format!(
@@ -323,13 +325,10 @@ impl Client {
 
     pub async fn revision(&self, project_id: &str) -> Result<String, ApiError> {
         let resp: dto::RevisionResponse = Self::send(
-                self.http
-                    .get(self.url(&format!(
-                        "/api/v1/projects/{}/revision",
-                        project_id
-                    ))),
-            )
-            .await?;
+            self.http
+                .get(self.url(&format!("/api/v1/projects/{}/revision", project_id))),
+        )
+        .await?;
         Ok(resp.revision)
     }
 
@@ -347,10 +346,7 @@ impl Client {
         };
         Self::send(
             self.http
-                .post(self.url(&format!(
-                    "/api/v1/projects/{}/changesets",
-                    project_id
-                )))
+                .post(self.url(&format!("/api/v1/projects/{}/changesets", project_id)))
                 .json(&body),
         )
         .await
@@ -359,10 +355,7 @@ impl Client {
     pub async fn acquire_lock(&self, project_id: &str, path: &str) -> Result<dto::Lock, ApiError> {
         let resp: dto::LockResponse = Self::send(
             self.http
-                .post(self.url(&format!(
-                    "/api/v1/projects/{}/locks",
-                    project_id
-                )))
+                .post(self.url(&format!("/api/v1/projects/{}/locks", project_id)))
                 .query(&[("path", path)]),
         )
         .await?;
@@ -376,10 +369,7 @@ impl Client {
     ) -> Result<dto::Lock, ApiError> {
         let resp: dto::LockResponse = Self::send(
             self.http
-                .post(self.url(&format!(
-                    "/api/v1/projects/{}/locks/heartbeat",
-                    project_id
-                )))
+                .post(self.url(&format!("/api/v1/projects/{}/locks/heartbeat", project_id)))
                 .query(&[("path", path)]),
         )
         .await?;
@@ -388,14 +378,11 @@ impl Client {
 
     pub async fn release_lock(&self, project_id: &str, path: &str) -> Result<bool, ApiError> {
         let resp: dto::ReleasedResponse = Self::send(
-                self.http
-                    .delete(self.url(&format!(
-                        "/api/v1/projects/{}/locks",
-                        project_id
-                    )))
-                    .query(&[("path", path)]),
-            )
-            .await?;
+            self.http
+                .delete(self.url(&format!("/api/v1/projects/{}/locks", project_id)))
+                .query(&[("path", path)]),
+        )
+        .await?;
         Ok(resp.released)
     }
 
@@ -405,14 +392,11 @@ impl Client {
         limit: u32,
     ) -> Result<Vec<dto::Commit>, ApiError> {
         let resp: dto::CommitListResponse = Self::send(
-                self.http
-                    .get(self.url(&format!(
-                        "/api/v1/projects/{}/commits",
-                        project_id
-                    )))
-                    .query(&[("limit", limit.to_string())]),
-            )
-            .await?;
+            self.http
+                .get(self.url(&format!("/api/v1/projects/{}/commits", project_id)))
+                .query(&[("limit", limit.to_string())]),
+        )
+        .await?;
         Ok(resp.commits)
     }
 
@@ -422,22 +406,19 @@ impl Client {
         sha: &str,
     ) -> Result<dto::CommitDetail, ApiError> {
         let resp: dto::CommitDetailResponse = Self::send(
-                self.http
-                    .get(self.url(&format!(
-                        "/api/v1/projects/{}/commits/{}",
-                        project_id, sha
-                    ))),
-            )
-            .await?;
+            self.http
+                .get(self.url(&format!("/api/v1/projects/{}/commits/{}", project_id, sha))),
+        )
+        .await?;
         Ok(resp.commit)
     }
 
     pub async fn project(&self, project_id: &str) -> Result<dto::Project, ApiError> {
         let resp: dto::ProjectResponse = Self::send(
-                self.http
-                    .get(self.url(&format!("/api/v1/projects/{project_id}"))),
-            )
-            .await?;
+            self.http
+                .get(self.url(&format!("/api/v1/projects/{project_id}"))),
+        )
+        .await?;
         Ok(resp.project)
     }
 
@@ -448,12 +429,10 @@ impl Client {
     ) -> Result<dto::Project, ApiError> {
         let path = if archived { "archive" } else { "unarchive" };
         let resp: dto::ProjectResponse = Self::send(
-                self.http
-                    .post(self.url(&format!(
-                        "/api/v1/projects/{project_id}/{path}"
-                    ))),
-            )
-            .await?;
+            self.http
+                .post(self.url(&format!("/api/v1/projects/{project_id}/{path}"))),
+        )
+        .await?;
         Ok(resp.project)
     }
 
@@ -467,12 +446,10 @@ impl Client {
         message: &str,
     ) -> Result<dto::ChangesetResult, ApiError> {
         let resp: dto::RevisionResponse = Self::send(
-                self.http
-                    .get(self.url(&format!(
-                        "/api/v1/projects/{project_id}/revision"
-                    ))),
-            )
-            .await?;
+            self.http
+                .get(self.url(&format!("/api/v1/projects/{project_id}/revision"))),
+        )
+        .await?;
         self.apply_changeset(
             project_id,
             &resp.revision,
@@ -523,8 +500,15 @@ impl Client {
         to: &str,
         message: &str,
     ) -> Result<dto::ChangesetResult, ApiError> {
-        self.changeset_one(project_id, from, "move", None, Some(to.to_string()), message)
-            .await
+        self.changeset_one(
+            project_id,
+            from,
+            "move",
+            None,
+            Some(to.to_string()),
+            message,
+        )
+        .await
     }
 
     pub async fn search(
@@ -533,19 +517,17 @@ impl Client {
         q: &str,
     ) -> Result<Vec<dto::SearchResult>, ApiError> {
         let resp: dto::SearchResponse = Self::send(
-                self.http
-                    .get(self.url(&format!(
-                        "/api/v1/projects/{project_id}/search"
-                    )))
-                    .query(&[("q", q)]),
-            )
-            .await?;
+            self.http
+                .get(self.url(&format!("/api/v1/projects/{project_id}/search")))
+                .query(&[("q", q)]),
+        )
+        .await?;
         Ok(resp.results)
     }
 
     pub async fn tokens(&self) -> Result<Vec<dto::Token>, ApiError> {
-        let resp: dto::TokenListResponse = Self::send(self.http.get(self.url("/api/v1/tokens")))
-            .await?;
+        let resp: dto::TokenListResponse =
+            Self::send(self.http.get(self.url("/api/v1/tokens"))).await?;
         Ok(resp.tokens)
     }
 
@@ -563,75 +545,57 @@ impl Client {
             project_ids: Vec<String>,
             path_prefixes: Vec<String>,
         }
-        let resp: dto::TokenCreateResponse = Self::send(
-                self.http
-                    .post(self.url("/api/v1/tokens"))
-                    .json(&Body {
-                        name,
-                        scope,
-                        project_ids,
-                        path_prefixes,
-                    }),
-            )
+        let resp: dto::TokenCreateResponse =
+            Self::send(self.http.post(self.url("/api/v1/tokens")).json(&Body {
+                name,
+                scope,
+                project_ids,
+                path_prefixes,
+            }))
             .await?;
         Ok((resp.token, resp.secret))
     }
 
     pub async fn revoke_token(&self, id: &str) -> Result<(), ApiError> {
-        Self::send(
-            self.http
-                .delete(self.url(&format!("/api/v1/tokens/{id}"))),
-        )
-        .await
+        Self::send(self.http.delete(self.url(&format!("/api/v1/tokens/{id}")))).await
     }
 
     pub async fn users(&self) -> Result<Vec<dto::User>, ApiError> {
-        let resp: dto::UsersResponse = Self::send(self.http.get(self.url("/api/v1/users")))
-            .await?;
+        let resp: dto::UsersResponse = Self::send(self.http.get(self.url("/api/v1/users"))).await?;
         Ok(resp.users)
     }
 
-    pub async fn create_user(
-        &self,
-        username: &str,
-        password: &str,
-    ) -> Result<dto::User, ApiError> {
+    pub async fn create_user(&self, username: &str, password: &str) -> Result<dto::User, ApiError> {
         #[derive(Serialize)]
         struct Body<'a> {
             username: &'a str,
             password: &'a str,
         }
         let resp: dto::UserResponse = Self::send(
-                self.http
-                    .post(self.url("/api/v1/users"))
-                    .json(&Body { username, password }),
-            )
-            .await?;
+            self.http
+                .post(self.url("/api/v1/users"))
+                .json(&Body { username, password }),
+        )
+        .await?;
         Ok(resp.user)
     }
 
-    pub async fn set_user_enabled(
-        &self,
-        id: &str,
-        enabled: bool,
-    ) -> Result<dto::User, ApiError> {
+    pub async fn set_user_enabled(&self, id: &str, enabled: bool) -> Result<dto::User, ApiError> {
         let action = if enabled { "enable" } else { "disable" };
         let resp: dto::UserResponse = Self::send(
-                self.http
-                    .post(self.url(&format!("/api/v1/users/{id}/{action}"))),
-            )
-            .await?;
+            self.http
+                .post(self.url(&format!("/api/v1/users/{id}/{action}"))),
+        )
+        .await?;
         Ok(resp.user)
     }
 
     pub async fn audit(&self, project_id: &str) -> Result<Vec<dto::AuditEntry>, ApiError> {
         let resp: dto::AuditResponse = Self::send(
-                self.http
-                    .get(self.url(&format!(
-                        "/api/v1/projects/{project_id}/audit"
-                    ))),
-            )
-            .await?;
+            self.http
+                .get(self.url(&format!("/api/v1/projects/{project_id}/audit"))),
+        )
+        .await?;
         Ok(resp.entries)
     }
 
@@ -641,14 +605,14 @@ impl Client {
         sha: &str,
     ) -> Result<Vec<dto::DiffStat>, ApiError> {
         let resp: dto::DiffStatsResponse = Self::send(
-                self.http
-                    .get(self.url(&format!(
-                        "/api/v1/projects/{}/commits/{}/diff",
-                        project_id, sha
-                    )))
-                    .query(&[("format", "numstat")]),
-            )
-            .await?;
+            self.http
+                .get(self.url(&format!(
+                    "/api/v1/projects/{}/commits/{}/diff",
+                    project_id, sha
+                )))
+                .query(&[("format", "numstat")]),
+        )
+        .await?;
         Ok(resp.stats)
     }
 
@@ -659,14 +623,14 @@ impl Client {
         sha: &str,
     ) -> Result<dto::CommitPatch, ApiError> {
         let resp: dto::CommitPatchResponse = Self::send(
-                self.http
-                    .get(self.url(&format!(
-                        "/api/v1/projects/{}/commits/{}/diff",
-                        project_id, sha
-                    )))
-                    .query(&[("format", "patch")]),
-            )
-            .await?;
+            self.http
+                .get(self.url(&format!(
+                    "/api/v1/projects/{}/commits/{}/diff",
+                    project_id, sha
+                )))
+                .query(&[("format", "patch")]),
+        )
+        .await?;
         Ok(dto::CommitPatch {
             sha: resp.sha,
             format: resp.format,
@@ -687,14 +651,14 @@ impl Client {
             message: &'a str,
         }
         let resp: dto::CommitResponse = Self::send(
-                self.http
-                    .post(self.url(&format!(
-                        "/api/v1/projects/{}/commits/{}/revert",
-                        project_id, sha
-                    )))
-                    .json(&Body { message }),
-            )
-            .await?;
+            self.http
+                .post(self.url(&format!(
+                    "/api/v1/projects/{}/commits/{}/revert",
+                    project_id, sha
+                )))
+                .json(&Body { message }),
+        )
+        .await?;
         Ok(resp.commit)
     }
 
@@ -706,11 +670,11 @@ impl Client {
             username: &'a str,
         }
         let resp: serde_json::Value = Self::send(
-                self.http
-                    .post(self.url("/api/v1/auth/forgot-password"))
-                    .json(&Body { username }),
-            )
-            .await?;
+            self.http
+                .post(self.url("/api/v1/auth/forgot-password"))
+                .json(&Body { username }),
+        )
+        .await?;
         Ok(resp.get("ok").and_then(|v| v.as_bool()).unwrap_or(false))
     }
 
@@ -722,11 +686,14 @@ impl Client {
             new_password: &'a str,
         }
         let resp: serde_json::Value = Self::send(
-                self.http
-                    .post(self.url("/api/v1/auth/reset-password"))
-                    .json(&Body { token, new_password }),
-            )
-            .await?;
+            self.http
+                .post(self.url("/api/v1/auth/reset-password"))
+                .json(&Body {
+                    token,
+                    new_password,
+                }),
+        )
+        .await?;
         Ok(resp.get("ok").and_then(|v| v.as_bool()).unwrap_or(false))
     }
 }
