@@ -46,7 +46,6 @@ impl XWikiApp {
 
     fn render_settings_header(&self, cx: &mut Context<Self>) -> Div {
         let theme = cx.theme().clone();
-        let cobalt = tokens::Cobalt::from_theme(&theme);
         div()
             .flex()
             .items_center()
@@ -66,8 +65,8 @@ impl XWikiApp {
                 Button::new("settings-back")
                     .custom(
                         ButtonCustomVariant::new(cx)
-                            .color(cobalt.graphite)
-                            .foreground(theme.background),
+                            .color(theme.sidebar)
+                            .foreground(theme.foreground),
                     )
                     .rounded(px(tokens::RADIUS))
                     .icon(IconName::ArrowLeft)
