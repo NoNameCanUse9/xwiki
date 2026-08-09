@@ -13,6 +13,7 @@ import {
 	RotateCcw,
 	ScrollText,
 	Trash2,
+	UserCog,
 	Users,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -403,26 +404,37 @@ export default function HomePage() {
 						API 文档
 					</Link>
 					<Link
-						to="/settings/tokens"
+						to="/settings/account"
 						className="flex items-center gap-2 rounded-sm px-3 py-2 text-sm text-[var(--color-ink-2)] hover:bg-[var(--color-surface-accent)] hover:text-[var(--color-ink)]"
 					>
-						<KeyRound className="size-4" />
-						Agent Token
+						<UserCog className="size-4" />
+						账号设置
 					</Link>
-					<Link
-						to="/settings/users"
-						className="flex items-center gap-2 rounded-sm px-3 py-2 text-sm text-[var(--color-ink-2)] hover:bg-[var(--color-surface-accent)] hover:text-[var(--color-ink)]"
-					>
-						<Users className="size-4" />
-						用户管理
-					</Link>
-					<Link
-						to="/settings/audit"
-						className="flex items-center gap-2 rounded-sm px-3 py-2 text-sm text-[var(--color-ink-2)] hover:bg-[var(--color-surface-accent)] hover:text-[var(--color-ink)]"
-					>
-						<ScrollText className="size-4" />
-						审计日志
-					</Link>
+					{user?.is_admin && (
+						<>
+							<Link
+								to="/settings/tokens"
+								className="flex items-center gap-2 rounded-sm px-3 py-2 text-sm text-[var(--color-ink-2)] hover:bg-[var(--color-surface-accent)] hover:text-[var(--color-ink)]"
+							>
+								<KeyRound className="size-4" />
+								Agent Token
+							</Link>
+							<Link
+								to="/settings/users"
+								className="flex items-center gap-2 rounded-sm px-3 py-2 text-sm text-[var(--color-ink-2)] hover:bg-[var(--color-surface-accent)] hover:text-[var(--color-ink)]"
+							>
+								<Users className="size-4" />
+								用户管理
+							</Link>
+							<Link
+								to="/settings/audit"
+								className="flex items-center gap-2 rounded-sm px-3 py-2 text-sm text-[var(--color-ink-2)] hover:bg-[var(--color-surface-accent)] hover:text-[var(--color-ink)]"
+							>
+								<ScrollText className="size-4" />
+								审计日志
+							</Link>
+						</>
+					)}
 					<Button
 						variant="outline"
 						className="w-full justify-start gap-2"
