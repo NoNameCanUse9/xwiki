@@ -109,7 +109,7 @@ export default function TokensPage() {
                   id="tok-scope"
                   value={scope}
                   onChange={(e) => setScope(e.target.value as "read" | "write")}
-                  className="h-9 w-full rounded-[var(--radius)] border border-[var(--color-rule)] bg-[var(--color-paper)] px-3 text-sm text-[var(--color-ink)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)]"
+                  className="h-8 w-full rounded-[var(--radius)] border border-[var(--color-rule)] bg-[var(--color-paper)] px-3 text-sm text-[var(--color-ink)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)]"
                 >
                   <option value="read">read</option>
                   <option value="write">write</option>
@@ -177,7 +177,7 @@ export default function TokensPage() {
                   还没有 Token
                 </p>
               )}
-              {data?.tokens.map((t) => (
+              {(data?.tokens ?? []).map((t) => (
                 <div key={t.id} className="flex items-center justify-between gap-3 py-3">
                   <div className="min-w-0">
                     <p className="truncate text-sm font-medium text-[var(--color-ink)]">

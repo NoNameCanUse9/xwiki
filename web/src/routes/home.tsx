@@ -283,7 +283,7 @@ export default function HomePage() {
 								<p className="mono-label text-[var(--color-ink-3)]">
 									active · {active.length}
 								</p>
-								<div className="grid gap-4">
+								<div className="grid gap-4 lg:grid-cols-2">
 									{active.map((p) => (
 										<ProjectCard key={p.id} project={p} />
 									))}
@@ -296,7 +296,7 @@ export default function HomePage() {
 								<p className="mono-label text-[var(--color-ink-3)]">
 									archived · {archived.length}
 								</p>
-								<div className="grid gap-4 opacity-70">
+								<div className="grid gap-4 opacity-70 lg:grid-cols-2">
 									{archived.map((p) => (
 										<ProjectCard key={p.id} project={p} />
 									))}
@@ -306,7 +306,7 @@ export default function HomePage() {
 					</div>
 				</main>
 
-				<footer className="border-t border-[var(--color-rule)] px-6 py-4">
+				<footer className="border-t border-[var(--color-rule)] px-6 py-4 sm:ml-56">
 					<p className="mono-label text-[var(--color-ink-3)]">
 						agentdocs · phase 02 · projects
 					</p>

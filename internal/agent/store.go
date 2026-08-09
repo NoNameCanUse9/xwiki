@@ -145,7 +145,7 @@ func (s *Store) ListTokens(ctx context.Context) ([]*Token, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []*Token
+	out := make([]*Token, 0)
 	for rows.Next() {
 		var t Token
 		var projects, prefixes, createdAt string
@@ -268,7 +268,7 @@ func (s *Store) RecentAudit(ctx context.Context, projectID string, limit int) ([
 		return nil, err
 	}
 	defer rows.Close()
-	var out []AuditEntry
+	out := make([]AuditEntry, 0)
 	for rows.Next() {
 		var e AuditEntry
 		var projectID, path, detail, requestID sql.NullString
