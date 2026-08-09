@@ -2,14 +2,40 @@ package httpapi
 
 import (
 	_ "embed"
+	"encoding/json"
 	"net/http"
+	"sync"
 
 	"agentdocs/internal/httpapi/response"
 	"agentdocs/internal/project"
+	"gopkg.in/yaml.v3"
 )
 
 //go:embed openapi.yaml
 var openapiYAML []byte
+
+var (
+	openapiJSONCache []byte
+	openapiJSONOnce  sync.Once
+)
+
+// openapiJSON converts the embedded YAML spec to JSON once and caches it.
+func openapiJSON() []byte {
+	openapiJSONOnce.Do(func() {
+		var spec any
+		if err := yaml.Unmarshal(openapiYAML, &spec); err != nil {
+			openapiJSONCache = []byte(`{"error":"openapi spec failed to parse"}`)
+			return
+		}
+		out, err := json.Marshal(spec)
+		if err != nil {
+			openapiJSONCache = []byte(`{"error":"openapi spec failed to encode"}`)
+			return
+		}
+		openapiJSONCache = out
+	})
+	return openapiJSONCache
+}
 
 // ServiceVersion is the AgentDocs release version reported by /api/v1/meta.
 const ServiceVersion = "0.8.0"
@@ -38,8 +64,11 @@ func MetaHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// OpenAPIHandler serves the OpenAPI 3.0 document (YAML) at /api/openapi.json.
+// OpenAPIHandler serves the OpenAPI 3.0 document at /api/openapi.json.
+// Scalar (the web api-docs viewer) consumes this endpoint and expects a
+// JSON document; the embedded spec is authored in YAML so we convert it
+// on the fly and cache the result.
 func OpenAPIHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/yaml; charset=utf-8")
-	w.Write(openapiYAML)
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Write(openapiJSON())
 }
