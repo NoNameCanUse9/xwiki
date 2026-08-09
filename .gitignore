@@ -17,10 +17,8 @@
 .config/
 skills-lock.json
 
-# npm
+# Node / pnpm
 node_modules/
-package.json
-package-lock.json
 
 # Rust build artifacts (app branch output)
 /target/

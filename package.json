@@ -1,0 +1,14 @@
+{
+  "name": "agentdocs",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "dev": "concurrently -k -n server,web -c blue,green \"pnpm run dev:server\" \"pnpm run dev:web\"",
+    "dev:server": "go run ./cmd/agentdocs serve --data-dir data --http-addr :9090",
+    "dev:web": "pnpm --dir web run dev",
+    "build": "pnpm --dir web run build"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.0"
+  }
+}
