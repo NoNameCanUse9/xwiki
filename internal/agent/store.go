@@ -18,7 +18,7 @@ var ErrNotFound = errors.New("agent token not found")
 // ErrTokenRevoked reports use of a revoked token.
 var ErrTokenRevoked = errors.New("agent token revoked")
 
-// ErrForbidden reports scope/project/path authorization failures.
+// ErrForbidden reports scope/project authorization failures.
 var ErrForbidden = errors.New("agent forbidden")
 
 // ErrIdempotencyConflict reports a reused key with a different payload.
@@ -29,14 +29,13 @@ var ErrInvalid = errors.New("invalid agent input")
 
 // Token is the stored metadata of an agent token (never the secret).
 type Token struct {
-	ID           string    `json:"id"`
-	Name         string    `json:"name"`
-	Scope        string    `json:"scope"`
-	ProjectIDs   []string  `json:"project_ids"`
-	PathPrefixes []string  `json:"path_prefixes"`
-	CreatedAt    time.Time `json:"created_at"`
-	LastUsedAt   time.Time `json:"last_used_at,omitempty"`
-	RevokedAt    time.Time `json:"revoked_at,omitempty"`
+	ID         string    `json:"id"`
+	Name       string    `json:"name"`
+	Scope      string    `json:"scope"`
+	ProjectIDs []string  `json:"project_ids"`
+	CreatedAt  time.Time `json:"created_at"`
+	LastUsedAt time.Time `json:"last_used_at,omitempty"`
+	RevokedAt  time.Time `json:"revoked_at,omitempty"`
 }
 
 // AuditEntry is one audit log row.
@@ -85,16 +84,11 @@ func (s *Store) CreateToken(ctx context.Context, t *Token) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	prefixJSON, err := json.Marshal(t.PathPrefixes)
-	if err != nil {
-		return "", err
-	}
 	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO agent_tokens (id, name, token_hash, scope, project_ids, path_prefixes, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, '[]', ?)`,
 		t.ID, t.Name, hashSecret(secret), t.Scope,
-		string(projectJSON), string(prefixJSON),
-		t.CreatedAt.UTC().Format(time.RFC3339))
+		string(projectJSON), t.CreatedAt.UTC().Format(time.RFC3339))
 	if err != nil {
 		return "", err
 	}
@@ -103,9 +97,9 @@ func (s *Store) CreateToken(ctx context.Context, t *Token) (string, error) {
 
 func scanToken(row *sql.Row) (*Token, error) {
 	var t Token
-	var projects, prefixes, createdAt string
+	var projects, createdAt string
 	var lastUsed, revoked sql.NullString
-	err := row.Scan(&t.ID, &t.Name, &t.Scope, &projects, &prefixes,
+	err := row.Scan(&t.ID, &t.Name, &t.Scope, &projects,
 		&createdAt, &lastUsed, &revoked)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -114,7 +108,6 @@ func scanToken(row *sql.Row) (*Token, error) {
 		return nil, err
 	}
 	_ = json.Unmarshal([]byte(projects), &t.ProjectIDs)
-	_ = json.Unmarshal([]byte(prefixes), &t.PathPrefixes)
 	t.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
 	if lastUsed.Valid {
 		t.LastUsedAt, _ = time.Parse(time.RFC3339, lastUsed.String)
@@ -131,7 +124,7 @@ func (s *Store) GetBySecret(ctx context.Context, secret string) (*Token, error) 
 		return nil, ErrInvalid
 	}
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, name, scope, project_ids, path_prefixes, created_at, last_used_at, revoked_at
+		SELECT id, name, scope, project_ids, created_at, last_used_at, revoked_at
 		FROM agent_tokens WHERE token_hash = ?`, hashSecret(secret))
 	return scanToken(row)
 }
@@ -139,7 +132,7 @@ func (s *Store) GetBySecret(ctx context.Context, secret string) (*Token, error) 
 // ListTokens returns all tokens, newest first.
 func (s *Store) ListTokens(ctx context.Context) ([]*Token, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, name, scope, project_ids, path_prefixes, created_at, last_used_at, revoked_at
+		SELECT id, name, scope, project_ids, created_at, last_used_at, revoked_at
 		FROM agent_tokens ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
@@ -148,14 +141,13 @@ func (s *Store) ListTokens(ctx context.Context) ([]*Token, error) {
 	out := make([]*Token, 0)
 	for rows.Next() {
 		var t Token
-		var projects, prefixes, createdAt string
+		var projects, createdAt string
 		var lastUsed, revoked sql.NullString
-		if err := rows.Scan(&t.ID, &t.Name, &t.Scope, &projects, &prefixes,
+		if err := rows.Scan(&t.ID, &t.Name, &t.Scope, &projects,
 			&createdAt, &lastUsed, &revoked); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal([]byte(projects), &t.ProjectIDs)
-		_ = json.Unmarshal([]byte(prefixes), &t.PathPrefixes)
 		t.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
 		if lastUsed.Valid {
 			t.LastUsedAt, _ = time.Parse(time.RFC3339, lastUsed.String)

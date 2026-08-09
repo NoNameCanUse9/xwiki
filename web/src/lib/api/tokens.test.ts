@@ -21,16 +21,15 @@ describe("tokens api client", () => {
     expect(fetch).toHaveBeenCalledWith("/api/v1/tokens", expect.anything());
   });
 
-  it("creates a token with the exact payload", async () => {
+  it("creates a token with project-only access", async () => {
     mockFetchOnce(201, {
-      token: { id: "tok_1", name: "ci", scope: "write" },
+      token: { id: "tok_1", name: "ci", scope: "write", project_ids: ["prj_1"] },
       secret: "ad_abc",
     });
     const res = await createToken({
       name: "ci",
       scope: "write",
       project_ids: ["prj_1"],
-      path_prefixes: ["docs"],
     });
     expect(res.secret).toBe("ad_abc");
     const [, init] = (fetch as ReturnType<typeof vi.fn>).mock.calls.at(-1) as [
@@ -41,7 +40,6 @@ describe("tokens api client", () => {
       name: "ci",
       scope: "write",
       project_ids: ["prj_1"],
-      path_prefixes: ["docs"],
     });
   });
 

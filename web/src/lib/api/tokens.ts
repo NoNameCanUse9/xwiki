@@ -5,7 +5,6 @@ export interface AgentToken {
   name: string;
   scope: "read" | "write";
   project_ids: string[];
-  path_prefixes: string[];
   created_at: string;
   revoked_at?: string;
 }
@@ -14,7 +13,6 @@ export interface CreateTokenInput {
   name: string;
   scope: "read" | "write";
   project_ids: string[];
-  path_prefixes: string[];
 }
 
 export interface CreatedTokenResponse {

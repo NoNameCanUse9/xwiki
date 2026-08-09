@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
@@ -45,5 +47,24 @@ describe("ApiDocsPage", () => {
         }),
       ),
     );
+  });
+
+  it("does not prevent Scalar sidebar labels from wrapping beside method badges", async () => {
+    render(
+      <MemoryRouter>
+        <ApiDocsPage />
+      </MemoryRouter>,
+    );
+
+    await vi.waitFor(() => {
+      const configuration = createApiReferenceMock.mock.calls.at(-1)?.[1] as
+        | { customCss?: string }
+        | undefined;
+      expect(configuration?.customCss).toEqual(expect.any(String));
+      const apiDocsCss = readFileSync(resolve(process.cwd(), "src/routes/api-docs.css"), "utf8");
+      expect(apiDocsCss).not.toMatch(
+        /\.api-docs-reference \.scalar-app button,\s*\.api-docs-reference \.scalar-app \[role="button"\]\s*\{[^}]*white-space:\s*nowrap/,
+      );
+    });
   });
 });

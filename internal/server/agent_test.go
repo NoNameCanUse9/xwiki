@@ -45,9 +45,9 @@ func TestAgentTokenLifecycle(t *testing.T) {
 	cookie := loginAndGetCookie(t, h)
 	projectID, _ := createProjectViaAPI(t, h, cookie, "agent-site")
 
-	// Create a write token bound to the project with docs/ prefix.
+	// Create a write token bound to the project.
 	secret := createAgentToken(t, h, cookie,
-		fmt.Sprintf(`{"name":"ci-bot","scope":"write","project_ids":["%s"],"path_prefixes":["docs"]}`, projectID))
+		fmt.Sprintf(`{"name":"ci-bot","scope":"write","project_ids":["%s"]}`, projectID))
 
 	// Read as token.
 	rec := bearerRequest(h, http.MethodGet,
@@ -56,7 +56,7 @@ func TestAgentTokenLifecycle(t *testing.T) {
 		t.Fatalf("token read: %d %s", rec.Code, rec.Body.String())
 	}
 
-	// Write inside the allowed prefix.
+	// Write within the bound project.
 	base := getRevision(t, h, cookie, projectID)
 	rec = bearerRequest(h, http.MethodPost,
 		"/api/v1/projects/"+projectID+"/changesets", secret,
@@ -66,13 +66,14 @@ func TestAgentTokenLifecycle(t *testing.T) {
 		t.Fatalf("token write: %d %s", rec.Code, rec.Body.String())
 	}
 
-	// Acceptance 2: write outside the prefix -> 403.
+	// A project-bound token can write any path in that project.
+	base = getRevision(t, h, cookie, projectID)
 	rec = bearerRequest(h, http.MethodPost,
 		"/api/v1/projects/"+projectID+"/changesets", secret,
-		fmt.Sprintf(`{"base_revision":"%s","message":"bad",
+		fmt.Sprintf(`{"base_revision":"%s","message":"any path",
 		  "changes":[{"op":"create","path":"README.md","content":"x"}]}`, base))
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("prefix bypass: %d, want 403", rec.Code)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("project-scoped write: %d, want 200", rec.Code)
 	}
 
 	// Acceptance 1: another project is unreachable.

@@ -26,9 +26,9 @@ func newService(t *testing.T) *Service {
 
 func sampleInput() CreateInput {
 	return CreateInput{
-		Name: "ci-bot", Scope: "write",
-		ProjectIDs:   []string{"prj_1"},
-		PathPrefixes: []string{"docs"},
+		Name:       "ci-bot",
+		Scope:      "write",
+		ProjectIDs: []string{"prj_1"},
 	}
 }
 
@@ -45,7 +45,7 @@ func TestCreateTokenSecretShownOnceAndHashed(t *testing.T) {
 		t.Fatalf("bad token: %+v", created.Token)
 	}
 	// Secret resolves; hash is not stored in plaintext anywhere.
-	got, err := svc.Authorize(context.Background(), created.Secret, "prj_1", "docs/a.md", true)
+	got, err := svc.Authorize(context.Background(), created.Secret, "prj_1", true)
 	if err != nil {
 		t.Fatalf("authorize: %v", err)
 	}
@@ -53,7 +53,7 @@ func TestCreateTokenSecretShownOnceAndHashed(t *testing.T) {
 		t.Fatalf("wrong token: %+v", got)
 	}
 	// Unknown secret.
-	if _, err := svc.Authorize(context.Background(), "ad_"+strings.Repeat("0", 32), "prj_1", "docs/a.md", true); !errors.Is(err, ErrNotFound) {
+	if _, err := svc.Authorize(context.Background(), "ad_"+strings.Repeat("0", 32), "prj_1", true); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("unknown: want ErrNotFound, got %v", err)
 	}
 }
@@ -69,21 +69,16 @@ func TestAuthorizeMatrix(t *testing.T) {
 	cases := []struct {
 		name    string
 		project string
-		path    string
 		write   bool
 		wantErr error
 	}{
-		{"read within project", "prj_1", "", false, nil},
-		{"write within project+prefix", "prj_1", "docs/a.md", true, nil},
-		{"write nested prefix", "prj_1", "docs/sub/b.md", true, nil},
-		{"write exact prefix file", "prj_1", "docs", true, nil},
-		{"write outside prefix", "prj_1", "README.md", true, ErrForbidden},
-		{"write outside project", "prj_2", "docs/a.md", true, ErrForbidden},
-		{"read outside project", "prj_2", "", false, ErrForbidden},
-		{"empty allowlist write", "prj_3", "x.md", true, ErrForbidden},
+		{"read within project", "prj_1", false, nil},
+		{"write any path within project", "prj_1", true, nil},
+		{"write outside project", "prj_2", true, ErrForbidden},
+		{"read outside project", "prj_2", false, ErrForbidden},
 	}
 	for _, c := range cases {
-		_, err := svc.Authorize(context.Background(), secret, c.project, c.path, c.write)
+		_, err := svc.Authorize(context.Background(), secret, c.project, c.write)
 		if !errors.Is(err, c.wantErr) {
 			t.Fatalf("%s: want %v, got %v", c.name, c.wantErr, err)
 		}
@@ -96,7 +91,7 @@ func TestRevokedTokenRejected(t *testing.T) {
 	if err := svc.Revoke(context.Background(), created.Token.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.Authorize(context.Background(), created.Secret, "prj_1", "docs/a.md", true); !errors.Is(err, ErrTokenRevoked) {
+	if _, err := svc.Authorize(context.Background(), created.Secret, "prj_1", true); !errors.Is(err, ErrTokenRevoked) {
 		t.Fatalf("want ErrTokenRevoked, got %v", err)
 	}
 	// List still shows it (with revoked flag) and revoke is idempotent.
@@ -115,8 +110,7 @@ func TestCreateRejectsInvalid(t *testing.T) {
 		{Name: "", Scope: "write", ProjectIDs: []string{"p"}},
 		{Name: "x", Scope: "admin", ProjectIDs: []string{"p"}},
 		{Name: "x", Scope: "read"}, // no projects
-		{Name: "x", Scope: "write", ProjectIDs: []string{"p"}, PathPrefixes: []string{"/abs"}},
-		{Name: "x", Scope: "write", ProjectIDs: []string{"p"}, PathPrefixes: []string{"trail/"}},
+
 	}
 	for i, c := range cases {
 		if _, err := svc.Create(context.Background(), c); !errors.Is(err, ErrInvalid) {

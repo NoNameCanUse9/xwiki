@@ -322,7 +322,6 @@ body.dark-mode .scalar-app .t-doc__header {
 .api-docs-reference .scalar-app button,
 .api-docs-reference .scalar-app [role="button"] {
   font-family: var(--font-body);
-  white-space: nowrap;
 }
 
 .api-docs-reference .scalar-app :focus-visible {
