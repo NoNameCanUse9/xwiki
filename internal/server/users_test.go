@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestAdminResetPasswordAndDeleteUser(t *testing.T) {
+func TestDeleteUser(t *testing.T) {
 	h, _ := newTestRouterWithService(t)
 	cookie := loginAndGetCookie(t, h)
 
@@ -27,32 +27,13 @@ func TestAdminResetPasswordAndDeleteUser(t *testing.T) {
 	}
 	aliceID := created.User.ID
 
-	// Alice logs in with the original password.
+	// Alice logs in and keeps a session.
 	aliceCookie := loginAndGetCookieWith(t, h, "alice", "firstpass123")
 
-	// Admin resets Alice's password.
-	rec = apiRequest(h, http.MethodPost, "/api/v1/users/"+aliceID+"/password", cookie,
-		`{"password":"secondpass456"}`)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("reset password: %d %s", rec.Code, rec.Body.String())
-	}
-	// Old password no longer works; new one does.
-	rec = apiRequest(h, http.MethodPost, "/api/v1/auth/login", "",
-		`{"username":"alice","password":"firstpass123"}`)
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("old password login: %d, want 401", rec.Code)
-	}
-	rec = apiRequest(h, http.MethodPost, "/api/v1/auth/login", "",
-		`{"username":"alice","password":"secondpass456"}`)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("new password login: %d, want 200", rec.Code)
-	}
-
-	// Short password rejected.
-	rec = apiRequest(h, http.MethodPost, "/api/v1/users/"+aliceID+"/password", cookie,
-		`{"password":"short"}`)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("short password: %d, want 400", rec.Code)
+	// Admin-only route: a non-admin cannot delete users.
+	rec = apiRequest(h, http.MethodDelete, "/api/v1/users/"+aliceID, aliceCookie, "")
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("non-admin delete: %d, want 403", rec.Code)
 	}
 
 	// Deleting the user invalidates their existing session.
@@ -66,7 +47,7 @@ func TestAdminResetPasswordAndDeleteUser(t *testing.T) {
 	}
 	// Login also fails.
 	rec = apiRequest(h, http.MethodPost, "/api/v1/auth/login", "",
-		`{"username":"alice","password":"secondpass456"}`)
+		`{"username":"alice","password":"firstpass123"}`)
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("deleted user login: %d, want 401", rec.Code)
 	}
@@ -116,7 +97,7 @@ func loginAndGetCookieWith(t *testing.T, h http.Handler, username, password stri
 	cookie := ""
 	for _, c := range rec.Result().Cookies() {
 		if c.Name == "agentdocs_session" {
-			cookie = c.Name + "=" + c.Value
+			cookie = c.Value
 		}
 	}
 	if cookie == "" {

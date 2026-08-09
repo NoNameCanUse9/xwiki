@@ -5,7 +5,6 @@ import {
   ArrowLeft,
   Ban,
   CheckCircle2,
-  KeyRound,
   Trash2,
   UserPlus,
   Users,
@@ -27,7 +26,6 @@ import {
   disableUser,
   enableUser,
   listUsers,
-  resetUserPassword,
 } from "@/lib/api/users";
 import { ApiError } from "@/lib/api/client";
 import type { UserView } from "@/lib/api/users";
@@ -82,34 +80,8 @@ export default function UsersPage() {
     }
   };
 
-  const [resetTarget, setResetTarget] = useState<UserView | null>(null);
-  const [resetValue, setResetValue] = useState("");
-  const [resetBusy, setResetBusy] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<UserView | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
-
-  const openReset = (u: UserView) => {
-    setResetValue("");
-    setResetTarget(u);
-  };
-
-  const onReset = async () => {
-    if (!resetTarget) return;
-    if (resetValue.length < 8) {
-      toast.error("密码至少 8 位");
-      return;
-    }
-    setResetBusy(true);
-    try {
-      await resetUserPassword(resetTarget.id, resetValue);
-      toast.success(`${resetTarget.display_name || resetTarget.username} 的密码已重置`);
-      setResetTarget(null);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "重置失败");
-    } finally {
-      setResetBusy(false);
-    }
-  };
 
   const onDelete = async () => {
     if (!deleteTarget) return;
@@ -236,15 +208,6 @@ export default function UsersPage() {
                       <Button
                         variant="ghost"
                         size="sm"
-                        className="gap-1.5 text-[var(--color-ink-3)]"
-                        onClick={() => openReset(u)}
-                      >
-                        <KeyRound className="size-3.5" />
-                        重置密码
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
                         className="gap-1.5 text-[var(--color-destructive)]"
                         onClick={() => setDeleteTarget(u)}
                       >
@@ -283,41 +246,6 @@ export default function UsersPage() {
           agentdocs · user management
         </p>
       </footer>
-
-      <Dialog open={resetTarget !== null} onOpenChange={(v) => !v && setResetTarget(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>重置密码</DialogTitle>
-            <DialogDescription>
-              为 {resetTarget?.display_name || resetTarget?.username} 设置新密码，重置后其所有会话将失效。
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-2">
-            <Label htmlFor="reset-pass">新密码</Label>
-            <Input
-              id="reset-pass"
-              type="password"
-              placeholder="至少 8 位"
-              value={resetValue}
-              onChange={(e) => setResetValue(e.target.value)}
-              autoFocus
-            />
-          </div>
-          <div className="flex justify-end gap-2 pt-2">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => setResetTarget(null)}
-              disabled={resetBusy}
-            >
-              取消
-            </Button>
-            <Button type="button" onClick={() => void onReset()} disabled={resetBusy}>
-              {resetBusy ? "保存中…" : "保存"}
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
 
       <Dialog open={deleteTarget !== null} onOpenChange={(v) => !v && setDeleteTarget(null)}>
         <DialogContent>

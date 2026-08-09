@@ -195,29 +195,6 @@ paths:
           $ref: "#/components/responses/UserResult"
         "404":
           $ref: "#/components/responses/NotFound"
-  /users/{id}/password:
-    post:
-      summary: 重置用户密码（管理员，使该用户所有会话失效）
-      parameters:
-        - $ref: "#/components/parameters/UserID"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [password]
-              properties:
-                password:
-                  type: string
-                  minLength: 8
-      responses:
-        "200":
-          description: OK
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "404":
-          $ref: "#/components/responses/NotFound"
   /users/{id}:
     delete:
       summary: 删除用户（管理员，会话级联清除）

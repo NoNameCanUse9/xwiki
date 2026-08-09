@@ -92,7 +92,6 @@ func NewRouter(cfg *config.Config, log *slog.Logger, db *sql.DB, users *user.Sto
 				r.Post("/", uh.Create)
 				r.Post("/{id}/disable", uh.Disable)
 				r.Post("/{id}/enable", uh.Enable)
-				r.Post("/{id}/password", uh.ResetPassword)
 				r.Delete("/{id}", uh.Delete)
 			})
 		})

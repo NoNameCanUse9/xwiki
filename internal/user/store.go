@@ -138,12 +138,6 @@ func (s *Store) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
-// DeleteSessionsForUser invalidates every session of a user (used on password reset).
-func (s *Store) DeleteSessionsForUser(ctx context.Context, id string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM sessions WHERE user_id = ?`, id)
-	return err
-}
-
 type rowScanner interface {
 	Scan(dest ...any) error
 }

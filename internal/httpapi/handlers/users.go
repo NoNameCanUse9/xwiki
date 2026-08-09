@@ -129,42 +129,6 @@ func (h *UserHandler) setDisabled(w http.ResponseWriter, r *http.Request, disabl
 	response.WriteJSON(w, http.StatusOK, map[string]any{"user": publicUserView(updated)})
 }
 
-// ResetPassword handles POST /api/v1/users/{id}/password (admin only).
-func (h *UserHandler) ResetPassword(w http.ResponseWriter, r *http.Request) {
-	userID := request.PathParam(r, "id")
-	var req struct {
-		Password string `json:"password"`
-	}
-	if err := request.DecodeJSON(w, r, &req, h.cfg.MaxBodyBytes); err != nil || len(req.Password) < 8 {
-		response.WriteError(w, r, http.StatusBadRequest, "invalid_password", "password must be at least 8 characters")
-		return
-	}
-	if _, err := h.svc.GetByID(r.Context(), userID); err != nil {
-		response.WriteError(w, r, http.StatusNotFound, "user_not_found", "user not found")
-		return
-	}
-	hash, err := auth.HashPassword(req.Password)
-	if err != nil {
-		h.log.Error("hash password failed", "error", err)
-		response.WriteError(w, r, http.StatusInternalServerError, "internal_error", "could not reset password")
-		return
-	}
-	if err := h.svc.UpdatePassword(r.Context(), userID, hash); err != nil {
-		if err == user.ErrNotFound {
-			response.WriteError(w, r, http.StatusNotFound, "user_not_found", "user not found")
-			return
-		}
-		h.log.Error("reset password failed", "error", err)
-		response.WriteError(w, r, http.StatusInternalServerError, "internal_error", "could not reset password")
-		return
-	}
-	// 重置密码后使该用户所有会话失效（仅保留当前管理员会话不受影响）。
-	if err := h.svc.DeleteSessionsForUser(r.Context(), userID); err != nil {
-		h.log.Error("delete sessions failed", "error", err)
-	}
-	response.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
-}
-
 // Delete handles DELETE /api/v1/users/{id} (admin only).
 func (h *UserHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	userID := request.PathParam(r, "id")

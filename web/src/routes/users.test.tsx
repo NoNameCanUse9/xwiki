@@ -12,7 +12,6 @@ vi.mock("@/lib/api/users", () => ({
   createUser: vi.fn(),
   disableUser: vi.fn(),
   enableUser: vi.fn(),
-  resetUserPassword: vi.fn(),
   deleteUser: vi.fn(),
 }));
 
@@ -79,34 +78,6 @@ describe("UsersPage", () => {
     renderPage();
     await user.click(await screen.findByRole("button", { name: /禁用/ }));
     expect(usersApi.disableUser).toHaveBeenCalledWith("usr_2");
-  });
-
-  it("resets a member password via dialog", async () => {
-    vi.mocked(usersApi.listUsers).mockResolvedValue({
-      users: [
-        adminUser,
-        {
-          id: "usr_2",
-          username: "alice",
-          display_name: "Alice",
-          is_admin: false,
-          disabled: false,
-          created_at: "2026-08-02T12:00:00Z",
-        },
-      ],
-    });
-    vi.mocked(usersApi.resetUserPassword).mockResolvedValue({ ok: true });
-    const user = userEvent.setup();
-    renderPage();
-    await user.click(await screen.findByRole("button", { name: "重置密码" }));
-    await user.type(screen.getByLabelText("新密码"), "newpass123");
-    await user.click(screen.getByRole("button", { name: "保存" }));
-    await vi.waitFor(() =>
-      expect(usersApi.resetUserPassword).toHaveBeenCalledWith(
-        "usr_2",
-        "newpass123",
-      ),
-    );
   });
 
   it("deletes a member after web confirmation", async () => {
