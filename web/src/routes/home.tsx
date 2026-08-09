@@ -9,6 +9,7 @@ import {
 	LogOut,
 	FolderGit2,
 	RotateCcw,
+	ScrollText,
 	Users,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -194,6 +195,13 @@ export default function HomePage() {
 					>
 						<Users className="size-4" />
 						用户管理
+					</Link>
+					<Link
+						to="/settings/audit"
+						className="flex items-center gap-2 rounded-sm px-3 py-2 text-sm text-[var(--color-ink-2)] hover:bg-[var(--color-surface-accent)] hover:text-[var(--color-ink)]"
+					>
+						<ScrollText className="size-4" />
+						审计日志
 					</Link>
 					<Button
 						variant="outline"

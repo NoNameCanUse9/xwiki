@@ -378,13 +378,22 @@ describe("DocsViewerPage search", () => {
 		});
 		const user = userEvent.setup();
 		renderPage();
-		await user.type(screen.getByLabelText("搜索文档"), "pineapple");
 		await user.click(screen.getByRole("button", { name: "搜索" }));
+		await user.type(screen.getByLabelText("搜索文档"), "pineapple");
 		await new Promise((r) => setTimeout(r, 400));
 		expect(screen.queryByText("docs/keyword.md")).not.toBeNull();
 		await user.click(screen.getByRole("button", { name: /docs\/keyword.md/ }));
 		await new Promise((r) => setTimeout(r, 400));
 		expect(screen.queryAllByText("K").length).toBeGreaterThanOrEqual(1);
+	});
+
+	it("closes the search overlay on Escape", async () => {
+		const user = userEvent.setup();
+		renderPage();
+		await user.click(screen.getByRole("button", { name: "搜索" }));
+		expect(screen.getByLabelText("搜索文档")).toBeInTheDocument();
+		await user.keyboard("{Escape}");
+		expect(screen.queryByLabelText("搜索文档")).not.toBeInTheDocument();
 	});
 });
 
@@ -426,7 +435,7 @@ describe("DocsViewerPage sidebar", () => {
 describe("DocsViewerPage edit sessions", () => {
 	const getEditor = () =>
 		screen
-			.getAllByRole("textbox")
+			.queryAllByRole("textbox")
 			.find((el) => el.tagName !== "INPUT");
 
 	function mockGuidePage() {
