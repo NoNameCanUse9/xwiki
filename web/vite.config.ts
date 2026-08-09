@@ -17,6 +17,8 @@ export default defineConfig({
     host: "127.0.0.1",
     proxy: {
       "/api": "http://localhost:9090",
+      // 分享页是后端服务端渲染路由（/share/{token}），需转发而非走 SPA。
+      "/share": "http://localhost:9090",
     },
   },
   test: {
