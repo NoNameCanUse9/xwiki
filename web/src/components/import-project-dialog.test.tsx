@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
+import JSZip from "jszip";
 import { Toaster } from "sonner";
 import ImportProjectDialog from "./import-project-dialog";
 import * as transferApi from "@/lib/api/transfer";
@@ -34,6 +35,14 @@ function makeFile(path: string): File {
   return file;
 }
 
+async function makeZip(): Promise<File> {
+  const zip = new JSZip();
+  zip.file("my-docs/README.md", "# hi");
+  zip.file("my-docs/docs/guide.md", "# guide");
+  const blob = await zip.generateAsync({ type: "blob" });
+  return new File([blob], "my-docs.zip", { type: "application/zip" });
+}
+
 describe("ImportProjectDialog", () => {
   beforeEach(() => vi.clearAllMocks());
 
@@ -50,6 +59,29 @@ describe("ImportProjectDialog", () => {
     await user.upload(input, [file]);
     await user.click(screen.getByRole("button", { name: "导入" }));
     await vi.waitFor(() => expect(transferApi.importFolder).toHaveBeenCalled());
+    expect(await screen.findByText("docs-view")).toBeInTheDocument();
+  });
+
+  it("imports a zip file, extracting entries and deriving the name", async () => {
+    vi.mocked(transferApi.importFolder).mockResolvedValue({
+      project: { id: "prj_9", name: "imported" },
+      commits: 3,
+    });
+    const user = userEvent.setup();
+    wrap();
+    await user.click(screen.getByRole("button", { name: "导入项目" }));
+    const zip = await makeZip();
+    await user.upload(screen.getByLabelText("选择 zip 文件"), [zip]);
+    expect(await screen.findByText(/已选择 2 个文件/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "导入" }));
+    await vi.waitFor(() => expect(transferApi.importFolder).toHaveBeenCalled());
+    const [name, , files] = vi.mocked(transferApi.importFolder).mock
+      .calls[0] as [string, string, (File & { __relPath?: string })[]];
+    expect(name).toBe("my-docs");
+    expect(files.map((f) => f.__relPath)).toEqual([
+      "README.md",
+      "docs/guide.md",
+    ]);
     expect(await screen.findByText("docs-view")).toBeInTheDocument();
   });
 

@@ -37,12 +37,14 @@ export async function importFolder(
 	form.set("name", name);
 	form.set("description", description);
 	for (const f of files) {
-		// webkitRelativePath gives "folder/sub/file.txt" — strip leading dir.
-		// Go's multipart parser strips directory parts from filename=, so send
-		// the real relative path separately, index-aligned with files.
-		const rel = (f.webkitRelativePath ?? f.name).split("/").slice(1).join("/");
-		form.append("paths", rel || f.name);
-		form.append("files", f, rel || f.name);
+		// zip 解压模式：__relPath 已是最终相对路径，直接使用；
+		// 文件夹模式：webkitRelativePath 是 "folder/sub/file.txt"，剥离首层目录。
+		const rel =
+			(f as File & { __relPath?: string }).__relPath ??
+			((f.webkitRelativePath ?? f.name).split("/").slice(1).join("/") ||
+				f.name);
+		form.append("paths", rel);
+		form.append("files", f, rel);
 	}
 	const res = await fetch("/api/v1/projects/import-folder", {
 		method: "POST",
