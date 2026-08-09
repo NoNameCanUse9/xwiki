@@ -1,0 +1,6 @@
+# Debug builds of the render-heavy views consume ~300 KB of stack per
+# render frame; the editing chain (6 frames deep) needs ~1.8 MB, which
+# exceeds the MSVC default 1 MB main-thread stack and overflows.
+# Give the executable a 16 MB reserved stack.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "link-arg=/STACK:16777216"]
