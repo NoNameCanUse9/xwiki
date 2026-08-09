@@ -57,8 +57,8 @@ type ChangeOutcome struct {
 	Status string `json:"status"` // created | updated | deleted | moved
 }
 
-// maxChangesetFiles caps the number of changes per request.
-const maxChangesetFiles = 100
+// MaxChangesetFiles caps the number of changes per request.
+const MaxChangesetFiles = 100
 
 // MaxDocBlobBytes caps the size of a single document (read and write).
 const MaxDocBlobBytes = 2 << 20 // 2 MiB
@@ -202,8 +202,8 @@ func defaultMessage(now time.Time, author CommitAuthor, changes []Change) string
 // validateChangeset checks structure, sizes and path safety up front.
 // Message may be empty: the service fills a default (time + author).
 func validateChangeset(input ChangesetInput) error {
-	if len(input.Changes) == 0 || len(input.Changes) > maxChangesetFiles {
-		return fmt.Errorf("changeset must contain 1-%d changes", maxChangesetFiles)
+	if len(input.Changes) == 0 || len(input.Changes) > MaxChangesetFiles {
+		return fmt.Errorf("changeset must contain 1-%d changes", MaxChangesetFiles)
 	}
 	for _, c := range input.Changes {
 		if !validateDocPathInternal(c.Path) {

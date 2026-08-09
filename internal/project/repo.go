@@ -172,6 +172,7 @@ type TreeEntry struct {
 	Name string `json:"name"`
 	Type string `json:"type"` // "blob" | "tree"
 	Path string `json:"path"`
+	SHA  string `json:"sha,omitempty"` // blob object id ("" for trees)
 }
 
 // Revision returns the current HEAD commit id (the write base revision).
@@ -323,7 +324,7 @@ func (r *Repo) ListTree(ctx context.Context, branch, path string) ([]TreeEntry, 
 		if path != "" {
 			entryPath = strings.TrimSuffix(path, "/") + "/" + name
 		}
-		entries = append(entries, TreeEntry{Name: name, Type: fields[1], Path: entryPath})
+		entries = append(entries, TreeEntry{Name: name, Type: fields[1], Path: entryPath, SHA: fields[2]})
 	}
 	return entries, nil
 }

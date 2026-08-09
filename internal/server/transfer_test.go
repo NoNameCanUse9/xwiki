@@ -11,6 +11,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestOpenAPIRoute(t *testing.T) {
@@ -20,7 +22,7 @@ func TestOpenAPIRoute(t *testing.T) {
 		t.Fatalf("openapi: %d", rec.Code)
 	}
 	var spec map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &spec); err != nil {
+	if err := yaml.Unmarshal(rec.Body.Bytes(), &spec); err != nil {
 		t.Fatal(err)
 	}
 	if spec["openapi"] != "3.0.3" {

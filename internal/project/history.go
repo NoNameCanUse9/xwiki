@@ -46,8 +46,8 @@ type CommitDiff struct {
 	Patch string     `json:"patch,omitempty"`
 }
 
-// maxDiffBytes caps rendered patch output.
-const maxDiffBytes = 1 << 20 // 1 MiB
+// MaxDiffBytes caps rendered patch output.
+const MaxDiffBytes = 1 << 20 // 1 MiB
 
 // ListCommits returns commit summaries, newest first.
 func (s *Service) ListCommits(ctx context.Context, projectID string, limit, offset int) ([]CommitSummary, error) {
@@ -183,7 +183,7 @@ func (s *Service) CommitDiff(ctx context.Context, projectID, sha, format string)
 		if err != nil {
 			return nil, ErrNotFound
 		}
-		if len(patch) > maxDiffBytes {
+		if len(patch) > MaxDiffBytes {
 			return nil, fmt.Errorf("diff too large")
 		}
 		diff.Patch = patch

@@ -64,6 +64,7 @@ func NewRouter(cfg *config.Config, log *slog.Logger, db *sql.DB, users *user.Sto
 	})
 
 	r.Route("/api/v1", func(r chi.Router) {
+		r.Get("/meta", httpapi.MetaHandler)
 		r.NotFound(func(w http.ResponseWriter, r *http.Request) {
 			response.WriteError(w, r, http.StatusNotFound, "not_found", "resource not found")
 		})
