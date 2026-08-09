@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">AgentDocs application icon</title>
+  <desc id="desc">A luminous document with an A-shaped agent mark on a cobalt background.</desc>
+
+  <defs>
+    <linearGradient id="background" x1="64" y1="32" x2="448" y2="480" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#182C68"/>
+      <stop offset="0.52" stop-color="#101D49"/>
+      <stop offset="1" stop-color="#080F2B"/>
+    </linearGradient>
+    <radialGradient id="halo" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(256 248) rotate(90) scale(214)">
+      <stop offset="0" stop-color="#6BD5FF" stop-opacity="0.26"/>
+      <stop offset="0.55" stop-color="#6574FF" stop-opacity="0.11"/>
+      <stop offset="1" stop-color="#6574FF" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="paper" x1="164" y1="92" x2="354" y2="426" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#DCE7FF"/>
+    </linearGradient>
+    <linearGradient id="fold" x1="292" y1="96" x2="362" y2="166" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#C9D8FF"/>
+      <stop offset="1" stop-color="#9AAFFF"/>
+    </linearGradient>
+    <linearGradient id="agent" x1="203" y1="220" x2="326" y2="340" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#49D9FF"/>
+      <stop offset="0.52" stop-color="#6D9CFF"/>
+      <stop offset="1" stop-color="#A875FF"/>
+    </linearGradient>
+    <filter id="paper-shadow" x="112" y="68" width="300" height="404" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="18" stdDeviation="18" flood-color="#020719" flood-opacity="0.42"/>
+    </filter>
+    <filter id="soft-glow" x="168" y="174" width="176" height="196" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="13"/>
+    </filter>
+  </defs>
+
+  <rect width="512" height="512" rx="128" fill="url(#background)"/>
+  <rect x="1.5" y="1.5" width="509" height="509" rx="126.5" fill="none" stroke="#8EA8FF" stroke-opacity="0.18" stroke-width="3"/>
+  <circle cx="256" cy="248" r="214" fill="url(#halo)"/>
+
+  <g opacity="0.18" fill="none" stroke="#9DC7FF" stroke-linecap="round">
+    <path d="M72 358C111 419 178 454 256 454" stroke-width="3"/>
+    <path d="M440 138C419 102 387 74 349 58" stroke-width="3"/>
+  </g>
+
+  <g filter="url(#paper-shadow)">
+    <path d="M176 88H292L368 164V400C368 413.255 357.255 424 344 424H176C162.745 424 152 413.255 152 400V112C152 98.745 162.745 88 176 88Z" fill="url(#paper)"/>
+    <path d="M292 88L368 164H316C302.745 164 292 153.255 292 140V88Z" fill="url(#fold)"/>
+    <path d="M292 88V140C292 153.255 302.745 164 316 164H368" fill="none" stroke="#FFFFFF" stroke-opacity="0.5" stroke-width="3"/>
+
+    <path d="M204 184H288" stroke="#9AAFFF" stroke-linecap="round" stroke-width="10" opacity="0.52"/>
+    <path d="M204 204H264" stroke="#B5C7F7" stroke-linecap="round" stroke-width="8" opacity="0.55"/>
+
+    <path d="M198 346L246 224C249.8 214.3 263.5 214.3 267.3 224L316 346" fill="none" stroke="url(#agent)" stroke-linecap="round" stroke-linejoin="round" stroke-width="22"/>
+    <path d="M218 300H296" fill="none" stroke="url(#agent)" stroke-linecap="round" stroke-width="22"/>
+  </g>
+
+  <path d="M256 199L261.5 214.5L277 220L261.5 225.5L256 241L250.5 225.5L235 220L250.5 214.5Z" fill="#FFFFFF" opacity="0.92" filter="url(#soft-glow)"/>
+  <path d="M256 199L261.5 214.5L277 220L261.5 225.5L256 241L250.5 225.5L235 220L250.5 214.5Z" fill="#FFFFFF" opacity="0.96"/>
+</svg>

@@ -5,7 +5,7 @@ use gpui::*;
 use gpui_component::{button::*, input::Input, scroll::ScrollableElement as _, *};
 
 use crate::app::XWikiApp;
-use crate::ui::{body, mono_label, tokens};
+use crate::ui::{app_icon, body, mono_label, tokens};
 
 impl XWikiApp {
     pub(crate) fn render_login(&self, cx: &mut Context<Self>) -> Div {
@@ -244,10 +244,17 @@ impl XWikiApp {
                                     .justify_between()
                                     .child(
                                         div()
-                                            .font_family(tokens::FONT_MONO)
-                                            .text_xs()
-                                            .text_color(theme.accent)
-                                            .child("AGENTDOCS"),
+                                            .flex()
+                                            .items_center()
+                                            .gap_2()
+                                            .child(app_icon().size(px(28.0)))
+                                            .child(
+                                                div()
+                                                    .font_family(tokens::FONT_MONO)
+                                                    .text_xs()
+                                                    .text_color(theme.accent)
+                                                    .child("AGENTDOCS"),
+                                            ),
                                     )
                                     .child(
                                         div()

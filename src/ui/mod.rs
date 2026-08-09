@@ -6,8 +6,25 @@
 pub mod split_pane;
 pub mod tokens;
 
-use gpui::{div, px, Div, IntoElement, ParentElement as _, Styled as _};
+use std::sync::{Arc, OnceLock};
+
+use gpui::{
+    div, img, px, Div, ElementId, Image, ImageFormat, Img, IntoElement, ParentElement as _,
+    Styled as _,
+};
 use gpui_component::text::TextView;
+
+const APP_ICON_SVG: &[u8] = include_bytes!("../../assets/agentdocs-app-icon.svg");
+static APP_ICON_IMAGE: OnceLock<Arc<Image>> = OnceLock::new();
+
+/// The AgentDocs brand mark, embedded at compile time so packaged builds do
+/// not depend on the source tree at runtime.
+pub fn app_icon() -> Img {
+    let image = APP_ICON_IMAGE
+        .get_or_init(|| Arc::new(Image::from_bytes(ImageFormat::Svg, APP_ICON_SVG.to_vec())))
+        .clone();
+    img(image).flex_none()
+}
 
 /// Mono machine-readout label: JetBrains Mono, 11px, UPPERCASE.
 ///
@@ -43,6 +60,6 @@ pub fn display(text: impl IntoElement) -> Div {
 }
 
 /// Markdown rendered at the reading measure (web `TextView::markdown`).
-pub fn markdown(id: &'static str, content: String) -> TextView {
+pub fn markdown(id: impl Into<ElementId>, content: String) -> TextView {
     TextView::markdown(id, content).w_full()
 }

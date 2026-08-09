@@ -15,6 +15,7 @@ use gpui_component::{
 
 use crate::api::{dto, Client};
 use crate::config;
+mod outline;
 pub mod views;
 use crate::ui::{mono_label, tokens};
 use crate::{QuickOpen, SaveEditor, TogglePalette, ToggleTheme};
@@ -152,6 +153,9 @@ pub struct XWikiApp {
     doc_path: Option<String>,
     doc_content: String,
     doc_loading: bool,
+    doc_outline: outline::ParsedDocument,
+    doc_scroll: ScrollHandle,
+    active_outline: Option<usize>,
     // Edit state: page lock + markdown editor + commit message.
     editing: bool,
     edit_path: Option<String>,
@@ -432,6 +436,12 @@ impl XWikiApp {
             doc_path: None,
             doc_content: String::new(),
             doc_loading: false,
+            doc_outline: outline::ParsedDocument {
+                entries: Vec::new(),
+                sections: Vec::new(),
+            },
+            doc_scroll: ScrollHandle::new(),
+            active_outline: None,
             editing: false,
             edit_path: None,
             lock_held: false,
@@ -535,6 +545,12 @@ impl XWikiApp {
         self.tree_path.clear();
         self.doc_path = None;
         self.doc_content.clear();
+        self.doc_outline = outline::ParsedDocument {
+            entries: Vec::new(),
+            sections: Vec::new(),
+        };
+        self.doc_scroll = ScrollHandle::new();
+        self.active_outline = None;
         self.load_tree("", cx);
         self.load_revision(cx);
     }
@@ -573,6 +589,12 @@ impl XWikiApp {
         self.tree_path = path.to_string();
         self.doc_path = None;
         self.doc_content.clear();
+        self.doc_outline = outline::ParsedDocument {
+            entries: Vec::new(),
+            sections: Vec::new(),
+        };
+        self.doc_scroll = ScrollHandle::new();
+        self.active_outline = None;
         self.doc_loading = false;
         self.tree_loading = true;
         self.tree_error = None;
@@ -614,6 +636,9 @@ impl XWikiApp {
                 Ok(page) => {
                     let _ = this.update(cx, |app, cx| {
                         app.doc_content = page.content;
+                        app.doc_outline = outline::parse_document(&app.doc_content);
+                        app.doc_scroll = ScrollHandle::new();
+                        app.active_outline = app.doc_outline.entries.first().map(|_| 0);
                         app.doc_loading = false;
                         // Context-menu edit: acquire the lock now that the
                         // content is loaded.
@@ -643,6 +668,12 @@ impl XWikiApp {
         self.tree_loading = false;
         self.doc_path = None;
         self.doc_content.clear();
+        self.doc_outline = outline::ParsedDocument {
+            entries: Vec::new(),
+            sections: Vec::new(),
+        };
+        self.doc_scroll = ScrollHandle::new();
+        self.active_outline = None;
         self.history_open = false;
         cx.notify();
     }

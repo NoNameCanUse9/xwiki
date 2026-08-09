@@ -11,7 +11,10 @@ mod ui;
 
 use app::XWikiApp;
 
-actions!(app_actions, [TogglePalette, ToggleTheme, QuickOpen, SaveEditor]);
+actions!(
+    app_actions,
+    [TogglePalette, ToggleTheme, QuickOpen, SaveEditor]
+);
 
 fn main() {
     // WSLg: the native-Wayland + swiftshader Vulkan path renders a blank
@@ -31,7 +34,9 @@ fn main() {
             .map(|h| format!("{h}/.config/agentdocs-client/panic.log"))
             .unwrap_or_else(|_| "/tmp/agentdocs-client-panic.log".into());
         let _ = std::fs::create_dir_all(
-            log.rsplit_once('/').map(|(d, _)| d.to_string()).unwrap_or_default(),
+            log.rsplit_once('/')
+                .map(|(d, _)| d.to_string())
+                .unwrap_or_default(),
         );
         let _ = std::fs::write(&log, format!("panic: {info}\n"));
         eprintln!("PANIC: {info}");
@@ -82,20 +87,23 @@ fn main() {
         ]);
 
         cx.spawn(async move |cx| {
-            cx.open_window(WindowOptions {
-                titlebar: Some(TitlebarOptions {
-                    title: Some("AgentDocs".into()),
+            cx.open_window(
+                WindowOptions {
+                    titlebar: Some(TitlebarOptions {
+                        title: Some("AgentDocs".into()),
+                        ..Default::default()
+                    }),
+                    // Plan §0.3: desktop window contract — never smaller than
+                    // 960×640 so panels + main content stay usable.
+                    window_min_size: Some(size(px(960.0), px(640.0))),
                     ..Default::default()
-                }),
-                // Plan §0.3: desktop window contract — never smaller than
-                // 960×640 so panels + main content stay usable.
-                window_min_size: Some(size(px(960.0), px(640.0))),
-                ..Default::default()
-            }, |window, cx| {
-                let view = cx.new(|cx| XWikiApp::new(window, cx));
-                // The first level on the window must be a Root.
-                cx.new(|cx| Root::new(view, window, cx).bg(cx.theme().background))
-            })
+                },
+                |window, cx| {
+                    let view = cx.new(|cx| XWikiApp::new(window, cx));
+                    // The first level on the window must be a Root.
+                    cx.new(|cx| Root::new(view, window, cx).bg(cx.theme().background))
+                },
+            )
             .expect("Failed to open window");
         })
         .detach();

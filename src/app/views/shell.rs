@@ -4,7 +4,7 @@ use gpui::*;
 use gpui_component::{button::*, *};
 
 use crate::app::{Screen, XWikiApp};
-use crate::ui::{mono_label, tokens};
+use crate::ui::{app_icon, mono_label, tokens};
 
 impl XWikiApp {
     pub(crate) fn render_authenticated_shell(
@@ -61,7 +61,14 @@ impl XWikiApp {
                     .flex()
                     .items_center()
                     .gap_3()
-                    .child(mono_label("AgentDocs").text_color(theme.accent))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .child(app_icon().size(px(24.0)))
+                            .child(mono_label("AgentDocs").text_color(theme.accent)),
+                    )
                     .child(div().w(px(1.0)).h(px(16.0)).bg(theme.border))
                     .child(
                         div()

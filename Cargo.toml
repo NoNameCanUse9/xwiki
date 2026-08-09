@@ -16,6 +16,7 @@ gpui_platform = { git = "https://github.com/zed-industries/zed.git", features = 
 ] }
 gpui-component = { git = "https://github.com/longbridge/gpui-component" }
 gpui-component-assets = { git = "https://github.com/longbridge/gpui-component" }
+markdown = "1"
 reqwest = { version = "0.12", default-features = false, features = [
   "json",
   "cookies",

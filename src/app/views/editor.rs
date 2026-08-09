@@ -258,8 +258,6 @@ impl XWikiApp {
             )
     }
 
-    /// Tab-style button for Edit/Preview toggle.
-    /// Matches demo: active tab has accent color + bottom border; inactive is muted.
     fn editor_tab_button(
         &self,
         cx: &mut Context<Self>,

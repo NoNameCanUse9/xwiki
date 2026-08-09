@@ -4,7 +4,11 @@
 use gpui::StatefulInteractiveElement;
 use gpui::*;
 use gpui_component::{
-    button::*, input::Input, menu::ContextMenuExt, scroll::ScrollableElement as _, *,
+    button::*,
+    input::Input,
+    menu::{ContextMenuExt, DropdownMenu},
+    scroll::ScrollableElement as _,
+    *,
 };
 
 use crate::app::{
@@ -117,6 +121,7 @@ impl XWikiApp {
             .max_w(px(tokens::PROJECT_GRID_MAX));
         for p in projects {
             let id = p.id.clone();
+            let name = p.name.clone();
             let archived = p.archived;
             let _action_id = id.clone();
             let _action_busy = self.project_action.as_deref() == Some(id.as_str());
@@ -178,21 +183,12 @@ impl XWikiApp {
                                     let menu_id = id.clone();
                                     let menu_name = p.name.clone();
                                     let menu_archived = archived;
-                                    div()
-                                        .id(format!("project-menu-{}", id))
-                                        .flex()
-                                        .items_center()
-                                        .justify_center()
-                                        .cursor_pointer()
-                                        .rounded(px(tokens::RADIUS_SMALL))
-                                        .p_1()
-                                        .hover(|s| s.bg(theme.list_hover))
-                                        .child(
-                                            Icon::new(IconName::EllipsisVertical)
-                                                .with_size(px(16.0))
-                                                .text_color(theme.muted_foreground),
-                                        )
-                                        .context_menu(move |menu, _window, _cx| {
+                                    Button::new(format!("project-menu-{}", id))
+                                        .ghost()
+                                        .compact()
+                                        .icon(IconName::EllipsisVertical)
+                                        .tooltip("项目操作")
+                                        .dropdown_menu(move |menu, _window, _cx| {
                                             let mut m = menu.menu(
                                                 "打开项目",
                                                 Box::new(ProjectContextAction {
@@ -217,14 +213,13 @@ impl XWikiApp {
                                                     current_name: menu_name.clone(),
                                                 }),
                                             );
-                                            m = m.menu(
+                                            m.menu(
                                                 "删除项目",
                                                 Box::new(ProjectDeleteAction {
                                                     project_id: menu_id.clone(),
                                                     project_name: menu_name.clone(),
                                                 }),
-                                            );
-                                            m
+                                            )
                                         })
                                 }),
                         ),
@@ -299,6 +294,20 @@ impl XWikiApp {
                     Box::new(ProjectArchiveAction {
                         project_id: id.clone(),
                         archived: !archived,
+                    }),
+                );
+                m = m.menu(
+                    "重命名",
+                    Box::new(ProjectRenameAction {
+                        project_id: id.clone(),
+                        current_name: name.clone(),
+                    }),
+                );
+                m = m.menu(
+                    "删除项目",
+                    Box::new(ProjectDeleteAction {
+                        project_id: id.clone(),
+                        project_name: name.clone(),
                     }),
                 );
                 m
