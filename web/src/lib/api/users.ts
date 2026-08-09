@@ -36,3 +36,16 @@ export function enableUser(id: string) {
     method: "POST",
   });
 }
+
+export function resetUserPassword(id: string, password: string) {
+  return api<{ ok: boolean }>(`/users/${encodeURIComponent(id)}/password`, {
+    method: "POST",
+    body: JSON.stringify({ password }),
+  });
+}
+
+export function deleteUser(id: string) {
+  return api<{ ok: boolean }>(`/users/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+}

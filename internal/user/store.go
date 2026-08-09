@@ -122,6 +122,28 @@ func (s *Store) SetDisabled(ctx context.Context, id string, disabled bool, at ti
 	return nil
 }
 
+// Delete removes a user; sessions and password resets cascade.
+func (s *Store) Delete(ctx context.Context, id string) error {
+	res, err := s.db.ExecContext(ctx, `DELETE FROM users WHERE id = ?`, id)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// DeleteSessionsForUser invalidates every session of a user (used on password reset).
+func (s *Store) DeleteSessionsForUser(ctx context.Context, id string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM sessions WHERE user_id = ?`, id)
+	return err
+}
+
 type rowScanner interface {
 	Scan(dest ...any) error
 }

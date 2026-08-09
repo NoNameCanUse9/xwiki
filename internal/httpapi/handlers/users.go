@@ -63,7 +63,7 @@ func (h *UserHandler) Create(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC()
 	u := &user.User{
 		ID: id.New("usr"), Username: req.Username,
-		DisplayName: firstNonEmpty(req.DisplayName, req.Username),
+		DisplayName:  firstNonEmpty(req.DisplayName, req.Username),
 		PasswordHash: hash, IsAdmin: req.IsAdmin,
 		CreatedAt: now, UpdatedAt: now,
 	}
@@ -127,6 +127,71 @@ func (h *UserHandler) setDisabled(w http.ResponseWriter, r *http.Request, disabl
 		return
 	}
 	response.WriteJSON(w, http.StatusOK, map[string]any{"user": publicUserView(updated)})
+}
+
+// ResetPassword handles POST /api/v1/users/{id}/password (admin only).
+func (h *UserHandler) ResetPassword(w http.ResponseWriter, r *http.Request) {
+	userID := request.PathParam(r, "id")
+	var req struct {
+		Password string `json:"password"`
+	}
+	if err := request.DecodeJSON(w, r, &req, h.cfg.MaxBodyBytes); err != nil || len(req.Password) < 8 {
+		response.WriteError(w, r, http.StatusBadRequest, "invalid_password", "password must be at least 8 characters")
+		return
+	}
+	if _, err := h.svc.GetByID(r.Context(), userID); err != nil {
+		response.WriteError(w, r, http.StatusNotFound, "user_not_found", "user not found")
+		return
+	}
+	hash, err := auth.HashPassword(req.Password)
+	if err != nil {
+		h.log.Error("hash password failed", "error", err)
+		response.WriteError(w, r, http.StatusInternalServerError, "internal_error", "could not reset password")
+		return
+	}
+	if err := h.svc.UpdatePassword(r.Context(), userID, hash); err != nil {
+		if err == user.ErrNotFound {
+			response.WriteError(w, r, http.StatusNotFound, "user_not_found", "user not found")
+			return
+		}
+		h.log.Error("reset password failed", "error", err)
+		response.WriteError(w, r, http.StatusInternalServerError, "internal_error", "could not reset password")
+		return
+	}
+	// 重置密码后使该用户所有会话失效（仅保留当前管理员会话不受影响）。
+	if err := h.svc.DeleteSessionsForUser(r.Context(), userID); err != nil {
+		h.log.Error("delete sessions failed", "error", err)
+	}
+	response.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// Delete handles DELETE /api/v1/users/{id} (admin only).
+func (h *UserHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	userID := request.PathParam(r, "id")
+	me := middleware.UserFrom(r)
+	if me != nil && me.ID == userID {
+		response.WriteError(w, r, http.StatusBadRequest, "cannot_delete_self", "cannot delete your own account")
+		return
+	}
+	target, err := h.svc.GetByID(r.Context(), userID)
+	if err != nil {
+		response.WriteError(w, r, http.StatusNotFound, "user_not_found", "user not found")
+		return
+	}
+	if target.IsAdmin {
+		response.WriteError(w, r, http.StatusBadRequest, "cannot_delete_admin", "admin accounts cannot be deleted")
+		return
+	}
+	if err := h.svc.Delete(r.Context(), userID); err != nil {
+		if err == user.ErrNotFound {
+			response.WriteError(w, r, http.StatusNotFound, "user_not_found", "user not found")
+			return
+		}
+		h.log.Error("delete user failed", "error", err)
+		response.WriteError(w, r, http.StatusInternalServerError, "internal_error", "could not delete user")
+		return
+	}
+	response.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func publicUserView(u *user.User) map[string]any {
