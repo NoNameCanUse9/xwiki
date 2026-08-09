@@ -1,0 +1,357 @@
+/* Hallmark · macrostructure: Component Playground · tone: technical · anchor hue: cobalt */
+/* Hallmark · pre-emit critique: P4 H4 E4 S5 R5 V4 · contrast: pass (40–41) · nav: N3 · footer: none · slop: pass (42–45) · honest: pass (46) · chrome: pass (47) · tokens: pass (48) · responsive: pass (49) · mobile: pass (34, 49, 50–57) */
+/* Hallmark · genre: modern-minimal · theme: Cobalt · enrichment: none · nav: N3 side-rail · footer: none */
+/* AgentDocs API reference adapter: keeps Scalar's interaction model, replaces its visual register. */
+
+:root {
+  --space-2xs: 0.25rem;
+  --space-xs: 0.5rem;
+  --space-sm: 0.75rem;
+  --space-md: 1rem;
+  --space-lg: 1.5rem;
+  --space-xl: 2.5rem;
+  --text-xs: 0.6875rem;
+  --text-sm: 0.8125rem;
+  --text-md: 0.9375rem;
+  --dur-micro: 120ms;
+  --dur-short: 220ms;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --api-docs-header-height: 3rem;
+  --z-sticky: 200;
+}
+
+.api-docs-shell {
+  min-height: 100dvh;
+  background: var(--color-paper);
+  color: var(--color-ink-2);
+  overflow-x: clip;
+}
+
+.api-docs-masthead {
+  position: relative;
+  z-index: var(--z-sticky);
+  display: flex;
+  min-height: var(--api-docs-header-height);
+  align-items: center;
+  gap: var(--space-lg);
+  border-bottom: 1px solid var(--color-rule);
+  padding: var(--space-sm) clamp(var(--space-md), 4vw, var(--space-xl));
+  background: var(--color-paper);
+}
+
+.api-docs-back,
+.api-docs-identity,
+.api-docs-controls {
+  min-width: 0;
+}
+
+.api-docs-back {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--space-xs);
+  color: var(--color-ink-3);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-transform: uppercase;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: color var(--dur-short) var(--ease-out), transform var(--dur-micro) var(--ease-out);
+}
+
+.api-docs-back:hover {
+  color: var(--color-accent);
+}
+
+.api-docs-back:active {
+  transform: translateY(1px);
+}
+
+.api-docs-identity {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: baseline;
+  gap: var(--space-sm);
+  overflow-wrap: anywhere;
+}
+
+.api-docs-identity-label,
+.api-docs-identity-meta {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.api-docs-identity-label {
+  color: var(--color-accent);
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.api-docs-identity-meta {
+  color: var(--color-ink-3);
+}
+
+.api-docs-controls {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  margin-inline-start: auto;
+}
+
+.api-docs-theme-toggle {
+  display: grid;
+  width: 2rem;
+  height: 2rem;
+  place-items: center;
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius);
+  background: var(--color-paper);
+  color: var(--color-ink-2);
+  cursor: pointer;
+  line-height: 1;
+  transition: background-color var(--dur-short) var(--ease-out), color var(--dur-short) var(--ease-out), transform var(--dur-micro) var(--ease-out);
+}
+
+.api-docs-theme-toggle:hover {
+  border-color: var(--color-rule-2);
+  background: var(--color-surface-accent);
+  color: var(--color-accent);
+}
+
+.api-docs-theme-toggle:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.api-docs-theme-toggle:active {
+  transform: translateY(1px);
+}
+
+.api-docs-theme-toggle:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.api-docs-theme-toggle[data-state="loading"] {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+.api-docs-theme-toggle[data-state="error"] {
+  border-color: var(--color-destructive);
+  color: var(--color-destructive);
+}
+
+.api-docs-theme-toggle[data-state="success"] {
+  border-color: var(--color-success);
+  color: var(--color-success);
+}
+
+.api-docs-main {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.api-docs-reference {
+  min-width: 0;
+  min-height: calc(100dvh - var(--api-docs-header-height));
+  background: var(--color-paper);
+}
+
+.api-docs-reference .scalar-api-reference {
+  min-height: calc(100dvh - var(--api-docs-header-height)) !important;
+}
+
+/* Cobalt bridge: Scalar's semantic variables inherit the app's existing tokens. */
+body.light-mode .scalar-app,
+body.dark-mode .scalar-app {
+  --scalar-border-width: 1px;
+  --scalar-radius: var(--radius);
+  --scalar-radius-max: 1rem;
+  --scalar-font: var(--font-body);
+  --scalar-font-code: var(--font-mono);
+  --scalar-heading-1: 2rem;
+  --scalar-page-description: 1rem;
+  --scalar-heading-2: 1.5rem;
+  --scalar-heading-3: 1.125rem;
+  --scalar-heading-4: 1rem;
+  --scalar-heading-5: 1rem;
+  --scalar-heading-6: 1rem;
+  --scalar-paragraph: 0.9375rem;
+  --scalar-small: 0.8125rem;
+  --scalar-mini: 0.75rem;
+  --scalar-micro: 0.6875rem;
+  --scalar-bold: 600;
+  --scalar-semibold: 500;
+  --scalar-regular: 400;
+  --scalar-font-normal: 400;
+  --scalar-font-medium: 500;
+  --scalar-font-bold: 600;
+  --scalar-text-decoration: none;
+  --scalar-text-decoration-hover: underline;
+  --scalar-link-font-weight: 500;
+  --scalar-color-accent: var(--color-accent);
+  --scalar-color-green: var(--color-success);
+  --scalar-color-red: var(--color-destructive);
+  --scalar-color-yellow: var(--color-warning);
+  --scalar-color-blue: var(--color-accent);
+  --scalar-color-orange: var(--color-warning);
+  --scalar-color-purple: var(--color-accent);
+  --scalar-button-1: var(--color-accent);
+  --scalar-button-1-hover: var(--color-accent);
+  --scalar-button-1-color: var(--color-accent-ink);
+  --scalar-shadow-1: var(--shadow-lift);
+  --scalar-shadow-2: var(--shadow-lift);
+}
+
+body.light-mode .scalar-app {
+  --scalar-background-1: var(--color-paper);
+  --scalar-background-2: var(--color-paper-2);
+  --scalar-background-3: var(--color-rule);
+  --scalar-background-4: var(--color-surface-accent);
+  --scalar-background-accent: var(--color-surface-accent);
+  --scalar-color-1: var(--color-ink);
+  --scalar-color-2: var(--color-ink-2);
+  --scalar-color-3: var(--color-ink-3);
+  --scalar-border-color: var(--color-rule);
+  --scalar-scrollbar-color: var(--color-rule-2);
+  --scalar-scrollbar-color-active: var(--color-accent);
+  --scalar-lifted-brightness: 1;
+  --scalar-backdrop-brightness: 1;
+}
+
+body.dark-mode .scalar-app {
+  --scalar-background-1: var(--color-paper);
+  --scalar-background-2: var(--color-paper-2);
+  --scalar-background-3: var(--color-rule);
+  --scalar-background-4: var(--color-surface-accent);
+  --scalar-background-accent: var(--color-surface-accent);
+  --scalar-color-1: var(--color-ink);
+  --scalar-color-2: var(--color-ink-2);
+  --scalar-color-3: var(--color-ink-3);
+  --scalar-border-color: var(--color-rule);
+  --scalar-scrollbar-color: var(--color-rule-2);
+  --scalar-scrollbar-color-active: var(--color-accent);
+  --scalar-lifted-brightness: 1.2;
+  --scalar-backdrop-brightness: 0.8;
+}
+
+body.light-mode .scalar-app .t-doc__sidebar,
+body.dark-mode .scalar-app .t-doc__sidebar {
+  --scalar-sidebar-background-1: var(--color-paper-2);
+  --scalar-sidebar-color-1: var(--color-ink);
+  --scalar-sidebar-color-2: var(--color-ink-3);
+  --scalar-sidebar-color-active: var(--color-accent);
+  --scalar-sidebar-border-color: var(--color-rule);
+  --scalar-sidebar-item-hover-background: var(--color-surface-accent);
+  --scalar-sidebar-item-hover-color: var(--color-ink);
+  --scalar-sidebar-item-active-background: var(--color-surface-accent);
+  --scalar-sidebar-search-background: var(--color-paper);
+  --scalar-sidebar-search-color: var(--color-ink-3);
+  --scalar-sidebar-search-border-color: var(--color-rule);
+  --scalar-sidebar-indent-border: var(--color-rule);
+  --scalar-sidebar-indent-border-hover: var(--color-rule-2);
+  --scalar-sidebar-indent-border-active: var(--color-accent);
+}
+
+body.light-mode .scalar-app .t-doc__header,
+body.dark-mode .scalar-app .t-doc__header {
+  --scalar-header-background-1: var(--color-paper);
+  --scalar-header-background-2: var(--color-paper-2);
+  --scalar-header-border-color: var(--color-rule);
+  --scalar-header-color-1: var(--color-ink);
+  --scalar-header-color-2: var(--color-ink-3);
+  --scalar-header-call-to-action-color: var(--color-accent);
+}
+
+/* Type is the structure: display face for headings, mono for the API register. */
+.api-docs-reference .scalar-app h1,
+.api-docs-reference .scalar-app h2,
+.api-docs-reference .scalar-app h3,
+.api-docs-reference .scalar-app h4,
+.api-docs-reference .scalar-app h5,
+.api-docs-reference .scalar-app h6,
+.api-docs-reference .scalar-app .section-header,
+.api-docs-reference .scalar-app .operation-title {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-family: var(--font-display);
+  font-style: normal;
+  letter-spacing: -0.02em;
+}
+
+.api-docs-reference .scalar-app .t-editor__page-title h1,
+.api-docs-reference .scalar-app .section-header,
+.api-docs-reference .scalar-app .operation-title {
+  color: var(--color-ink);
+  font-weight: 600;
+}
+
+.api-docs-reference .scalar-app .markdown a,
+.api-docs-reference .scalar-app .t-editor__anchor {
+  color: var(--color-accent);
+}
+
+.api-docs-reference .scalar-app code,
+.api-docs-reference .scalar-app pre,
+.api-docs-reference .scalar-app .scalar-code-block,
+.api-docs-reference .scalar-app .mono {
+  font-family: var(--font-mono);
+}
+
+.api-docs-reference .scalar-app .scalar-code-block,
+.api-docs-reference .scalar-app .request-card,
+.api-docs-reference .scalar-app .response-card {
+  border-color: var(--color-rule);
+  border-radius: var(--radius);
+}
+
+.api-docs-reference .scalar-app .sidebar-search,
+.api-docs-reference .scalar-app input,
+.api-docs-reference .scalar-app select,
+.api-docs-reference .scalar-app textarea {
+  border-radius: var(--radius);
+}
+
+.api-docs-reference .scalar-app button,
+.api-docs-reference .scalar-app [role="button"] {
+  font-family: var(--font-body);
+  white-space: nowrap;
+}
+
+.api-docs-reference .scalar-app :focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+@media (max-width: 40rem) {
+  .api-docs-masthead {
+    gap: var(--space-sm);
+    padding-inline: var(--space-md);
+  }
+
+  .api-docs-identity {
+    gap: var(--space-xs);
+  }
+
+  .api-docs-identity-meta {
+    display: none;
+  }
+
+  .api-docs-back {
+    letter-spacing: 0.06em;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .api-docs-back,
+  .api-docs-theme-toggle {
+    transition-duration: 0.01ms !important;
+  }
+}

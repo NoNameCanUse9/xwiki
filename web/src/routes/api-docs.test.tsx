@@ -25,13 +25,24 @@ describe("ApiDocsPage", () => {
         <ApiDocsPage />
       </MemoryRouter>,
     );
-    expect(screen.getByText("api · openapi 3.0")).toBeInTheDocument();
+    expect(screen.getByText("api · openapi 3.0.3")).toBeInTheDocument();
     expect(screen.getByText("workspace")).toBeInTheDocument();
-    // The Scalar instance is created against the OpenAPI endpoint.
+    expect(screen.getByRole("button", { name: "切换到暗色模式" })).toBeInTheDocument();
+    // The Scalar instance is created against the OpenAPI endpoint with the app theme.
     await vi.waitFor(() =>
       expect(createApiReferenceMock).toHaveBeenCalledWith(
         expect.anything(),
-        { url: "/api/openapi.json" },
+        expect.objectContaining({
+          url: "/api/openapi.json",
+          theme: "default",
+          layout: "modern",
+          showSidebar: true,
+          showDeveloperTools: "always",
+          darkMode: false,
+          forceDarkModeState: "light",
+          hideDarkModeToggle: true,
+          customCss: expect.any(String),
+        }),
       ),
     );
   });

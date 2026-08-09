@@ -63,6 +63,10 @@
   --color-graphite-2: oklch(27% 0.018 260);
   --color-destructive: oklch(55% 0.200 25);
   --color-destructive-ink: oklch(99% 0.002 25);
+  --color-success: oklch(58% 0.145 156);
+  --color-success-ink: oklch(99% 0.002 250);
+  --color-warning: oklch(72% 0.140 80);
+  --color-warning-ink: oklch(24% 0.020 258);
 
   --shadow-lift: 0 1px 2px oklch(24% 0.02 258 / 0.05);
 
@@ -85,6 +89,10 @@
   --color-graphite-2: oklch(22% 0.018 258);
   --color-destructive: oklch(64% 0.180 25);
   --color-destructive-ink: oklch(14% 0.015 258);
+  --color-success: oklch(72% 0.130 156);
+  --color-success-ink: oklch(14% 0.015 258);
+  --color-warning: oklch(78% 0.120 80);
+  --color-warning-ink: oklch(14% 0.015 258);
 
   --shadow-lift: 0 1px 2px oklch(10% 0.02 258 / 0.4);
 

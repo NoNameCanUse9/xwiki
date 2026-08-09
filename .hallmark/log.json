@@ -1,0 +1,11 @@
+[
+  {
+    "date": "2026-08-09",
+    "macrostructure": "Component Playground",
+    "theme": "Cobalt",
+    "enrichment": "none",
+    "brief": "AgentDocs API reference: restore Scalar styling and align the interactive docs surface with the existing Cobalt system",
+    "nav": "N3 side-rail",
+    "footer": "none — docs workspace"
+  }
+]
