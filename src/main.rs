@@ -101,7 +101,10 @@ fn main() {
                 |window, cx| {
                     let view = cx.new(|cx| XWikiApp::new(window, cx));
                     // The first level on the window must be a Root.
-                    cx.new(|cx| Root::new(view, window, cx).bg(cx.theme().background))
+                    // Root paints the active theme background dynamically. Do
+                    // not capture a one-time color here, otherwise switching
+                    // between light and dark modes leaves the surface stale.
+                    cx.new(|cx| Root::new(view, window, cx))
                 },
             )
             .expect("Failed to open window");

@@ -5,6 +5,7 @@ use gpui::InteractiveElement;
 use gpui::*;
 use gpui_component::{
     button::*,
+    input::Input,
     menu::{ContextMenuExt, DropdownMenu},
     scroll::ScrollableElement as _,
     *,
@@ -631,59 +632,66 @@ impl XWikiApp {
         let theme = cx.theme().clone();
         if self.doc_content.trim().is_empty() {
             return div()
+                .id("doc-content-scroll")
                 .flex_1()
-                .flex()
-                .flex_col()
-                .items_center()
-                .justify_center()
-                .gap_3()
-                .text_center()
-                .child(
-                    Icon::new(IconName::File)
-                        .with_size(px(24.0))
-                        .text_color(theme.muted_foreground),
-                )
+                .min_h(px(0.0))
+                .track_scroll(&self.doc_scroll)
+                .overflow_y_scrollbar()
                 .child(
                     div()
-                        .text_lg()
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(theme.foreground)
-                        .child("文档内容为空"),
+                        .min_h(px(320.0))
+                        .flex()
+                        .flex_col()
+                        .items_center()
+                        .justify_center()
+                        .gap_3()
+                        .text_center()
+                        .child(
+                            Icon::new(IconName::File)
+                                .with_size(px(24.0))
+                                .text_color(theme.muted_foreground),
+                        )
+                        .child(
+                            div()
+                                .text_lg()
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .text_color(theme.foreground)
+                                .child("文档内容为空"),
+                        )
+                        .child(
+                            div()
+                                .text_sm()
+                                .text_color(theme.muted_foreground)
+                                .child("可以直接开始编辑，保存后会创建一个新的版本。"),
+                        )
+                        .child(
+                            Button::new("empty-doc-edit")
+                                .rounded(px(tokens::RADIUS))
+                                .icon(IconName::File)
+                                .label("开始编辑")
+                                .on_click(cx.listener(|this, _, _, cx| this.start_edit(cx))),
+                        ),
                 )
-                .child(
-                    div()
-                        .text_sm()
-                        .text_color(theme.muted_foreground)
-                        .child("可以直接开始编辑，保存后会创建一个新的版本。"),
-                )
-                .child(
-                    Button::new("empty-doc-edit")
-                        .rounded(px(tokens::RADIUS))
-                        .icon(IconName::File)
-                        .label("开始编辑")
-                        .on_click(cx.listener(|this, _, _, cx| this.start_edit(cx))),
-                )
+                .child(self.render_content_tools(cx))
+                .child(self.render_doc_panel(cx))
                 .into_any_element();
         }
 
-        let sections =
-            self.doc_outline
-                .sections
-                .iter()
-                .enumerate()
-                .map(|(index, section)| {
-                    div()
-                        .id(format!("doc-section-{index}"))
-                        .w_full()
-                        .px_6()
-                        .py_4()
-                        .child(div().w(px(tokens::MEASURE)).max_w_full().child(
-                            crate::ui::markdown(
-                                format!("doc-content-{index}"),
-                                section.source.clone(),
-                            ),
-                        ))
-                });
+        let sections = self
+            .doc_outline
+            .sections
+            .iter()
+            .enumerate()
+            .map(|(index, section)| {
+                div()
+                    .id(format!("doc-section-{index}"))
+                    .w_full()
+                    .px_6()
+                    .py_4()
+                    .child(div().w(px(tokens::MEASURE)).max_w_full().mx_auto().child(
+                        crate::ui::markdown(format!("doc-content-{index}"), section.source.clone()),
+                    ))
+            });
 
         div()
             .id("doc-content-scroll")
@@ -707,6 +715,78 @@ impl XWikiApp {
                 }
             }))
             .children(sections)
+            .child(self.render_content_tools(cx))
+            .child(self.render_doc_panel(cx))
+            .into_any_element()
+    }
+
+    fn render_content_tools(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = cx.theme().clone();
+        div()
+            .w_full()
+            .px_6()
+            .py_4()
+            .border_t_1()
+            .border_color(theme.border)
+            .child(
+                div()
+                    .w(px(tokens::MEASURE))
+                    .max_w_full()
+                    .mx_auto()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap_3()
+                    .child(
+                        div()
+                            .v_flex()
+                            .gap_1()
+                            .child(
+                                mono_label("DOCUMENT CONTEXT").text_color(theme.muted_foreground),
+                            )
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .text_color(theme.foreground)
+                                    .child("文档分析与附件"),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .gap_2()
+                            .child(
+                                Button::new("content-backlinks")
+                                    .secondary()
+                                    .outline()
+                                    .compact()
+                                    .label("文档分析")
+                                    .selected(self.doc_panel == crate::app::DocPanel::Backlinks)
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        if this.doc_panel == crate::app::DocPanel::Backlinks {
+                                            this.close_doc_panel(cx);
+                                        } else {
+                                            this.open_backlinks_panel(cx);
+                                        }
+                                    })),
+                            )
+                            .child(
+                                Button::new("content-attachments")
+                                    .secondary()
+                                    .outline()
+                                    .compact()
+                                    .label("附件")
+                                    .selected(self.doc_panel == crate::app::DocPanel::Attachments)
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        if this.doc_panel == crate::app::DocPanel::Attachments {
+                                            this.close_doc_panel(cx);
+                                        } else {
+                                            this.open_attachments_panel(cx);
+                                        }
+                                    })),
+                            ),
+                    ),
+            )
             .into_any_element()
     }
 
@@ -873,6 +953,23 @@ impl XWikiApp {
                                             ),
                                     )
                                     .child(
+                                        Button::new("open-file-history")
+                                            .rounded(px(tokens::RADIUS))
+                                            .label("文件历史")
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                this.open_file_history_panel(cx)
+                                            })),
+                                    )
+                                    .child(
+                                        Button::new("open-share")
+                                            .primary()
+                                            .rounded(px(tokens::RADIUS))
+                                            .label("分享")
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                this.open_share_panel(cx)
+                                            })),
+                                    )
+                                    .child(
                                         Button::new("start-edit")
                                             .rounded(px(tokens::RADIUS))
                                             .icon(IconName::File)
@@ -895,6 +992,358 @@ impl XWikiApp {
                     .text_color(theme.muted_foreground)
                     .child("选择左侧文档")
             })
+            .into_any_element()
+    }
+
+    fn render_doc_panel(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = cx.theme().clone();
+        if self.doc_panel == crate::app::DocPanel::None {
+            return div().into_any_element();
+        }
+        let title = match self.doc_panel {
+            crate::app::DocPanel::Share => "分享页面",
+            crate::app::DocPanel::Backlinks => "反向链接",
+            crate::app::DocPanel::Attachments => "附件",
+            crate::app::DocPanel::FileHistory => "文件历史",
+            crate::app::DocPanel::None => "",
+        };
+        let header = div()
+            .flex()
+            .items_center()
+            .justify_between()
+            .border_b_1()
+            .border_color(theme.border)
+            .px_6()
+            .py_3()
+            .child(
+                div()
+                    .font_family(tokens::FONT_MONO)
+                    .text_xs()
+                    .text_color(theme.muted_foreground)
+                    .child(title),
+            )
+            .child(
+                Button::new("close-doc-panel")
+                    .ghost()
+                    .compact()
+                    .label("关闭")
+                    .on_click(cx.listener(|this, _, _, cx| this.close_doc_panel(cx))),
+            );
+        let body = match self.doc_panel {
+            crate::app::DocPanel::Share => self.render_share_panel(cx),
+            crate::app::DocPanel::Backlinks => self.render_backlinks_panel(cx),
+            crate::app::DocPanel::Attachments => self.render_attachments_panel(cx),
+            crate::app::DocPanel::FileHistory => self.render_file_history_panel(cx),
+            crate::app::DocPanel::None => div().into_any_element(),
+        };
+        div()
+            .flex_none()
+            .border_t_1()
+            .border_color(theme.border)
+            .bg(theme.sidebar)
+            .child(header)
+            .child(body)
+            .into_any_element()
+    }
+
+    fn render_share_panel(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = cx.theme().clone();
+        let body = if self.share_loading {
+            div()
+                .text_sm()
+                .text_color(theme.muted_foreground)
+                .child("正在创建分享链接…")
+        } else if let Some(error) = &self.share_error {
+            div()
+                .text_sm()
+                .text_color(theme.danger)
+                .child(error.clone())
+        } else if let Some(url) = &self.share_url {
+            div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w(px(0.0))
+                        .px_3()
+                        .py_2()
+                        .border_1()
+                        .border_color(theme.border)
+                        .font_family(tokens::FONT_MONO)
+                        .text_xs()
+                        .text_color(theme.foreground)
+                        .overflow_x_hidden()
+                        .text_ellipsis()
+                        .whitespace_nowrap()
+                        .child(url.clone()),
+                )
+                .child(
+                    Button::new("copy-share-url")
+                        .primary()
+                        .rounded(px(tokens::RADIUS))
+                        .label("复制完整 URL")
+                        .on_click(cx.listener(|this, _, _, cx| this.copy_share_url(cx))),
+                )
+        } else {
+            div()
+                .text_sm()
+                .text_color(theme.muted_foreground)
+                .child("点击“分享”创建一个只读页面链接。")
+        };
+        div().px_6().py_4().child(body).into_any_element()
+    }
+
+    fn render_backlinks_panel(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = cx.theme().clone();
+        if self.backlinks_loading {
+            return div()
+                .px_6()
+                .py_4()
+                .text_sm()
+                .text_color(theme.muted_foreground)
+                .child("正在加载反向链接…")
+                .into_any_element();
+        }
+        if let Some(error) = &self.backlinks_error {
+            return div()
+                .px_6()
+                .py_4()
+                .text_sm()
+                .text_color(theme.danger)
+                .child(error.clone())
+                .into_any_element();
+        }
+        if self.backlinks.is_empty() {
+            return div()
+                .px_6()
+                .py_4()
+                .text_sm()
+                .text_color(theme.muted_foreground)
+                .child("暂无其他页面引用本文档。")
+                .into_any_element();
+        }
+        let items: Vec<AnyElement> = self
+            .backlinks
+            .iter()
+            .map(|item| {
+                let path = item.source.clone();
+                div()
+                    .id(format!("backlink-{}", path))
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .px_6()
+                    .py_3()
+                    .border_b_1()
+                    .border_color(theme.border)
+                    .cursor_pointer()
+                    .hover(|s| s.bg(theme.list_hover))
+                    .child(
+                        div()
+                            .font_family(tokens::FONT_MONO)
+                            .text_xs()
+                            .text_color(theme.accent)
+                            .child(path.clone()),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(theme.muted_foreground)
+                            .child(item.snippet.clone()),
+                    )
+                    .on_click(cx.listener(move |this, _, _, cx| this.open_doc(&path, cx)))
+                    .into_any_element()
+            })
+            .collect();
+        div()
+            .max_h(px(220.0))
+            .overflow_y_scrollbar()
+            .children(items)
+            .into_any_element()
+    }
+
+    fn render_attachments_panel(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = cx.theme().clone();
+        let mut content = div().v_flex().gap_3().px_6().py_4();
+        content = content
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(theme.muted_foreground)
+                    .child("上传路径"),
+            )
+            .child(Input::new(&self.attachment_source_input).w_full())
+            .child(
+                Button::new("upload-attachment")
+                    .primary()
+                    .rounded(px(tokens::RADIUS))
+                    .label(if self.attachments_loading {
+                        "处理中…"
+                    } else {
+                        "读取并上传附件"
+                    })
+                    .disabled(self.attachments_loading)
+                    .on_click(cx.listener(|this, _, _, cx| this.upload_attachment(cx))),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(theme.muted_foreground)
+                    .child("下载目标（留空则保存到当前目录）"),
+            )
+            .child(Input::new(&self.attachment_destination_input).w_full());
+        if let Some(error) = &self.attachments_error {
+            content = content.child(
+                div()
+                    .text_xs()
+                    .text_color(theme.danger)
+                    .child(error.clone()),
+            );
+        }
+        if self.attachments_loading {
+            content = content.child(
+                div()
+                    .text_xs()
+                    .text_color(theme.muted_foreground)
+                    .child("正在处理附件…"),
+            );
+        }
+        if self.attachments.is_empty() && !self.attachments_loading {
+            content = content.child(
+                div()
+                    .text_xs()
+                    .text_color(theme.muted_foreground)
+                    .child("暂无附件。"),
+            );
+        }
+        let rows: Vec<AnyElement> = self
+            .attachments
+            .iter()
+            .map(|item| {
+                let path = item.path.clone();
+                let filename = item.name.clone();
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap_2()
+                    .border_t_1()
+                    .border_color(theme.border)
+                    .py_2()
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w(px(0.0))
+                            .font_family(tokens::FONT_MONO)
+                            .text_xs()
+                            .text_color(theme.foreground)
+                            .overflow_x_hidden()
+                            .text_ellipsis()
+                            .whitespace_nowrap()
+                            .child(filename),
+                    )
+                    .child(
+                        Button::new(format!("download-attachment-{}", path))
+                            .compact()
+                            .label("下载")
+                            .on_click(cx.listener({
+                                let path = path.clone();
+                                move |this, _, _, cx| this.download_attachment(&path, cx)
+                            })),
+                    )
+                    .child(
+                        Button::new(format!("delete-attachment-{}", path))
+                            .danger()
+                            .compact()
+                            .label("删除")
+                            .on_click(cx.listener({
+                                let path = path.clone();
+                                move |this, _, window, cx| {
+                                    this.confirm_delete_attachment(window, cx, path.clone())
+                                }
+                            })),
+                    )
+                    .into_any_element()
+            })
+            .collect();
+        content.children(rows).into_any_element()
+    }
+
+    fn render_file_history_panel(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = cx.theme().clone();
+        if self.file_history_loading {
+            return div()
+                .px_6()
+                .py_4()
+                .text_sm()
+                .text_color(theme.muted_foreground)
+                .child("正在加载文件历史…")
+                .into_any_element();
+        }
+        if let Some(error) = &self.file_history_error {
+            return div()
+                .px_6()
+                .py_4()
+                .text_sm()
+                .text_color(theme.danger)
+                .child(error.clone())
+                .into_any_element();
+        }
+        if self.file_history.is_empty() {
+            return div()
+                .px_6()
+                .py_4()
+                .text_sm()
+                .text_color(theme.muted_foreground)
+                .child("该文件暂无历史记录。")
+                .into_any_element();
+        }
+        let rows: Vec<AnyElement> = self
+            .file_history
+            .iter()
+            .map(|commit| {
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_3()
+                    .px_6()
+                    .py_2()
+                    .border_b_1()
+                    .border_color(theme.border)
+                    .child(
+                        div()
+                            .font_family(tokens::FONT_MONO)
+                            .text_xs()
+                            .text_color(theme.accent)
+                            .child(tokens::truncate(&commit.sha, 10)),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w(px(0.0))
+                            .text_xs()
+                            .text_color(theme.foreground)
+                            .overflow_x_hidden()
+                            .text_ellipsis()
+                            .whitespace_nowrap()
+                            .child(commit.message.clone()),
+                    )
+                    .child(
+                        div()
+                            .font_family(tokens::FONT_MONO)
+                            .text_xs()
+                            .text_color(theme.muted_foreground)
+                            .child(commit.date.clone()),
+                    )
+                    .into_any_element()
+            })
+            .collect();
+        div()
+            .max_h(px(240.0))
+            .overflow_y_scrollbar()
+            .children(rows)
             .into_any_element()
     }
 }

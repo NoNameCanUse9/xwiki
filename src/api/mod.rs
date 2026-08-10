@@ -198,6 +198,44 @@ impl Client {
         .await
     }
 
+    /// Send a request whose successful response is an opaque byte stream.
+    /// This is used for ZIP/Bundle exports and attachment downloads; keeping
+    /// it separate from `send` avoids accidentally decoding binary data as
+    /// JSON or buffering it in a string.
+    async fn send_bytes(req: reqwest::RequestBuilder) -> Result<Vec<u8>, ApiError> {
+        tokio_spawn(async move {
+            let resp = req.send().await.map_err(network_error)?;
+            let status = resp.status().as_u16();
+            if !resp.status().is_success() {
+                let body: Result<ErrorEnvelope, _> = resp.json().await;
+                let (code, message, request_id) = match body {
+                    Ok(env) => (
+                        env.error.code,
+                        env.error.message,
+                        Some(env.error.request_id),
+                    ),
+                    Err(_) => ("http_error".into(), format!("HTTP {status}"), None),
+                };
+                return Err(ApiError {
+                    code,
+                    message,
+                    request_id,
+                    status,
+                });
+            }
+            resp.bytes()
+                .await
+                .map(|bytes| bytes.to_vec())
+                .map_err(|e| ApiError {
+                    code: "decode_error".into(),
+                    message: e.to_string(),
+                    request_id: None,
+                    status,
+                })
+        })
+        .await
+    }
+
     async fn send_with_session<T: DeserializeOwned + Send + 'static>(
         req: reqwest::RequestBuilder,
     ) -> Result<(T, Option<String>), ApiError> {
@@ -575,6 +613,213 @@ impl Client {
         )
         .await?;
         Ok(resp.results)
+    }
+
+    /// Create (or reuse) the public share for one document.
+    pub async fn create_share(&self, project_id: &str, path: &str) -> Result<dto::Share, ApiError> {
+        #[derive(Serialize)]
+        struct Body<'a> {
+            path: &'a str,
+        }
+        Self::send(
+            self.http
+                .post(self.url(&format!("/api/v1/projects/{project_id}/shares")))
+                .json(&Body { path }),
+        )
+        .await
+    }
+
+    pub async fn backlinks(
+        &self,
+        project_id: &str,
+        path: &str,
+    ) -> Result<Vec<dto::Backlink>, ApiError> {
+        let resp: dto::BacklinksResponse = Self::send(
+            self.http
+                .get(self.url(&format!("/api/v1/projects/{project_id}/backlinks")))
+                .query(&[("path", path)]),
+        )
+        .await?;
+        Ok(resp.backlinks)
+    }
+
+    pub async fn file_history(
+        &self,
+        project_id: &str,
+        path: &str,
+    ) -> Result<Vec<dto::Commit>, ApiError> {
+        let resp: dto::FileHistoryResponse = Self::send(self.http.get(self.url(&format!(
+            "/api/v1/projects/{project_id}/files/history/{path}"
+        ))))
+        .await?;
+        Ok(resp.commits)
+    }
+
+    pub async fn export_zip(&self, project_id: &str) -> Result<Vec<u8>, ApiError> {
+        Self::send_bytes(
+            self.http
+                .get(self.url(&format!("/api/v1/projects/{project_id}/export.zip"))),
+        )
+        .await
+    }
+
+    pub async fn export_bundle(&self, project_id: &str) -> Result<Vec<u8>, ApiError> {
+        Self::send_bytes(
+            self.http
+                .get(self.url(&format!("/api/v1/projects/{project_id}/export.bundle"))),
+        )
+        .await
+    }
+
+    pub async fn download_attachment(
+        &self,
+        project_id: &str,
+        path: &str,
+    ) -> Result<Vec<u8>, ApiError> {
+        Self::send_bytes(
+            self.http
+                .get(self.url(&format!("/api/v1/projects/{project_id}/attachments/{path}"))),
+        )
+        .await
+    }
+
+    pub async fn openapi(&self) -> Result<serde_json::Value, ApiError> {
+        Self::send(self.http.get(self.url("/api/openapi.json"))).await
+    }
+
+    #[allow(dead_code)]
+    pub async fn import_zip(
+        &self,
+        project_id: &str,
+        base_revision: &str,
+        message: &str,
+        files: Vec<dto::ImportFile>,
+    ) -> Result<dto::ImportResult, ApiError> {
+        let body = dto::ImportRequest {
+            base_revision: base_revision.to_string(),
+            message: message.to_string(),
+            files,
+        };
+        Self::send(
+            self.http
+                .post(self.url(&format!("/api/v1/projects/{project_id}/import")))
+                .json(&body),
+        )
+        .await
+    }
+
+    pub async fn import_repo(
+        &self,
+        name: &str,
+        url: &str,
+    ) -> Result<dto::ImportProjectResult, ApiError> {
+        Self::send(
+            self.http
+                .post(self.url("/api/v1/import/repo"))
+                .query(&[("name", name), ("url", url)]),
+        )
+        .await
+    }
+
+    pub async fn import_bundle(
+        &self,
+        name: &str,
+        bundle: Vec<u8>,
+    ) -> Result<dto::ImportProjectResult, ApiError> {
+        let part = reqwest::multipart::Part::bytes(bundle).file_name("project.bundle");
+        let form = reqwest::multipart::Form::new()
+            .text("name", name.to_string())
+            .part("file", part);
+        Self::send(
+            self.http
+                .post(self.url("/api/v1/import/bundle"))
+                .query(&[("name", name)])
+                .multipart(form),
+        )
+        .await
+    }
+
+    pub async fn import_folder(
+        &self,
+        name: &str,
+        description: &str,
+        files: Vec<dto::UploadFile>,
+    ) -> Result<dto::ImportProjectResult, ApiError> {
+        let mut form = reqwest::multipart::Form::new()
+            .text("name", name.to_string())
+            .text("description", description.to_string());
+        for file in files {
+            let path = file.path.clone();
+            form = form.text("paths", path.clone()).part(
+                "files",
+                reqwest::multipart::Part::bytes(file.content).file_name(path),
+            );
+        }
+        Self::send(
+            self.http
+                .post(self.url("/api/v1/projects/import-folder"))
+                .multipart(form),
+        )
+        .await
+    }
+
+    /// Upload an attachment through the same atomic changeset endpoint used
+    /// by the web client. The server stores the content as base64 in Git.
+    pub async fn upload_attachment(
+        &self,
+        project_id: &str,
+        base_revision: &str,
+        path: &str,
+        content_base64: &str,
+    ) -> Result<dto::ChangesetResult, ApiError> {
+        #[derive(Serialize)]
+        struct EncodedChange<'a> {
+            op: &'a str,
+            path: &'a str,
+            content: &'a str,
+            encoding: &'a str,
+        }
+        #[derive(Serialize)]
+        struct Body<'a> {
+            base_revision: &'a str,
+            message: &'a str,
+            changes: Vec<EncodedChange<'a>>,
+        }
+        Self::send(
+            self.http
+                .post(self.url(&format!("/api/v1/projects/{project_id}/changesets")))
+                .json(&Body {
+                    base_revision,
+                    message: "",
+                    changes: vec![EncodedChange {
+                        op: "create",
+                        path,
+                        content: content_base64,
+                        encoding: "base64",
+                    }],
+                }),
+        )
+        .await
+    }
+
+    pub async fn delete_attachment(
+        &self,
+        project_id: &str,
+        base_revision: &str,
+        path: &str,
+    ) -> Result<dto::ChangesetResult, ApiError> {
+        self.apply_changeset(
+            project_id,
+            base_revision,
+            "删除附件",
+            vec![dto::Change {
+                op: "delete".into(),
+                path: path.into(),
+                new_path: None,
+                content: None,
+            }],
+        )
+        .await
     }
 
     pub async fn tokens(&self) -> Result<Vec<dto::Token>, ApiError> {
@@ -997,6 +1242,65 @@ pub mod dto {
     pub struct SearchResponse {
         #[serde(default, deserialize_with = "crate::api::de_null_default")]
         pub results: Vec<SearchResult>,
+    }
+
+    #[derive(Debug, Deserialize, Clone)]
+    pub struct Share {
+        pub token: String,
+        pub url: String,
+    }
+
+    #[derive(Debug, Deserialize, Clone)]
+    pub struct Backlink {
+        pub source: String,
+        pub snippet: String,
+    }
+
+    #[derive(Debug, Deserialize)]
+    pub struct BacklinksResponse {
+        #[serde(default)]
+        pub path: String,
+        #[serde(default, deserialize_with = "crate::api::de_null_default")]
+        pub backlinks: Vec<Backlink>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    pub struct FileHistoryResponse {
+        pub path: String,
+        #[serde(default, deserialize_with = "crate::api::de_null_default")]
+        pub commits: Vec<Commit>,
+    }
+
+    #[derive(Debug, Serialize)]
+    pub struct ImportFile {
+        pub path: String,
+        pub content: String,
+    }
+
+    #[derive(Debug, Serialize)]
+    pub struct ImportRequest {
+        pub base_revision: String,
+        pub message: String,
+        pub files: Vec<ImportFile>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    pub struct ImportResult {
+        pub commit: String,
+        pub revision: String,
+        pub imported: u32,
+    }
+
+    #[derive(Debug, Deserialize)]
+    pub struct ImportProjectResult {
+        pub project: Project,
+        pub commits: u32,
+    }
+
+    #[derive(Debug, Clone)]
+    pub struct UploadFile {
+        pub path: String,
+        pub content: Vec<u8>,
     }
 
     #[derive(Debug, Deserialize)]

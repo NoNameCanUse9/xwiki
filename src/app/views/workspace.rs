@@ -484,7 +484,30 @@ impl XWikiApp {
                             .flex_col()
                             .overflow_y_scrollbar()
                             .children(items)
-                    }),
+                    })
+                    .child(
+                        div()
+                            .flex_none()
+                            .border_t_1()
+                            .border_color(theme.border)
+                            .px_3()
+                            .py_3()
+                            .v_flex()
+                            .gap_2()
+                            .child(mono_label("DEVELOPER TOOLS").text_color(theme.muted_foreground))
+                            .child(
+                                Button::new("sidebar-api-reference")
+                                    .secondary()
+                                    .outline()
+                                    .compact()
+                                    .w_full()
+                                    .icon(IconName::File)
+                                    .label("API Reference")
+                                    .on_click(
+                                        cx.listener(|this, _, _, cx| this.open_api_reference(cx)),
+                                    ),
+                            ),
+                    ),
                 div()
                     .flex_1()
                     .min_w(px(0.0))
@@ -594,6 +617,17 @@ impl XWikiApp {
                                     .tooltip(format!("快速打开 ({} P)", tokens::MOD_KEY))
                                     .on_click(cx.listener(|this, _, window, cx| {
                                         this.toggle_quick_open(window, cx)
+                                    })),
+                            )
+                            .child(
+                                Button::new("import-project")
+                                    .secondary()
+                                    .outline()
+                                    .compact()
+                                    .rounded(px(tokens::RADIUS))
+                                    .label("导入项目")
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.open_import_dialog(window, cx)
                                     })),
                             )
                             .child(

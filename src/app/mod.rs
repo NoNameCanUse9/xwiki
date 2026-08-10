@@ -1,3 +1,4 @@
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
@@ -115,6 +116,15 @@ pub(crate) enum ProjectFilter {
     Archived,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DocPanel {
+    None,
+    Share,
+    Backlinks,
+    Attachments,
+    FileHistory,
+}
+
 /// A filterable ⌘P entry.
 #[derive(Clone)]
 pub(crate) struct QuickItem {
@@ -156,6 +166,22 @@ pub struct XWikiApp {
     doc_outline: outline::ParsedDocument,
     doc_scroll: ScrollHandle,
     active_outline: Option<usize>,
+    /// Contextual API-backed panels for the current document.
+    doc_panel: DocPanel,
+    share_loading: bool,
+    share_url: Option<String>,
+    share_error: Option<String>,
+    backlinks_loading: bool,
+    backlinks_error: Option<String>,
+    backlinks: Vec<dto::Backlink>,
+    attachments_loading: bool,
+    attachments_error: Option<String>,
+    attachments: Vec<dto::TreeEntry>,
+    file_history_loading: bool,
+    file_history_error: Option<String>,
+    file_history: Vec<dto::Commit>,
+    attachment_source_input: Entity<InputState>,
+    attachment_destination_input: Entity<InputState>,
     // Edit state: page lock + markdown editor + commit message.
     editing: bool,
     edit_path: Option<String>,
@@ -223,6 +249,13 @@ pub struct XWikiApp {
     audit_entries: Vec<dto::AuditEntry>,
     audit_loading: bool,
     audit_error: Option<String>,
+    /// OpenAPI reference is rendered as a native read-only reference page.
+    api_reference_open: bool,
+    api_reference_loading: bool,
+    api_reference_error: Option<String>,
+    api_reference: Option<String>,
+    api_reference_selected_path: Option<String>,
+    api_reference_selected_method: Option<String>,
     /// Edit requested from a context menu while the doc is still loading.
     pending_edit: Option<String>,
     /// Cached window title; `set_window_title` only on change.
@@ -235,6 +268,7 @@ enum Screen {
     Login,
     Workspace,
     Settings,
+    ApiReference,
 }
 
 #[derive(Clone)]
@@ -294,6 +328,10 @@ impl XWikiApp {
         });
         let editor_title_input = cx.new(|cx| InputState::new(window, cx).placeholder("文档标题"));
         let history_input = cx.new(|cx| InputState::new(window, cx).placeholder("搜索版本…"));
+        let attachment_source_input =
+            cx.new(|cx| InputState::new(window, cx).placeholder("本地文件路径（≤ 5 MiB）"));
+        let attachment_destination_input =
+            cx.new(|cx| InputState::new(window, cx).placeholder("下载目标路径"));
 
         let settings_server_input = cx.new(|cx| {
             let mut state = InputState::new(window, cx);
@@ -442,6 +480,21 @@ impl XWikiApp {
             },
             doc_scroll: ScrollHandle::new(),
             active_outline: None,
+            doc_panel: DocPanel::None,
+            share_loading: false,
+            share_url: None,
+            share_error: None,
+            backlinks_loading: false,
+            backlinks_error: None,
+            backlinks: Vec::new(),
+            attachments_loading: false,
+            attachments_error: None,
+            attachments: Vec::new(),
+            file_history_loading: false,
+            file_history_error: None,
+            file_history: Vec::new(),
+            attachment_source_input,
+            attachment_destination_input,
             editing: false,
             edit_path: None,
             lock_held: false,
@@ -494,6 +547,12 @@ impl XWikiApp {
             audit_entries: Vec::new(),
             audit_loading: false,
             audit_error: None,
+            api_reference_open: false,
+            api_reference_loading: false,
+            api_reference_error: None,
+            api_reference: None,
+            api_reference_selected_path: None,
+            api_reference_selected_method: None,
             pending_edit: None,
             last_title: String::new(),
             _subscriptions: subs,
@@ -660,6 +719,379 @@ impl XWikiApp {
         .detach();
     }
 
+    // ----- Document API panels: share, backlinks, attachments, file history -----
+
+    pub(crate) fn open_share_panel(&mut self, cx: &mut Context<Self>) {
+        let (Some(client), Some(project), Some(path)) = (
+            self.client.clone(),
+            self.selected_project.clone(),
+            self.doc_path.clone(),
+        ) else {
+            return;
+        };
+        self.doc_panel = DocPanel::Share;
+        self.share_loading = true;
+        self.share_error = None;
+        cx.notify();
+        let server = self.server_url.clone();
+        cx.spawn(
+            async move |this, cx| match client.create_share(&project, &path).await {
+                Ok(share) => {
+                    let url =
+                        if share.url.starts_with("http://") || share.url.starts_with("https://") {
+                            share.url
+                        } else {
+                            format!("{}{}", server.trim_end_matches('/'), share.url)
+                        };
+                    let _ = this.update(cx, |app, cx| {
+                        app.share_loading = false;
+                        app.share_url = Some(url);
+                        app.share_error = None;
+                        cx.notify();
+                    });
+                }
+                Err(error) => {
+                    let _ = this.update(cx, |app, cx| {
+                        app.share_loading = false;
+                        app.share_error = Some(Self::friendly_api_error(&error));
+                        cx.notify();
+                    });
+                }
+            },
+        )
+        .detach();
+    }
+
+    pub(crate) fn copy_share_url(&mut self, cx: &mut Context<Self>) {
+        if let Some(url) = self.share_url.clone() {
+            cx.write_to_clipboard(ClipboardItem::new_string(url));
+            self.notify("完整分享 URL 已复制".into(), cx);
+        }
+    }
+
+    pub(crate) fn open_backlinks_panel(&mut self, cx: &mut Context<Self>) {
+        let (Some(client), Some(project), Some(path)) = (
+            self.client.clone(),
+            self.selected_project.clone(),
+            self.doc_path.clone(),
+        ) else {
+            return;
+        };
+        self.doc_panel = DocPanel::Backlinks;
+        self.backlinks_loading = true;
+        self.backlinks_error = None;
+        cx.notify();
+        cx.spawn(
+            async move |this, cx| match client.backlinks(&project, &path).await {
+                Ok(items) => {
+                    let _ = this.update(cx, |app, cx| {
+                        app.backlinks_loading = false;
+                        app.backlinks = items;
+                        cx.notify();
+                    });
+                }
+                Err(error) => {
+                    let _ = this.update(cx, |app, cx| {
+                        app.backlinks_loading = false;
+                        app.backlinks_error = Some(Self::friendly_api_error(&error));
+                        cx.notify();
+                    });
+                }
+            },
+        )
+        .detach();
+    }
+
+    pub(crate) fn open_attachments_panel(&mut self, cx: &mut Context<Self>) {
+        let (Some(client), Some(project)) = (self.client.clone(), self.selected_project.clone())
+        else {
+            return;
+        };
+        self.doc_panel = DocPanel::Attachments;
+        self.attachments_loading = true;
+        self.attachments_error = None;
+        cx.notify();
+        cx.spawn(
+            async move |this, cx| match client.tree(&project, "attachments").await {
+                Ok(items) => {
+                    let _ = this.update(cx, |app, cx| {
+                        app.attachments_loading = false;
+                        app.attachments =
+                            items.into_iter().filter(|e| e.r#type == "blob").collect();
+                        cx.notify();
+                    });
+                }
+                Err(error) => {
+                    let _ = this.update(cx, |app, cx| {
+                        app.attachments_loading = false;
+                        app.attachments_error = Some(Self::friendly_api_error(&error));
+                        cx.notify();
+                    });
+                }
+            },
+        )
+        .detach();
+    }
+
+    pub(crate) fn open_file_history_panel(&mut self, cx: &mut Context<Self>) {
+        let (Some(client), Some(project), Some(path)) = (
+            self.client.clone(),
+            self.selected_project.clone(),
+            self.doc_path.clone(),
+        ) else {
+            return;
+        };
+        self.doc_panel = DocPanel::FileHistory;
+        self.file_history_loading = true;
+        self.file_history_error = None;
+        cx.notify();
+        cx.spawn(
+            async move |this, cx| match client.file_history(&project, &path).await {
+                Ok(items) => {
+                    let _ = this.update(cx, |app, cx| {
+                        app.file_history_loading = false;
+                        app.file_history = items;
+                        cx.notify();
+                    });
+                }
+                Err(error) => {
+                    let _ = this.update(cx, |app, cx| {
+                        app.file_history_loading = false;
+                        app.file_history_error = Some(Self::friendly_api_error(&error));
+                        cx.notify();
+                    });
+                }
+            },
+        )
+        .detach();
+    }
+
+    pub(crate) fn close_doc_panel(&mut self, cx: &mut Context<Self>) {
+        self.doc_panel = DocPanel::None;
+        cx.notify();
+    }
+
+    pub(crate) fn upload_attachment(&mut self, cx: &mut Context<Self>) {
+        let (Some(client), Some(project)) = (self.client.clone(), self.selected_project.clone())
+        else {
+            return;
+        };
+        let source = self
+            .attachment_source_input
+            .read(cx)
+            .value()
+            .trim()
+            .to_string();
+        if source.is_empty() {
+            self.attachments_error = Some("请输入本地文件路径。".into());
+            cx.notify();
+            return;
+        }
+        let path = std::path::PathBuf::from(&source);
+        let filename = path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or("attachment")
+            .to_string();
+        let content = match std::fs::read(&path) {
+            Ok(content) => content,
+            Err(error) => {
+                self.attachments_error = Some(format!("读取附件失败: {error}"));
+                cx.notify();
+                return;
+            }
+        };
+        if content.len() > 5 * 1024 * 1024 {
+            self.attachments_error = Some("附件超过后端 5 MiB 限制。".into());
+            cx.notify();
+            return;
+        }
+        self.attachments_loading = true;
+        self.attachments_error = None;
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            let result = async {
+                let revision = client.revision(&project).await?;
+                let encoded = BASE64.encode(content);
+                client
+                    .upload_attachment(
+                        &project,
+                        &revision,
+                        &format!("attachments/{filename}"),
+                        &encoded,
+                    )
+                    .await
+            }
+            .await;
+            match result {
+                Ok(_) => {
+                    let _ = this.update(cx, |app, cx| {
+                        app.attachments_loading = false;
+                        app.notify(format!("附件 {filename} 已上传"), cx);
+                        app.open_attachments_panel(cx);
+                    });
+                }
+                Err(error) => {
+                    let _ = this.update(cx, |app, cx| {
+                        app.attachments_loading = false;
+                        app.attachments_error = Some(Self::friendly_api_error(&error));
+                        cx.notify();
+                    });
+                }
+            }
+        })
+        .detach();
+    }
+
+    pub(crate) fn download_attachment(&mut self, path: &str, cx: &mut Context<Self>) {
+        let (Some(client), Some(project)) = (self.client.clone(), self.selected_project.clone())
+        else {
+            return;
+        };
+        let destination = self
+            .attachment_destination_input
+            .read(cx)
+            .value()
+            .trim()
+            .to_string();
+        let fallback = path.rsplit('/').next().unwrap_or("attachment").to_string();
+        let destination = if destination.is_empty() {
+            fallback.clone()
+        } else {
+            destination
+        };
+        self.attachments_loading = true;
+        self.attachments_error = None;
+        cx.notify();
+        let path = path.to_string();
+        cx.spawn(
+            async move |this, cx| match client.download_attachment(&project, &path).await {
+                Ok(bytes) => {
+                    let result = std::fs::write(&destination, bytes);
+                    let _ = this.update(cx, |app, cx| {
+                        app.attachments_loading = false;
+                        match result {
+                            Ok(_) => app.notify(format!("附件已保存到 {destination}"), cx),
+                            Err(error) => {
+                                app.attachments_error = Some(format!("保存附件失败: {error}"));
+                                cx.notify();
+                            }
+                        }
+                    });
+                }
+                Err(error) => {
+                    let _ = this.update(cx, |app, cx| {
+                        app.attachments_loading = false;
+                        app.attachments_error = Some(Self::friendly_api_error(&error));
+                        cx.notify();
+                    });
+                }
+            },
+        )
+        .detach();
+    }
+
+    pub(crate) fn confirm_delete_attachment(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        path: String,
+    ) {
+        let handle = cx.entity();
+        window.open_dialog(cx, move |dialog, _window, cx| {
+            let theme = cx.theme().clone();
+            let cancel = Button::new("cancel-delete-attachment")
+                .rounded(px(tokens::RADIUS))
+                .label("取消")
+                .on_click(|_, window, cx| window.close_dialog(cx));
+            let target = handle.clone();
+            let delete_path = path.clone();
+            let confirm = Button::new("confirm-delete-attachment")
+                .danger()
+                .rounded(px(tokens::RADIUS))
+                .label("删除")
+                .on_click(move |_, window, cx| {
+                    let path = delete_path.clone();
+                    target.update(cx, |app, cx| app.delete_attachment(&path, cx));
+                    window.close_dialog(cx);
+                });
+            dialog
+                .title(div().text_color(theme.danger).child("删除附件？"))
+                .content(|content, _, _| content.child("删除会创建一个新的文档提交。"))
+                .footer(
+                    h_flex()
+                        .gap_2()
+                        .justify_end()
+                        .w_full()
+                        .child(cancel)
+                        .child(confirm),
+                )
+        });
+    }
+
+    fn delete_attachment(&mut self, path: &str, cx: &mut Context<Self>) {
+        let (Some(client), Some(project)) = (self.client.clone(), self.selected_project.clone())
+        else {
+            return;
+        };
+        self.attachments_loading = true;
+        let path = path.to_string();
+        cx.spawn(async move |this, cx| {
+            let result = async {
+                let revision = client.revision(&project).await?;
+                client.delete_attachment(&project, &revision, &path).await
+            }
+            .await;
+            match result {
+                Ok(_) => {
+                    let _ = this.update(cx, |app, cx| {
+                        app.notify("附件已删除".into(), cx);
+                        app.open_attachments_panel(cx);
+                    });
+                }
+                Err(error) => {
+                    let _ = this.update(cx, |app, cx| {
+                        app.attachments_loading = false;
+                        app.attachments_error = Some(Self::friendly_api_error(&error));
+                        cx.notify();
+                    });
+                }
+            }
+        })
+        .detach();
+    }
+
+    pub(crate) fn open_api_reference(&mut self, cx: &mut Context<Self>) {
+        let Some(client) = self.client.clone() else {
+            return;
+        };
+        self.api_reference_open = true;
+        self.screen = Screen::ApiReference;
+        self.api_reference_loading = true;
+        self.api_reference_error = None;
+        self.api_reference_selected_path = None;
+        self.api_reference_selected_method = None;
+        cx.notify();
+        cx.spawn(async move |this, cx| match client.openapi().await {
+            Ok(spec) => {
+                let text = serde_json::to_string_pretty(&spec).unwrap_or_else(|_| "{}".into());
+                let _ = this.update(cx, |app, cx| {
+                    app.api_reference_loading = false;
+                    app.api_reference = Some(text);
+                    cx.notify();
+                });
+            }
+            Err(error) => {
+                let _ = this.update(cx, |app, cx| {
+                    app.api_reference_loading = false;
+                    app.api_reference_error = Some(Self::friendly_api_error(&error));
+                    cx.notify();
+                });
+            }
+        })
+        .detach();
+    }
+
     fn back_to_projects(&mut self, cx: &mut Context<Self>) {
         self.selected_project = None;
         self.current_revision = None;
@@ -674,6 +1106,11 @@ impl XWikiApp {
         };
         self.doc_scroll = ScrollHandle::new();
         self.active_outline = None;
+        self.doc_panel = DocPanel::None;
+        self.share_url = None;
+        self.backlinks.clear();
+        self.attachments.clear();
+        self.file_history.clear();
         self.history_open = false;
         cx.notify();
     }
@@ -3417,6 +3854,647 @@ impl XWikiApp {
         self.settings_test_detail = None;
         self.notify("服务地址已保存，重新登录后生效".into(), cx);
     }
+
+    // ----- Workspace import/export -----
+
+    pub(crate) fn open_import_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let handle = cx.entity();
+        window.open_dialog(cx, move |dialog, window, cx| {
+            let theme = cx.theme().clone();
+            let name = cx.new(|cx| InputState::new(window, cx).placeholder("项目名"));
+            let description = cx.new(|cx| InputState::new(window, cx).placeholder("描述（可选）"));
+            let folder = cx.new(|cx| InputState::new(window, cx).placeholder("文件夹路径"));
+            let repo_url = cx.new(|cx| InputState::new(window, cx).placeholder("Git 仓库 URL"));
+            let bundle = cx.new(|cx| InputState::new(window, cx).placeholder("Bundle 文件路径"));
+
+            let folder_name = name.clone();
+            let folder_description = description.clone();
+            let folder_path = folder.clone();
+            let folder_handle = handle.clone();
+            let folder_button = Button::new("import-folder")
+                .primary()
+                .rounded(px(tokens::RADIUS))
+                .label("预览文件夹")
+                .on_click(move |_, window, cx| {
+                    let name = folder_name.read(cx).value().trim().to_string();
+                    let description = folder_description.read(cx).value().trim().to_string();
+                    let path = folder_path.read(cx).value().trim().to_string();
+                    folder_handle.update(cx, |app, cx| {
+                        app.prepare_folder_import(window, name, description, path, cx)
+                    });
+                });
+
+            let repo_name = name.clone();
+            let repo_input = repo_url.clone();
+            let repo_handle = handle.clone();
+            let repo_button = Button::new("import-repo")
+                .secondary()
+                .outline()
+                .rounded(px(tokens::RADIUS))
+                .label("确认导入仓库")
+                .on_click(move |_, window, cx| {
+                    let name = repo_name.read(cx).value().trim().to_string();
+                    let url = repo_input.read(cx).value().trim().to_string();
+                    repo_handle
+                        .update(cx, |app, cx| app.confirm_repo_import(window, name, url, cx));
+                });
+
+            let bundle_name = name.clone();
+            let bundle_input = bundle.clone();
+            let bundle_handle = handle.clone();
+            let bundle_button = Button::new("import-bundle")
+                .secondary()
+                .outline()
+                .rounded(px(tokens::RADIUS))
+                .label("预览 Bundle")
+                .on_click(move |_, window, cx| {
+                    let name = bundle_name.read(cx).value().trim().to_string();
+                    let path = bundle_input.read(cx).value().trim().to_string();
+                    bundle_handle.update(cx, |app, cx| {
+                        app.prepare_bundle_import(window, name, path, cx)
+                    });
+                });
+
+            dialog
+                .title(div().text_color(theme.foreground).child("导入项目"))
+                .content(move |content, _, _| {
+                    content
+                        .child(
+                            div()
+                                .text_sm()
+                                .text_color(theme.muted_foreground)
+                                .child("填写来源后先预览；确认后才会读取并上传本地内容。"),
+                        )
+                        .child(
+                            div()
+                                .mt_3()
+                                .text_xs()
+                                .text_color(theme.muted_foreground)
+                                .child("项目名"),
+                        )
+                        .child(Input::new(&name))
+                        .child(
+                            div()
+                                .mt_2()
+                                .text_xs()
+                                .text_color(theme.muted_foreground)
+                                .child("描述"),
+                        )
+                        .child(Input::new(&description))
+                        .child(
+                            div()
+                                .mt_2()
+                                .text_xs()
+                                .text_color(theme.muted_foreground)
+                                .child("文件夹路径"),
+                        )
+                        .child(Input::new(&folder))
+                        .child(
+                            div()
+                                .mt_2()
+                                .text_xs()
+                                .text_color(theme.muted_foreground)
+                                .child("Git URL"),
+                        )
+                        .child(Input::new(&repo_url))
+                        .child(
+                            div()
+                                .mt_2()
+                                .text_xs()
+                                .text_color(theme.muted_foreground)
+                                .child("Bundle 路径"),
+                        )
+                        .child(Input::new(&bundle))
+                })
+                .footer(
+                    h_flex()
+                        .gap_2()
+                        .justify_end()
+                        .w_full()
+                        .child(
+                            Button::new("cancel-import")
+                                .ghost()
+                                .label("取消")
+                                .on_click(|_, window, cx| window.close_dialog(cx)),
+                        )
+                        .child(bundle_button)
+                        .child(repo_button)
+                        .child(folder_button),
+                )
+        });
+    }
+
+    pub(crate) fn open_export_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(project) = self.selected_project.clone() else {
+            return;
+        };
+        let handle = cx.entity();
+        window.open_dialog(cx, move |dialog, window, cx| {
+            let theme = cx.theme().clone();
+            let destination =
+                cx.new(|cx| InputState::new(window, cx).placeholder("保存路径（可选）"));
+            let zip_destination = destination.clone();
+            let zip_project = project.clone();
+            let zip_handle = handle.clone();
+            let zip = Button::new("export-zip")
+                .primary()
+                .rounded(px(tokens::RADIUS))
+                .label("预览 ZIP 导出")
+                .on_click(move |_, window, cx| {
+                    let destination = zip_destination.read(cx).value().trim().to_string();
+                    zip_handle.update(cx, |app, cx| {
+                        app.confirm_export(window, zip_project.clone(), "zip", destination, cx)
+                    });
+                });
+            let bundle_destination = destination.clone();
+            let bundle_project = project.clone();
+            let bundle_handle = handle.clone();
+            let bundle = Button::new("export-bundle")
+                .secondary()
+                .outline()
+                .rounded(px(tokens::RADIUS))
+                .label("预览 Bundle 导出")
+                .on_click(move |_, window, cx| {
+                    let destination = bundle_destination.read(cx).value().trim().to_string();
+                    bundle_handle.update(cx, |app, cx| {
+                        app.confirm_export(
+                            window,
+                            bundle_project.clone(),
+                            "bundle",
+                            destination,
+                            cx,
+                        )
+                    });
+                });
+            dialog
+                .title(div().text_color(theme.foreground).child("导出项目"))
+                .content(move |content, _, _| {
+                    content
+                        .child(div().text_sm().text_color(theme.muted_foreground).child(
+                            "ZIP 是工作树快照；Bundle 保留完整 Git 历史。确认后才会写入本地路径。",
+                        ))
+                        .child(
+                            div()
+                                .mt_3()
+                                .text_xs()
+                                .text_color(theme.muted_foreground)
+                                .child("保存路径"),
+                        )
+                        .child(Input::new(&destination))
+                })
+                .footer(
+                    h_flex()
+                        .gap_2()
+                        .justify_end()
+                        .w_full()
+                        .child(
+                            Button::new("cancel-export")
+                                .ghost()
+                                .label("取消")
+                                .on_click(|_, window, cx| window.close_dialog(cx)),
+                        )
+                        .child(bundle)
+                        .child(zip),
+                )
+        });
+    }
+
+    fn prepare_folder_import(
+        &mut self,
+        window: &mut Window,
+        name: String,
+        description: String,
+        source: String,
+        cx: &mut Context<Self>,
+    ) {
+        if name.trim().is_empty() || source.trim().is_empty() {
+            self.status_msg = Some("项目名和文件夹路径不能为空。".into());
+            cx.notify();
+            return;
+        }
+        match collect_import_files(std::path::Path::new(&source)) {
+            Ok(files) if !files.is_empty() => {
+                self.confirm_folder_import(window, name, description, files, cx);
+            }
+            Ok(_) => {
+                self.status_msg = Some("文件夹中没有可导入的文件。".into());
+                cx.notify();
+            }
+            Err(error) => {
+                self.status_msg = Some(format!("读取文件夹失败: {error}"));
+                cx.notify();
+            }
+        }
+    }
+
+    fn confirm_folder_import(
+        &mut self,
+        window: &mut Window,
+        name: String,
+        description: String,
+        files: Vec<dto::UploadFile>,
+        cx: &mut Context<Self>,
+    ) {
+        let handle = cx.entity();
+        let count = files.len();
+        window.open_dialog(cx, move |dialog, _, cx| {
+            let theme = cx.theme().clone();
+            let confirm_files = files.clone();
+            let confirm_name = name.clone();
+            let confirm_description = description.clone();
+            let confirm_handle = handle.clone();
+            let confirm = Button::new("confirm-folder-import")
+                .primary()
+                .rounded(px(tokens::RADIUS))
+                .label("确认并上传")
+                .on_click(move |_, window, cx| {
+                    confirm_handle.update(cx, |app, cx| {
+                        app.execute_folder_import(
+                            confirm_name.clone(),
+                            confirm_description.clone(),
+                            confirm_files.clone(),
+                            cx,
+                        )
+                    });
+                    window.close_dialog(cx);
+                });
+            dialog
+                .title(div().text_color(theme.foreground).child("确认文件夹导入"))
+                .content(move |content, _, _| {
+                    content.child(
+                        div()
+                            .text_sm()
+                            .text_color(theme.muted_foreground)
+                            .child(format!("将上传 {count} 个文件并创建一个新项目。")),
+                    )
+                })
+                .footer(
+                    h_flex()
+                        .gap_2()
+                        .justify_end()
+                        .w_full()
+                        .child(
+                            Button::new("cancel-folder-import")
+                                .ghost()
+                                .label("取消")
+                                .on_click(|_, window, cx| window.close_dialog(cx)),
+                        )
+                        .child(confirm),
+                )
+        });
+    }
+
+    fn confirm_repo_import(
+        &mut self,
+        window: &mut Window,
+        name: String,
+        url: String,
+        cx: &mut Context<Self>,
+    ) {
+        if name.trim().is_empty() || url.trim().is_empty() {
+            self.status_msg = Some("项目名和 Git URL 不能为空。".into());
+            cx.notify();
+            return;
+        }
+        let handle = cx.entity();
+        window.open_dialog(cx, move |dialog, _, cx| {
+            let theme = cx.theme().clone();
+            let confirm_handle = handle.clone();
+            let confirm_name = name.clone();
+            let confirm_url = url.clone();
+            let confirm = Button::new("confirm-repo-import")
+                .primary()
+                .rounded(px(tokens::RADIUS))
+                .label("确认并克隆")
+                .on_click(move |_, window, cx| {
+                    confirm_handle.update(cx, |app, cx| {
+                        app.execute_repo_import(confirm_name.clone(), confirm_url.clone(), cx)
+                    });
+                    window.close_dialog(cx);
+                });
+            let summary_url = url.clone();
+            dialog
+                .title(
+                    div()
+                        .text_color(theme.foreground)
+                        .child("确认 Git 仓库导入"),
+                )
+                .content(move |content, _, _| {
+                    content.child(
+                        div()
+                            .text_sm()
+                            .text_color(theme.muted_foreground)
+                            .child(format!("将从 {summary_url} 克隆为新项目。")),
+                    )
+                })
+                .footer(
+                    h_flex()
+                        .gap_2()
+                        .justify_end()
+                        .w_full()
+                        .child(
+                            Button::new("cancel-repo-import")
+                                .ghost()
+                                .label("取消")
+                                .on_click(|_, window, cx| window.close_dialog(cx)),
+                        )
+                        .child(confirm),
+                )
+        });
+    }
+
+    fn prepare_bundle_import(
+        &mut self,
+        window: &mut Window,
+        name: String,
+        source: String,
+        cx: &mut Context<Self>,
+    ) {
+        if name.trim().is_empty() || source.trim().is_empty() {
+            self.status_msg = Some("项目名和 Bundle 路径不能为空。".into());
+            cx.notify();
+            return;
+        }
+        match std::fs::read(&source) {
+            Ok(bytes) if !bytes.is_empty() => self.confirm_bundle_import(window, name, bytes, cx),
+            Ok(_) => {
+                self.status_msg = Some("Bundle 文件为空。".into());
+                cx.notify();
+            }
+            Err(error) => {
+                self.status_msg = Some(format!("读取 Bundle 失败: {error}"));
+                cx.notify();
+            }
+        }
+    }
+
+    fn confirm_bundle_import(
+        &mut self,
+        window: &mut Window,
+        name: String,
+        bytes: Vec<u8>,
+        cx: &mut Context<Self>,
+    ) {
+        let handle = cx.entity();
+        let size = bytes.len();
+        window.open_dialog(cx, move |dialog, _, cx| {
+            let theme = cx.theme().clone();
+            let confirm_handle = handle.clone();
+            let confirm_name = name.clone();
+            let confirm_bytes = bytes.clone();
+            let confirm = Button::new("confirm-bundle-import")
+                .primary()
+                .rounded(px(tokens::RADIUS))
+                .label("确认并上传")
+                .on_click(move |_, window, cx| {
+                    confirm_handle.update(cx, |app, cx| {
+                        app.execute_bundle_import(confirm_name.clone(), confirm_bytes.clone(), cx)
+                    });
+                    window.close_dialog(cx);
+                });
+            dialog
+                .title(div().text_color(theme.foreground).child("确认 Bundle 导入"))
+                .content(move |content, _, _| {
+                    content.child(
+                        div()
+                            .text_sm()
+                            .text_color(theme.muted_foreground)
+                            .child(format!("将上传 {} 后创建新项目。", format_bytes(size))),
+                    )
+                })
+                .footer(
+                    h_flex()
+                        .gap_2()
+                        .justify_end()
+                        .w_full()
+                        .child(
+                            Button::new("cancel-bundle-import")
+                                .ghost()
+                                .label("取消")
+                                .on_click(|_, window, cx| window.close_dialog(cx)),
+                        )
+                        .child(confirm),
+                )
+        });
+    }
+
+    fn execute_folder_import(
+        &mut self,
+        name: String,
+        description: String,
+        files: Vec<dto::UploadFile>,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(client) = self.client.clone() else {
+            return;
+        };
+        self.loading = true;
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            match client.import_folder(&name, &description, files).await {
+                Ok(result) => {
+                    let _ = this.update(cx, |app, cx| {
+                        app.loading = false;
+                        app.notify(
+                            format!(
+                                "项目 {} 已导入（{} 个提交）",
+                                result.project.name, result.commits
+                            ),
+                            cx,
+                        );
+                        app.load_projects(cx);
+                    });
+                }
+                Err(error) => {
+                    let _ = this.update(cx, |app, cx| {
+                        app.loading = false;
+                        app.status_msg = Some(Self::friendly_api_error(&error));
+                        cx.notify();
+                    });
+                }
+            }
+        })
+        .detach();
+    }
+
+    fn execute_repo_import(&mut self, name: String, url: String, cx: &mut Context<Self>) {
+        let Some(client) = self.client.clone() else {
+            return;
+        };
+        self.loading = true;
+        cx.notify();
+        cx.spawn(
+            async move |this, cx| match client.import_repo(&name, &url).await {
+                Ok(result) => {
+                    let _ = this.update(cx, |app, cx| {
+                        app.loading = false;
+                        app.notify(
+                            format!(
+                                "项目 {} 已导入（{} 个提交）",
+                                result.project.name, result.commits
+                            ),
+                            cx,
+                        );
+                        app.load_projects(cx);
+                    });
+                }
+                Err(error) => {
+                    let _ = this.update(cx, |app, cx| {
+                        app.loading = false;
+                        app.status_msg = Some(Self::friendly_api_error(&error));
+                        cx.notify();
+                    });
+                }
+            },
+        )
+        .detach();
+    }
+
+    fn execute_bundle_import(&mut self, name: String, bytes: Vec<u8>, cx: &mut Context<Self>) {
+        let Some(client) = self.client.clone() else {
+            return;
+        };
+        self.loading = true;
+        cx.notify();
+        cx.spawn(
+            async move |this, cx| match client.import_bundle(&name, bytes).await {
+                Ok(result) => {
+                    let _ = this.update(cx, |app, cx| {
+                        app.loading = false;
+                        app.notify(
+                            format!(
+                                "项目 {} 已导入（{} 个提交）",
+                                result.project.name, result.commits
+                            ),
+                            cx,
+                        );
+                        app.load_projects(cx);
+                    });
+                }
+                Err(error) => {
+                    let _ = this.update(cx, |app, cx| {
+                        app.loading = false;
+                        app.status_msg = Some(Self::friendly_api_error(&error));
+                        cx.notify();
+                    });
+                }
+            },
+        )
+        .detach();
+    }
+
+    fn confirm_export(
+        &mut self,
+        window: &mut Window,
+        project: String,
+        format: &str,
+        destination: String,
+        cx: &mut Context<Self>,
+    ) {
+        let format = format.to_string();
+        let path = if destination.trim().is_empty() {
+            if format == "zip" {
+                "project.zip".to_string()
+            } else {
+                "project.bundle".to_string()
+            }
+        } else {
+            destination
+        };
+        let handle = cx.entity();
+        window.open_dialog(cx, move |dialog, _, cx| {
+            let theme = cx.theme().clone();
+            let confirm_handle = handle.clone();
+            let confirm_project = project.clone();
+            let confirm_format = format.clone();
+            let confirm_path = path.clone();
+            let summary_format = format.clone();
+            let summary_path = path.clone();
+            let confirm = Button::new("confirm-export")
+                .primary()
+                .rounded(px(tokens::RADIUS))
+                .label("确认并保存")
+                .on_click(move |_, window, cx| {
+                    confirm_handle.update(cx, |app, cx| {
+                        app.execute_export(
+                            confirm_project.clone(),
+                            confirm_format.clone(),
+                            confirm_path.clone(),
+                            cx,
+                        )
+                    });
+                    window.close_dialog(cx);
+                });
+            dialog
+                .title(div().text_color(theme.foreground).child("确认导出"))
+                .content(move |content, _, _| {
+                    content.child(div().text_sm().text_color(theme.muted_foreground).child(
+                        format!(
+                            "将生成 {} 并写入 {}。",
+                            summary_format.to_uppercase(),
+                            summary_path
+                        ),
+                    ))
+                })
+                .footer(
+                    h_flex()
+                        .gap_2()
+                        .justify_end()
+                        .w_full()
+                        .child(
+                            Button::new("cancel-confirm-export")
+                                .ghost()
+                                .label("取消")
+                                .on_click(|_, window, cx| window.close_dialog(cx)),
+                        )
+                        .child(confirm),
+                )
+        });
+    }
+
+    fn execute_export(
+        &mut self,
+        project: String,
+        format: String,
+        path: String,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(client) = self.client.clone() else {
+            return;
+        };
+        self.loading = true;
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            let result = if format == "zip" {
+                client.export_zip(&project).await
+            } else {
+                client.export_bundle(&project).await
+            };
+            match result {
+                Ok(bytes) => {
+                    let write = std::fs::write(&path, bytes);
+                    let _ = this.update(cx, |app, cx| {
+                        app.loading = false;
+                        match write {
+                            Ok(_) => app.notify(format!("导出已保存到 {path}"), cx),
+                            Err(error) => {
+                                app.status_msg = Some(format!("保存导出失败: {error}"));
+                                cx.notify();
+                            }
+                        }
+                    });
+                }
+                Err(error) => {
+                    let _ = this.update(cx, |app, cx| {
+                        app.loading = false;
+                        app.status_msg = Some(Self::friendly_api_error(&error));
+                        cx.notify();
+                    });
+                }
+            }
+        })
+        .detach();
+    }
 }
 
 impl Render for XWikiApp {
@@ -3465,7 +4543,7 @@ impl Render for XWikiApp {
                     }
                 } else if this.screen_is_workspace() && this.selected_project.is_some() {
                     this.back_to_projects(cx);
-                } else if matches!(this.screen, Screen::Settings) {
+                } else if matches!(this.screen, Screen::Settings | Screen::ApiReference) {
                     this.screen = Screen::Workspace;
                     cx.notify();
                 }
@@ -3554,7 +4632,7 @@ impl Render for XWikiApp {
                     .relative()
                     .child(match self.screen {
                         Screen::Login => self.render_login(cx).into_any_element(),
-                        Screen::Settings | Screen::Workspace => self
+                        Screen::Settings | Screen::Workspace | Screen::ApiReference => self
                             .render_authenticated_shell(window, cx)
                             .into_any_element(),
                     })
@@ -3569,6 +4647,54 @@ impl Render for XWikiApp {
                         div().into_any_element()
                     }),
             )
+    }
+}
+
+fn collect_import_files(root: &std::path::Path) -> Result<Vec<dto::UploadFile>, String> {
+    if !root.is_dir() {
+        return Err("路径不是文件夹".into());
+    }
+    let mut pending = vec![(root.to_path_buf(), String::new())];
+    let mut files = Vec::new();
+    while let Some((directory, relative)) = pending.pop() {
+        let entries = std::fs::read_dir(&directory).map_err(|error| error.to_string())?;
+        for entry in entries {
+            let entry = entry.map_err(|error| error.to_string())?;
+            let path = entry.path();
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name == ".git" || name == ".DS_Store" {
+                continue;
+            }
+            let child_relative = if relative.is_empty() {
+                name
+            } else {
+                format!("{relative}/{name}")
+            };
+            if path.is_dir() {
+                pending.push((path, child_relative));
+            } else if path.is_file() {
+                let content = std::fs::read(&path).map_err(|error| error.to_string())?;
+                if content.len() > 5 * 1024 * 1024 {
+                    return Err(format!("文件 {child_relative} 超过 5 MiB 限制"));
+                }
+                files.push(dto::UploadFile {
+                    path: child_relative,
+                    content,
+                });
+            }
+        }
+    }
+    files.sort_by(|left, right| left.path.cmp(&right.path));
+    Ok(files)
+}
+
+fn format_bytes(bytes: usize) -> String {
+    if bytes >= 1024 * 1024 {
+        format!("{:.1} MiB", bytes as f64 / (1024.0 * 1024.0))
+    } else if bytes >= 1024 {
+        format!("{:.1} KiB", bytes as f64 / 1024.0)
+    } else {
+        format!("{bytes} B")
     }
 }
 

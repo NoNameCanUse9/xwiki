@@ -50,26 +50,14 @@ impl XWikiApp {
         div()
             .flex()
             .items_center()
-            .justify_between()
+            .gap_3()
             .pb_4()
             .border_b_1()
             .border_color(theme.border)
             .child(
-                div()
-                    .font_family(tokens::FONT_DISPLAY)
-                    .text_3xl()
-                    .font_weight(FontWeight::BOLD)
-                    .text_color(theme.foreground)
-                    .child("设置"),
-            )
-            .child(
                 Button::new("settings-back")
-                    .custom(
-                        ButtonCustomVariant::new(cx)
-                            .color(theme.sidebar)
-                            .foreground(theme.foreground),
-                    )
-                    .rounded(px(tokens::RADIUS))
+                    .ghost()
+                    .compact()
                     .icon(IconName::ArrowLeft)
                     .label("返回工作台")
                     .tooltip("返回工作台 (Esc)")
@@ -77,6 +65,14 @@ impl XWikiApp {
                         this.screen = Screen::Workspace;
                         cx.notify();
                     })),
+            )
+            .child(
+                div()
+                    .font_family(tokens::FONT_DISPLAY)
+                    .text_3xl()
+                    .font_weight(FontWeight::BOLD)
+                    .text_color(theme.foreground)
+                    .child("设置"),
             )
     }
 
