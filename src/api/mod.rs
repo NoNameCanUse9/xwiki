@@ -687,8 +687,7 @@ impl Client {
         Self::send(self.http.get(self.url("/api/openapi.json"))).await
     }
 
-    #[allow(dead_code)]
-    pub async fn import_zip(
+    pub async fn import_files(
         &self,
         project_id: &str,
         base_revision: &str,
@@ -706,6 +705,20 @@ impl Client {
                 .json(&body),
         )
         .await
+    }
+
+    /// Backwards-compatible name for callers that used the original import
+    /// endpoint wrapper before it supported arbitrary project files.
+    #[allow(dead_code)]
+    pub async fn import_zip(
+        &self,
+        project_id: &str,
+        base_revision: &str,
+        message: &str,
+        files: Vec<dto::ImportFile>,
+    ) -> Result<dto::ImportResult, ApiError> {
+        self.import_files(project_id, base_revision, message, files)
+            .await
     }
 
     pub async fn import_repo(
@@ -1271,7 +1284,7 @@ pub mod dto {
         pub commits: Vec<Commit>,
     }
 
-    #[derive(Debug, Serialize)]
+    #[derive(Debug, Clone, Serialize)]
     pub struct ImportFile {
         pub path: String,
         pub content: String,

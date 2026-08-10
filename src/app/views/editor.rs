@@ -49,7 +49,8 @@ impl XWikiApp {
             .flex()
             .flex_col()
             // ── Toolbar ──────────────────────────────────────────
-            // Matches: [EDIT] [path] | flex | [Edit] [Preview] [History] [commit msg] [Save] [Cancel]
+            // Matches: [EDIT] [path] | [Edit] [Preview] [History] [Rename]
+            // [commit msg] [Save] [Cancel]
             .child(
                 div()
                     .h(px(tokens::TOOLBAR_H))
@@ -73,7 +74,6 @@ impl XWikiApp {
                             .whitespace_nowrap()
                             .child(tokens::truncate(&path, 64)),
                     )
-                    .child(div().flex_1())
                     .child(self.editor_tab_button(cx, "编辑", !self.editor_preview))
                     .child(self.editor_tab_button(cx, "预览", self.editor_preview))
                     .child(
@@ -81,8 +81,10 @@ impl XWikiApp {
                             .rounded(px(tokens::RADIUS))
                             .icon(IconName::Undo2)
                             .label("历史")
-                            .tooltip("打开版本历史")
-                            .on_click(cx.listener(|this, _, _, cx| this.open_history(cx))),
+                            .tooltip("查看当前文件的版本历史")
+                            .on_click(
+                                cx.listener(|this, _, _, cx| this.open_file_history_panel(cx)),
+                            ),
                     )
                     .child(
                         Button::new("rename-doc")
@@ -94,14 +96,7 @@ impl XWikiApp {
                                 this.open_rename_dialog(window, cx)
                             })),
                     )
-                    .child(
-                        div()
-                            .w(px(280.0))
-                            .v_flex()
-                            .gap_1()
-                            .child(mono_label("提交消息").text_color(theme.muted_foreground))
-                            .child(Input::new(&self.commit_msg).w_full()),
-                    )
+                    .child(Input::new(&self.commit_msg).w(px(280.0)))
                     .child(
                         Button::new("save-edit")
                             .primary()
@@ -201,7 +196,9 @@ impl XWikiApp {
                             .rounded(px(tokens::RADIUS))
                             .icon(IconName::Search)
                             .label("查看历史")
-                            .on_click(cx.listener(|this, _, _, cx| this.open_history(cx))),
+                            .on_click(
+                                cx.listener(|this, _, _, cx| this.open_file_history_panel(cx)),
+                            ),
                     )
             } else {
                 div()

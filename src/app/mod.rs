@@ -44,6 +44,7 @@ pub(crate) enum QuickTarget {
     OpenProject(String),
     OpenDoc(String),
     EnterDir(String),
+    BackToDocumentBrowser,
     BackToProjects,
 }
 
@@ -54,6 +55,11 @@ pub(crate) struct TreeContextAction {
     pub path: String,
     pub is_dir: bool,
 }
+
+/// Export the current project from a document-row overflow menu.
+#[derive(Clone, PartialEq, gpui::Action)]
+#[action(namespace = app_actions, no_json)]
+pub(crate) struct ProjectExportAction;
 
 /// Right-click menu action for a project card / rail row.
 #[derive(Clone, PartialEq, gpui::Action)]
@@ -122,7 +128,12 @@ pub(crate) enum DocPanel {
     Share,
     Backlinks,
     Attachments,
-    FileHistory,
+}
+
+#[derive(Clone, Copy)]
+enum DocumentImportMode {
+    Folder,
+    Markdown,
 }
 
 /// A filterable ⌘P entry.
@@ -177,9 +188,6 @@ pub struct XWikiApp {
     attachments_loading: bool,
     attachments_error: Option<String>,
     attachments: Vec<dto::TreeEntry>,
-    file_history_loading: bool,
-    file_history_error: Option<String>,
-    file_history: Vec<dto::Commit>,
     attachment_source_input: Entity<InputState>,
     attachment_destination_input: Entity<InputState>,
     // Edit state: page lock + markdown editor + commit message.
@@ -196,6 +204,7 @@ pub struct XWikiApp {
     editor_preview: bool,
     // History view state.
     history_open: bool,
+    history_file_path: Option<String>,
     history_input: Entity<InputState>,
     history_loading: bool,
     history_detail_loading: bool,
@@ -490,9 +499,6 @@ impl XWikiApp {
             attachments_loading: false,
             attachments_error: None,
             attachments: Vec::new(),
-            file_history_loading: false,
-            file_history_error: None,
-            file_history: Vec::new(),
             attachment_source_input,
             attachment_destination_input,
             editing: false,
@@ -507,6 +513,7 @@ impl XWikiApp {
             editor_title_input,
             editor_preview: false,
             history_open: false,
+            history_file_path: None,
             history_input,
             history_loading: false,
             history_detail_loading: false,
@@ -645,6 +652,8 @@ impl XWikiApp {
         let Some(project) = self.selected_project.clone() else {
             return;
         };
+        self.history_open = false;
+        self.history_file_path = None;
         self.tree_path = path.to_string();
         self.doc_path = None;
         self.doc_content.clear();
@@ -686,6 +695,8 @@ impl XWikiApp {
         let Some(project) = self.selected_project.clone() else {
             return;
         };
+        self.history_open = false;
+        self.history_file_path = None;
         self.doc_path = Some(path.to_string());
         self.doc_loading = true;
         self.doc_error = None;
@@ -834,36 +845,24 @@ impl XWikiApp {
     }
 
     pub(crate) fn open_file_history_panel(&mut self, cx: &mut Context<Self>) {
-        let (Some(client), Some(project), Some(path)) = (
-            self.client.clone(),
-            self.selected_project.clone(),
-            self.doc_path.clone(),
-        ) else {
+        if self.selected_project.is_none() || self.doc_path.is_none() {
             return;
-        };
-        self.doc_panel = DocPanel::FileHistory;
-        self.file_history_loading = true;
-        self.file_history_error = None;
+        }
+        self.doc_panel = DocPanel::None;
+        self.history_open = true;
+        self.history_file_path = self.doc_path.clone();
+        self.history_loading = true;
+        self.history_detail_loading = false;
+        self.history_error = None;
+        self.history_focus = None;
+        self.commit_detail = None;
+        self.diff_stats.clear();
+        self.commit_patch = None;
+        self.history_compare_open = false;
+        self.selected_sha = None;
+        config::save_layout(&self.layout);
         cx.notify();
-        cx.spawn(
-            async move |this, cx| match client.file_history(&project, &path).await {
-                Ok(items) => {
-                    let _ = this.update(cx, |app, cx| {
-                        app.file_history_loading = false;
-                        app.file_history = items;
-                        cx.notify();
-                    });
-                }
-                Err(error) => {
-                    let _ = this.update(cx, |app, cx| {
-                        app.file_history_loading = false;
-                        app.file_history_error = Some(Self::friendly_api_error(&error));
-                        cx.notify();
-                    });
-                }
-            },
-        )
-        .detach();
+        self.load_file_history(cx);
     }
 
     pub(crate) fn close_doc_panel(&mut self, cx: &mut Context<Self>) {
@@ -1110,9 +1109,39 @@ impl XWikiApp {
         self.share_url = None;
         self.backlinks.clear();
         self.attachments.clear();
-        self.file_history.clear();
         self.history_open = false;
+        self.history_file_path = None;
         cx.notify();
+    }
+
+    fn back_to_document_browser(&mut self, cx: &mut Context<Self>) {
+        if self.editing {
+            return;
+        }
+        let path = self.tree_path.clone();
+        self.doc_path = None;
+        self.doc_content.clear();
+        self.doc_outline = outline::ParsedDocument {
+            entries: Vec::new(),
+            sections: Vec::new(),
+        };
+        self.doc_scroll = ScrollHandle::new();
+        self.active_outline = None;
+        self.doc_panel = DocPanel::None;
+        self.share_url = None;
+        self.share_error = None;
+        self.backlinks.clear();
+        self.backlinks_error = None;
+        self.attachments.clear();
+        self.attachments_error = None;
+        self.history_open = false;
+        self.history_file_path = None;
+        self.history_error = None;
+        if self.tree_entries.is_empty() {
+            self.load_tree(&path, cx);
+        } else {
+            cx.notify();
+        }
     }
 
     // ----- Edit flow: acquire lock -> edit -> changeset commit -----
@@ -1412,38 +1441,27 @@ impl XWikiApp {
 
     // ----- History: commit list + per-commit diff stats -----
 
-    fn open_history(&mut self, cx: &mut Context<Self>) {
-        self.history_open = true;
-        self.history_loading = true;
-        self.history_detail_loading = false;
-        self.history_error = None;
-        self.history_focus = None;
-        self.commit_detail = None;
-        self.diff_stats.clear();
-        self.commit_patch = None;
-        self.history_compare_open = false;
-        self.selected_sha = None;
-        config::save_layout(&self.layout);
-        self.load_commits(cx);
-    }
-
     fn close_history(&mut self, cx: &mut Context<Self>) {
         self.history_open = false;
+        self.history_file_path = None;
         self.history_detail_loading = false;
         self.restoring = false;
         config::save_layout(&self.layout);
         cx.notify();
     }
 
-    fn load_commits(&mut self, cx: &mut Context<Self>) {
-        let (Some(client), Some(project)) = (self.client.clone(), self.selected_project.clone())
-        else {
+    fn load_file_history(&mut self, cx: &mut Context<Self>) {
+        let (Some(client), Some(project), Some(path)) = (
+            self.client.clone(),
+            self.selected_project.clone(),
+            self.history_file_path.clone(),
+        ) else {
             return;
         };
         self.history_loading = true;
         self.history_error = None;
         cx.spawn(
-            async move |this, cx| match client.commits(&project, 50).await {
+            async move |this, cx| match client.file_history(&project, &path).await {
                 Ok(list) => {
                     let first_sha = list.first().map(|commit| commit.sha.clone());
                     let _ = this.update(cx, |app, cx| {
@@ -1462,7 +1480,7 @@ impl XWikiApp {
                 Err(e) => {
                     let _ = this.update(cx, |app, cx| {
                         app.history_loading = false;
-                        app.history_error = Some(format!("加载历史失败: {e}"));
+                        app.history_error = Some(format!("加载文件历史失败: {e}"));
                         cx.notify();
                     });
                 }
@@ -1557,7 +1575,7 @@ impl XWikiApp {
                             .child(format!(
                                 "将以 {short_for_content} 创建一个新的恢复提交，当前文档内容不会被静默覆盖。"
                             ))
-                            .child("此操作会影响项目历史，请确认后继续。"),
+                            .child("此操作会生成新的提交，请确认后继续。"),
                     )
                 })
                 .footer(h_flex().gap_2().justify_end().w_full().child(cancel).child(restore))
@@ -1586,7 +1604,7 @@ impl XWikiApp {
                     let _ = this.update(cx, |app, cx| {
                         app.restoring = false;
                         app.notify(format!("已恢复提交 {short} · {}", c.message), cx);
-                        app.load_commits(cx);
+                        app.load_file_history(cx);
                         app.load_revision(cx);
                         let path = app.doc_path.clone().unwrap_or_default();
                         if !path.is_empty() {
@@ -2334,15 +2352,19 @@ impl XWikiApp {
             if !self.editing {
                 cmds.push(PaletteCmd {
                     id: "back",
-                    label: "返回项目列表",
+                    label: if self.doc_path.is_some() {
+                        "返回文件列表"
+                    } else {
+                        "返回项目列表"
+                    },
                     hint: "esc",
                 });
             }
-            if !self.history_open {
+            if !self.history_open && self.doc_path.is_some() {
                 cmds.push(PaletteCmd {
                     id: "history",
                     label: "查看历史",
-                    hint: "commits",
+                    hint: "file",
                 });
             }
             if !self.editing && self.doc_path.is_some() {
@@ -2442,8 +2464,9 @@ impl XWikiApp {
     fn run_command(&mut self, id: &str, cx: &mut Context<Self>) {
         match id {
             "back" if self.editing => {}
+            "back" if self.doc_path.is_some() => self.back_to_document_browser(cx),
             "back" => self.back_to_projects(cx),
-            "history" => self.open_history(cx),
+            "history" => self.open_file_history_panel(cx),
             "edit" => self.start_edit(cx),
             "new-project" => {
                 let handle = cx.entity();
@@ -2697,6 +2720,7 @@ impl XWikiApp {
         self.current_revision = None;
         self.project_action = None;
         self.history_open = false;
+        self.history_file_path = None;
         self.settings_tokens.clear();
         self.settings_users.clear();
         self.settings_token_secret = None;
@@ -2973,9 +2997,17 @@ impl XWikiApp {
                 }
             }
             items.push(QuickItem {
-                label: "返回项目列表".into(),
+                label: if self.doc_path.is_some() {
+                    "返回文件列表".into()
+                } else {
+                    "返回项目列表".into()
+                },
                 hint: "esc".into(),
-                target: QuickTarget::BackToProjects,
+                target: if self.doc_path.is_some() {
+                    QuickTarget::BackToDocumentBrowser
+                } else {
+                    QuickTarget::BackToProjects
+                },
             });
         }
         if self.client.is_some() {
@@ -2998,6 +3030,7 @@ impl XWikiApp {
             QuickTarget::OpenProject(id) => self.open_project(&id, cx),
             QuickTarget::OpenDoc(path) => self.open_doc(&path, cx),
             QuickTarget::EnterDir(path) => self.load_tree(&path, cx),
+            QuickTarget::BackToDocumentBrowser => self.back_to_document_browser(cx),
             QuickTarget::BackToProjects => self.back_to_projects(cx),
         }
         cx.notify();
@@ -3330,7 +3363,15 @@ impl XWikiApp {
                 app.settings_access_loading = false;
                 let mut errors = Vec::new();
                 match tokens {
-                    Ok(items) => app.settings_tokens = items,
+                    // Revoked tokens remain in the audit/API response, but they
+                    // are no longer actionable credentials. Keep them out of
+                    // the settings list so it only represents usable keys.
+                    Ok(items) => {
+                        app.settings_tokens = items
+                            .into_iter()
+                            .filter(|token| token.revoked_at.is_empty())
+                            .collect()
+                    }
                     Err(e) => errors.push(format!("Token：{}", Self::friendly_api_error(&e))),
                 }
                 match users {
@@ -3984,6 +4025,266 @@ impl XWikiApp {
         });
     }
 
+    pub(crate) fn open_document_folder_import_dialog(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_document_import_dialog(window, cx, DocumentImportMode::Folder);
+    }
+
+    pub(crate) fn open_document_markdown_import_dialog(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_document_import_dialog(window, cx, DocumentImportMode::Markdown);
+    }
+
+    fn open_document_import_dialog(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        mode: DocumentImportMode,
+    ) {
+        if self.selected_project.is_none() {
+            return;
+        }
+        let handle = cx.entity();
+        let base_path = self.tree_path.clone();
+        let (title, placeholder, action_label) = match mode {
+            DocumentImportMode::Folder => {
+                ("导入文件夹到当前项目", "本地文件夹路径", "预览文件夹导入")
+            }
+            DocumentImportMode::Markdown => (
+                "导入 Markdown 到当前项目",
+                "Markdown 文件路径",
+                "预览 Markdown 导入",
+            ),
+        };
+        window.open_dialog(cx, move |dialog, window, cx| {
+            let theme = cx.theme().clone();
+            let source = cx.new(|cx| InputState::new(window, cx).placeholder(placeholder));
+            let action_source = source.clone();
+            let action_handle = handle.clone();
+            let action_base_path = base_path.clone();
+            let action = Button::new("preview-document-import")
+                .primary()
+                .rounded(px(tokens::RADIUS))
+                .label(action_label)
+                .on_click(move |_, window, cx| {
+                    let source = action_source.read(cx).value().trim().to_string();
+                    action_handle.update(cx, |app, cx| {
+                        app.prepare_document_import(
+                            window,
+                            mode,
+                            source,
+                            action_base_path.clone(),
+                            cx,
+                        )
+                    });
+                });
+            dialog
+                .title(div().text_color(theme.foreground).child(title))
+                .content(move |content, _, _| {
+                    content
+                        .child(div().text_sm().text_color(theme.muted_foreground).child(
+                            match mode {
+                                DocumentImportMode::Folder => {
+                                    "只导入文件夹中的 Markdown 文件，保留相对目录。"
+                                }
+                                DocumentImportMode::Markdown => {
+                                    "选择一个 .md 文件，导入到当前文档目录。"
+                                }
+                            },
+                        ))
+                        .child(
+                            div()
+                                .mt_3()
+                                .text_xs()
+                                .text_color(theme.muted_foreground)
+                                .child("来源路径"),
+                        )
+                        .child(Input::new(&source))
+                })
+                .footer(
+                    h_flex()
+                        .gap_2()
+                        .justify_end()
+                        .w_full()
+                        .child(
+                            Button::new("cancel-document-import")
+                                .ghost()
+                                .label("取消")
+                                .on_click(|_, window, cx| window.close_dialog(cx)),
+                        )
+                        .child(action),
+                )
+        });
+    }
+
+    fn prepare_document_import(
+        &mut self,
+        window: &mut Window,
+        mode: DocumentImportMode,
+        source: String,
+        base_path: String,
+        cx: &mut Context<Self>,
+    ) {
+        if source.trim().is_empty() {
+            self.status_msg = Some("请输入来源路径。".into());
+            cx.notify();
+            return;
+        }
+        let files = match mode {
+            DocumentImportMode::Folder => collect_import_files(std::path::Path::new(&source))
+                .and_then(|files| {
+                    let mut imported = Vec::new();
+                    for file in files {
+                        if !is_markdown_import_path(&file.path) {
+                            continue;
+                        }
+                        let content = String::from_utf8(file.content)
+                            .map_err(|_| format!("文件 {} 不是 UTF-8 Markdown。", file.path))?;
+                        imported.push(dto::ImportFile {
+                            path: join_document_import_path(&base_path, &file.path),
+                            content,
+                        });
+                    }
+                    Ok(imported)
+                }),
+            DocumentImportMode::Markdown => (|| {
+                let path = std::path::Path::new(&source);
+                if !path.is_file() {
+                    Err("路径不是 Markdown 文件。".into())
+                } else if !is_markdown_import_path(&source) {
+                    Err("请选择 .md 或 .markdown 文件。".into())
+                } else {
+                    let name = path
+                        .file_name()
+                        .map(|name| name.to_string_lossy().to_string())
+                        .unwrap_or_else(|| "imported.md".into());
+                    let content = std::fs::read_to_string(path)
+                        .map_err(|error| format!("读取 Markdown 失败: {error}"))?;
+                    Ok(vec![dto::ImportFile {
+                        path: join_document_import_path(&base_path, &name),
+                        content,
+                    }])
+                }
+            })(),
+        };
+        match files {
+            Ok(files) if !files.is_empty() => self.confirm_document_import(window, files, cx),
+            Ok(_) => {
+                self.status_msg = Some("来源文件夹中没有 Markdown 文件。".into());
+                cx.notify();
+            }
+            Err(error) => {
+                self.status_msg = Some(error);
+                cx.notify();
+            }
+        }
+    }
+
+    fn confirm_document_import(
+        &mut self,
+        window: &mut Window,
+        files: Vec<dto::ImportFile>,
+        cx: &mut Context<Self>,
+    ) {
+        let handle = cx.entity();
+        let count = files.len();
+        let summary = files
+            .iter()
+            .take(5)
+            .map(|file| file.path.clone())
+            .collect::<Vec<_>>()
+            .join("、");
+        let more = count.saturating_sub(5);
+        window.open_dialog(cx, move |dialog, _, cx| {
+            let theme = cx.theme().clone();
+            let confirm_handle = handle.clone();
+            let confirm_files = files.clone();
+            let confirm = Button::new("confirm-document-import")
+                .primary()
+                .rounded(px(tokens::RADIUS))
+                .label("确认导入")
+                .on_click(move |_, window, cx| {
+                    let files = confirm_files.clone();
+                    confirm_handle.update(cx, |app, cx| app.execute_document_import(files, cx));
+                    window.close_dialog(cx);
+                });
+            let summary_for_content = summary.clone();
+            dialog
+                .title(div().text_color(theme.foreground).child("确认导入文档"))
+                .content(move |content, _, _| {
+                    let suffix = if more > 0 {
+                        format!(" 等 {} 个文件", more)
+                    } else {
+                        String::new()
+                    };
+                    content.child(div().text_sm().text_color(theme.muted_foreground).child(
+                        format!("将导入 {} 个文件：{}{}", count, summary_for_content, suffix),
+                    ))
+                })
+                .footer(
+                    h_flex()
+                        .gap_2()
+                        .justify_end()
+                        .w_full()
+                        .child(
+                            Button::new("cancel-confirm-document-import")
+                                .ghost()
+                                .label("取消")
+                                .on_click(|_, window, cx| window.close_dialog(cx)),
+                        )
+                        .child(confirm),
+                )
+        });
+    }
+
+    fn execute_document_import(&mut self, files: Vec<dto::ImportFile>, cx: &mut Context<Self>) {
+        let (Some(client), Some(project)) = (self.client.clone(), self.selected_project.clone())
+        else {
+            return;
+        };
+        let current_revision = self.current_revision.clone();
+        self.loading = true;
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            let result = async {
+                let base_revision = if let Some(revision) = current_revision {
+                    revision
+                } else {
+                    client.revision(&project).await?
+                };
+                client
+                    .import_files(&project, &base_revision, "导入文档", files)
+                    .await
+            }
+            .await;
+            match result {
+                Ok(result) => {
+                    let _ = this.update(cx, |app, cx| {
+                        app.loading = false;
+                        app.current_revision = Some(result.revision);
+                        app.notify(format!("已导入 {} 个 Markdown 文件", result.imported), cx);
+                        let path = app.tree_path.clone();
+                        app.load_tree(&path, cx);
+                    });
+                }
+                Err(error) => {
+                    let _ = this.update(cx, |app, cx| {
+                        app.loading = false;
+                        app.status_msg = Some(Self::friendly_api_error(&error));
+                        cx.notify();
+                    });
+                }
+            }
+        })
+        .detach();
+    }
+
     pub(crate) fn open_export_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(project) = self.selected_project.clone() else {
             return;
@@ -4507,6 +4808,7 @@ impl Render for XWikiApp {
         let save_weak = cx.weak_entity();
         let ctx_weak = cx.weak_entity();
         let proj_weak = cx.weak_entity();
+        let export_weak = cx.weak_entity();
         let archive_weak = cx.weak_entity();
         let rename_weak = cx.weak_entity();
         let delete_weak = cx.weak_entity();
@@ -4542,7 +4844,11 @@ impl Render for XWikiApp {
                         this.request_cancel_edit(window, cx);
                     }
                 } else if this.screen_is_workspace() && this.selected_project.is_some() {
-                    this.back_to_projects(cx);
+                    if this.doc_path.is_some() {
+                        this.back_to_document_browser(cx);
+                    } else {
+                        this.back_to_projects(cx);
+                    }
                 } else if matches!(this.screen, Screen::Settings | Screen::ApiReference) {
                     this.screen = Screen::Workspace;
                     cx.notify();
@@ -4579,6 +4885,11 @@ impl Render for XWikiApp {
             .on_action(move |action: &ProjectContextAction, _window, cx| {
                 let _ = proj_weak.update(cx, |app, cx| {
                     app.open_project(&action.project_id, cx);
+                });
+            })
+            .on_action(move |_: &ProjectExportAction, window, cx| {
+                let _ = export_weak.update(cx, |app, cx| {
+                    app.open_export_dialog(window, cx);
                 });
             })
             .on_action(move |action: &ProjectArchiveAction, window, cx| {
@@ -4686,6 +4997,25 @@ fn collect_import_files(root: &std::path::Path) -> Result<Vec<dto::UploadFile>, 
     }
     files.sort_by(|left, right| left.path.cmp(&right.path));
     Ok(files)
+}
+
+fn is_markdown_import_path(path: &str) -> bool {
+    std::path::Path::new(path)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(|extension| matches!(extension.to_ascii_lowercase().as_str(), "md" | "markdown"))
+        .unwrap_or(false)
+}
+
+fn join_document_import_path(base: &str, relative: &str) -> String {
+    let relative = relative.trim_matches('/').replace('\\', "/");
+    if base.trim_matches('/').is_empty() {
+        relative
+    } else if relative.is_empty() {
+        base.trim_matches('/').to_string()
+    } else {
+        format!("{}/{}", base.trim_matches('/'), relative)
+    }
 }
 
 fn format_bytes(bytes: usize) -> String {

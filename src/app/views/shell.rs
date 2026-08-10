@@ -821,22 +821,6 @@ impl XWikiApp {
                             })),
                     )
                     .child(
-                        if matches!(self.screen, Screen::Workspace)
-                            && self.selected_project.is_some()
-                        {
-                            Button::new("shell-export")
-                                .ghost()
-                                .compact()
-                                .label("导出")
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.open_export_dialog(window, cx)
-                                }))
-                                .into_any_element()
-                        } else {
-                            div().into_any_element()
-                        },
-                    )
-                    .child(
                         div()
                             .font_family(tokens::FONT_MONO)
                             .text_xs()

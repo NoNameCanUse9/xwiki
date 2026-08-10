@@ -11,7 +11,10 @@ use gpui_component::{
     *,
 };
 
-use crate::app::{DocDeleteAction, DocRenameAction, EditDocAction, TreeContextAction, XWikiApp};
+use crate::app::{
+    DocDeleteAction, DocRenameAction, EditDocAction, ProjectExportAction, TreeContextAction,
+    XWikiApp,
+};
 use crate::config;
 use crate::ui::{mono_label, split_pane, tokens};
 
@@ -100,9 +103,8 @@ impl XWikiApp {
                     .py_8()
                     .rounded(px(tokens::RADIUS))
                     .v_flex()
-                    .items_center()
+                    .items_start()
                     .gap_3()
-                    .text_center()
                     .text_color(theme.muted_foreground)
                     .child(
                         div()
@@ -272,6 +274,7 @@ impl XWikiApp {
                                                 path: menu_path.clone(),
                                             }),
                                         );
+                                        m = m.menu("导出项目", Box::new(ProjectExportAction));
                                     }
                                     m = m.menu(
                                         "重命名",
@@ -497,6 +500,38 @@ impl XWikiApp {
                             .child(format!("{count}")),
                     ),
             )
+            .child(
+                div()
+                    .px_4()
+                    .py_2()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .justify_end()
+                    .bg(theme.background)
+                    .child(
+                        Button::new("doc-import-folder")
+                            .secondary()
+                            .outline()
+                            .compact()
+                            .rounded(px(tokens::RADIUS))
+                            .label("导入文件夹")
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.open_document_folder_import_dialog(window, cx)
+                            })),
+                    )
+                    .child(
+                        Button::new("doc-import-markdown")
+                            .secondary()
+                            .outline()
+                            .compact()
+                            .rounded(px(tokens::RADIUS))
+                            .label("导入 Markdown")
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.open_document_markdown_import_dialog(window, cx)
+                            })),
+                    ),
+            )
             .child(if self.tree_loading {
                 div()
                     .flex_1()
@@ -565,18 +600,23 @@ impl XWikiApp {
                 div()
                     .px_3()
                     .py_3()
+                    .w_full()
+                    .h(px(tokens::TOOLBAR_H))
                     .flex()
                     .items_center()
-                    .justify_between()
-                    .child(mono_label("OUTLINE").text_color(theme.muted_foreground))
+                    .gap_3()
                     .child(
-                        Button::new("back-projects")
+                        Button::new("back-document-browser")
                             .rounded(px(tokens::RADIUS))
                             .icon(IconName::ArrowLeft)
-                            .label("项目")
+                            .label("返回文件列表")
+                            .tooltip("返回当前项目的文件列表")
                             .disabled(self.editing)
-                            .on_click(cx.listener(|this, _, _, cx| this.back_to_projects(cx))),
-                    ),
+                            .on_click(
+                                cx.listener(|this, _, _, cx| this.back_to_document_browser(cx)),
+                            ),
+                    )
+                    .child(mono_label("OUTLINE").text_color(theme.muted_foreground)),
             )
             .child(div().flex_1().overflow_y_scrollbar().p_2().child(
                 if self.doc_outline.entries.is_empty() {
@@ -754,6 +794,7 @@ impl XWikiApp {
                     .child(
                         div()
                             .flex()
+                            .items_center()
                             .gap_2()
                             .child(
                                 Button::new("content-backlinks")
@@ -933,6 +974,7 @@ impl XWikiApp {
                             .child(
                                 div()
                                     .flex()
+                                    .items_center()
                                     .gap_2()
                                     .child(
                                         Button::new("open-search")
@@ -944,18 +986,11 @@ impl XWikiApp {
                                             })),
                                     )
                                     .child(
-                                        Button::new("open-history")
+                                        Button::new("open-file-history")
                                             .rounded(px(tokens::RADIUS))
                                             .icon(IconName::Undo2)
                                             .label("历史")
-                                            .on_click(
-                                                cx.listener(|this, _, _, cx| this.open_history(cx)),
-                                            ),
-                                    )
-                                    .child(
-                                        Button::new("open-file-history")
-                                            .rounded(px(tokens::RADIUS))
-                                            .label("文件历史")
+                                            .tooltip("查看当前文件的版本历史")
                                             .on_click(cx.listener(|this, _, _, cx| {
                                                 this.open_file_history_panel(cx)
                                             })),
@@ -1004,36 +1039,36 @@ impl XWikiApp {
             crate::app::DocPanel::Share => "分享页面",
             crate::app::DocPanel::Backlinks => "反向链接",
             crate::app::DocPanel::Attachments => "附件",
-            crate::app::DocPanel::FileHistory => "文件历史",
             crate::app::DocPanel::None => "",
         };
         let header = div()
             .flex()
             .items_center()
-            .justify_between()
+            .gap_3()
             .border_b_1()
             .border_color(theme.border)
             .px_6()
             .py_3()
+            .child(
+                Button::new("close-doc-panel")
+                    .ghost()
+                    .compact()
+                    .icon(IconName::ArrowLeft)
+                    .label("返回文档")
+                    .tooltip("返回文档")
+                    .on_click(cx.listener(|this, _, _, cx| this.close_doc_panel(cx))),
+            )
             .child(
                 div()
                     .font_family(tokens::FONT_MONO)
                     .text_xs()
                     .text_color(theme.muted_foreground)
                     .child(title),
-            )
-            .child(
-                Button::new("close-doc-panel")
-                    .ghost()
-                    .compact()
-                    .label("关闭")
-                    .on_click(cx.listener(|this, _, _, cx| this.close_doc_panel(cx))),
             );
         let body = match self.doc_panel {
             crate::app::DocPanel::Share => self.render_share_panel(cx),
             crate::app::DocPanel::Backlinks => self.render_backlinks_panel(cx),
             crate::app::DocPanel::Attachments => self.render_attachments_panel(cx),
-            crate::app::DocPanel::FileHistory => self.render_file_history_panel(cx),
             crate::app::DocPanel::None => div().into_any_element(),
         };
         div()
@@ -1269,82 +1304,6 @@ impl XWikiApp {
             })
             .collect();
         content.children(rows).into_any_element()
-    }
-
-    fn render_file_history_panel(&self, cx: &mut Context<Self>) -> AnyElement {
-        let theme = cx.theme().clone();
-        if self.file_history_loading {
-            return div()
-                .px_6()
-                .py_4()
-                .text_sm()
-                .text_color(theme.muted_foreground)
-                .child("正在加载文件历史…")
-                .into_any_element();
-        }
-        if let Some(error) = &self.file_history_error {
-            return div()
-                .px_6()
-                .py_4()
-                .text_sm()
-                .text_color(theme.danger)
-                .child(error.clone())
-                .into_any_element();
-        }
-        if self.file_history.is_empty() {
-            return div()
-                .px_6()
-                .py_4()
-                .text_sm()
-                .text_color(theme.muted_foreground)
-                .child("该文件暂无历史记录。")
-                .into_any_element();
-        }
-        let rows: Vec<AnyElement> = self
-            .file_history
-            .iter()
-            .map(|commit| {
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_3()
-                    .px_6()
-                    .py_2()
-                    .border_b_1()
-                    .border_color(theme.border)
-                    .child(
-                        div()
-                            .font_family(tokens::FONT_MONO)
-                            .text_xs()
-                            .text_color(theme.accent)
-                            .child(tokens::truncate(&commit.sha, 10)),
-                    )
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w(px(0.0))
-                            .text_xs()
-                            .text_color(theme.foreground)
-                            .overflow_x_hidden()
-                            .text_ellipsis()
-                            .whitespace_nowrap()
-                            .child(commit.message.clone()),
-                    )
-                    .child(
-                        div()
-                            .font_family(tokens::FONT_MONO)
-                            .text_xs()
-                            .text_color(theme.muted_foreground)
-                            .child(commit.date.clone()),
-                    )
-                    .into_any_element()
-            })
-            .collect();
-        div()
-            .max_h(px(240.0))
-            .overflow_y_scrollbar()
-            .children(rows)
-            .into_any_element()
     }
 }
 

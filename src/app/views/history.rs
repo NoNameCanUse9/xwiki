@@ -64,7 +64,7 @@ impl XWikiApp {
                         .rounded(px(tokens::RADIUS))
                         .icon(IconName::Redo2)
                         .label("重试")
-                        .on_click(cx.listener(|this, _, _, cx| this.load_commits(cx))),
+                        .on_click(cx.listener(|this, _, _, cx| this.load_file_history(cx))),
                 )
                 .into_any_element()
         } else if self.commits.is_empty() {
@@ -422,6 +422,15 @@ impl XWikiApp {
                             .flex()
                             .items_center()
                             .gap_2()
+                            .child(
+                                Button::new("close-history")
+                                    .ghost()
+                                    .compact()
+                                    .icon(IconName::ArrowLeft)
+                                    .label("返回文档")
+                                    .tooltip("返回文档 (Esc)")
+                                    .on_click(cx.listener(|this, _, _, cx| this.close_history(cx))),
+                            )
                             .child(mono_label("REVISIONS").text_color(theme.accent))
                             .child(
                                 div()
@@ -430,20 +439,15 @@ impl XWikiApp {
                                     .text_color(theme.muted_foreground)
                                     .child(format!("{} revisions", self.commits.len())),
                             )
-                            .child(div().flex_1())
-                            .child(
-                                Button::new("close-history")
-                                    .ghost()
-                                    .compact()
-                                    .icon(IconName::Close)
-                                    .label("关闭")
-                                    .tooltip("关闭历史 (Esc)")
-                                    .on_click(cx.listener(|this, _, _, cx| this.close_history(cx))),
-                            ),
+                            .child(div().flex_1()),
                     )
                     .child(
                         div()
                             .flex()
+                            // The search field has a label above it. Align the
+                            // action buttons to the field's bottom edge instead
+                            // of centering them against the taller two-line block.
+                            .items_end()
                             .gap_2()
                             .child(
                                 div()
@@ -487,9 +491,14 @@ impl XWikiApp {
                                         "Restore"
                                     })
                                     .loading(self.restoring)
-                                    .tooltip("恢复到此版本（生成新提交）")
+                                    .tooltip(if self.history_file_path.is_some() {
+                                        "文件历史暂不支持恢复"
+                                    } else {
+                                        "恢复到此版本（生成新提交）"
+                                    })
                                     .disabled(
-                                        self.selected_sha.is_none()
+                                        self.history_file_path.is_some()
+                                            || self.selected_sha.is_none()
                                             || self.restoring
                                             || self.history_detail_loading,
                                     )
@@ -529,7 +538,7 @@ impl XWikiApp {
                                     if let Some(sha) = this.selected_sha.clone() {
                                         this.select_commit(&sha, cx);
                                     } else {
-                                        this.load_commits(cx);
+                                        this.load_file_history(cx);
                                     }
                                 })),
                         )

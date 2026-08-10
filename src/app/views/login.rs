@@ -162,13 +162,15 @@ impl XWikiApp {
                         .on_click(cx.listener(|this, _, _, cx| this.submit_reset(cx))),
                 )
                 .child(
-                    Button::new("back-to-login")
-                        .ghost()
-                        .w_full()
-                        .rounded(px(tokens::RADIUS))
-                        .icon(IconName::ArrowLeft)
-                        .label("返回登录")
-                        .on_click(cx.listener(|this, _, _, cx| this.toggle_reset_mode(cx))),
+                    div().w_full().flex().child(
+                        Button::new("back-to-login")
+                            .ghost()
+                            .compact()
+                            .rounded(px(tokens::RADIUS))
+                            .icon(IconName::ArrowLeft)
+                            .label("返回登录")
+                            .on_click(cx.listener(|this, _, _, cx| this.toggle_reset_mode(cx))),
+                    ),
                 )
         } else {
             div()

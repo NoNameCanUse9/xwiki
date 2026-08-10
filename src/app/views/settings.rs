@@ -183,7 +183,6 @@ impl XWikiApp {
             .map(|token| {
                 let id = token.id.clone();
                 let token_name = token.name.clone();
-                let revoked = !token.revoked_at.is_empty();
                 div()
                     .flex()
                     .items_center()
@@ -207,11 +206,7 @@ impl XWikiApp {
                                     .font_family(tokens::FONT_MONO)
                                     .text_xs()
                                     .text_color(theme.muted_foreground)
-                                    .child(if revoked {
-                                        "已撤销".to_string()
-                                    } else {
-                                        format!("{} · {}", token.scope, token.created_at)
-                                    }),
+                                    .child(format!("{} · {}", token.scope, token.created_at)),
                             ),
                     )
                     .child(
@@ -221,7 +216,7 @@ impl XWikiApp {
                             .compact()
                             .icon(IconName::Delete)
                             .label("撤销")
-                            .disabled(revoked || access_busy)
+                            .disabled(access_busy)
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 this.confirm_revoke_token(
                                     window,
@@ -249,7 +244,7 @@ impl XWikiApp {
                 .font_family(tokens::FONT_BODY)
                 .text_sm()
                 .text_color(theme.muted_foreground)
-                .child("暂无访问 Token。")
+                .child("暂无可用访问 Token。")
                 .into_any_element()
         } else {
             div().v_flex().children(token_rows).into_any_element()
