@@ -11,6 +11,20 @@ fn config_path() -> PathBuf {
     PathBuf::from(home).join(".config/agentdocs-client")
 }
 
+/// Writes a file atomically (tmp + rename) so a crash mid-write never leaves
+/// a truncated config. On Unix the tmp file gets `mode` before the rename,
+/// closing the umask window where a credential file could be world-readable.
+fn write_atomic(path: &std::path::Path, contents: &str, mode: u32) -> std::io::Result<()> {
+    let tmp = path.with_extension("tmp");
+    std::fs::write(&tmp, contents)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(mode))?;
+    }
+    std::fs::rename(&tmp, path)
+}
+
 /// Serializes tests that mutate `HOME` (see `cli::tests::isolated_home` and
 /// `config::tests`): `set_var` is process-global, so parallel tests would
 /// otherwise race on the same config directory.
@@ -24,10 +38,10 @@ pub fn load_server() -> String {
         .unwrap_or_else(|_| "http://127.0.0.1:9090".into())
 }
 
-pub fn save_server(url: &str) {
+pub fn save_server(url: &str) -> std::io::Result<()> {
     let dir = config_path();
-    let _ = std::fs::create_dir_all(&dir);
-    let _ = std::fs::write(dir.join("server"), url);
+    std::fs::create_dir_all(&dir)?;
+    write_atomic(&dir.join("server"), url, 0o644)
 }
 
 /// Saved username for login convenience. Passwords are never persisted.
@@ -44,7 +58,7 @@ pub fn save_username(username: &str) {
     }
     let dir = config_path();
     let _ = std::fs::create_dir_all(&dir);
-    let _ = std::fs::write(dir.join("username"), username);
+    let _ = write_atomic(&dir.join("username"), username, 0o644);
 }
 
 /// A persisted server session. This contains a server-issued cookie, never a
@@ -79,14 +93,7 @@ pub fn save_session(server: &str, username: &str, cookie: &str) {
         cookie: cookie.trim().to_string(),
     };
     if let Ok(json) = serde_json::to_string(&session) {
-        let path = dir.join("session.json");
-        if std::fs::write(&path, json).is_ok() {
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
-            }
-        }
+        let _ = write_atomic(&dir.join("session.json"), &json, 0o600);
     }
 }
 
@@ -113,7 +120,7 @@ pub fn save_theme(mode: ThemeMode) {
         ThemeMode::Light => "light",
         ThemeMode::Dark => "dark",
     };
-    let _ = std::fs::write(dir.join("theme"), value);
+    let _ = write_atomic(&dir.join("theme"), value, 0o644);
 }
 
 /// Persisted panel layout (plan §0.3: widths + collapse state survive
@@ -148,7 +155,7 @@ pub fn save_layout(layout: &Layout) {
     let dir = config_path();
     let _ = std::fs::create_dir_all(&dir);
     if let Ok(json) = serde_json::to_string(layout) {
-        let _ = std::fs::write(dir.join("layout.json"), json);
+        let _ = write_atomic(&dir.join("layout.json"), &json, 0o644);
     }
 }
 

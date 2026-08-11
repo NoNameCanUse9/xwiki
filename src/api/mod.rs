@@ -34,7 +34,19 @@ mod tests {
         )
         .unwrap();
         assert_eq!(e.code, "revision_conflict");
-        assert_eq!(e.request_id, "req_x");
+        assert_eq!(e.request_id.as_deref(), Some("req_x"));
+    }
+
+    #[test]
+    fn error_envelope_without_request_id_still_decodes() {
+        // The Go server always sends request_id today, but an envelope
+        // missing it must not fail the whole decode (that would mask the
+        // real error code — e.g. revision_conflict — as http_error).
+        let e: dto::ApiErrorBody =
+            serde_json::from_str(r#"{"code":"revision_conflict","message":"stale"}"#)
+                .unwrap();
+        assert_eq!(e.code, "revision_conflict");
+        assert_eq!(e.request_id, None);
     }
 
     #[test]
@@ -138,14 +150,21 @@ impl Client {
 
     fn with_credentials(server: &str, token: Option<String>, cookie: Option<String>) -> Self {
         let base = server.trim_end_matches('/').to_string();
-        let mut builder = reqwest::Client::builder().cookie_store(true);
+        let mut builder = reqwest::Client::builder()
+            .cookie_store(true)
+            // Guard against a hung/half-open server leaving every request
+            // pending forever (no cancel path on the GUI side).
+            .timeout(std::time::Duration::from_secs(60));
         let mut headers = reqwest::header::HeaderMap::new();
         if let Some(t) = token {
-            headers.insert(
-                reqwest::header::AUTHORIZATION,
+            // An invalid token (e.g. control chars from the environment)
+            // must not panic startup — skip it and let the server reject
+            // the anonymous request instead.
+            if let Ok(value) =
                 reqwest::header::HeaderValue::from_str(&format!("Bearer {t}"))
-                    .expect("bearer header"),
-            );
+            {
+                headers.insert(reqwest::header::AUTHORIZATION, value);
+            }
         }
         if let Some(c) = cookie {
             if let Ok(value) = reqwest::header::HeaderValue::from_str(&c) {
@@ -165,6 +184,28 @@ impl Client {
         format!("{}{}", self.base, path)
     }
 
+    /// Turns a non-success response into the uniform `ApiError`, extracting
+    /// the server envelope when it decodes and falling back to a plain HTTP
+    /// status otherwise.
+    async fn error_from_resp(resp: reqwest::Response) -> ApiError {
+        let status = resp.status().as_u16();
+        let body: Result<ErrorEnvelope, _> = resp.json().await;
+        match body {
+            Ok(env) => ApiError {
+                code: env.error.code,
+                message: env.error.message,
+                request_id: env.error.request_id,
+                status,
+            },
+            Err(_) => ApiError {
+                code: "http_error".into(),
+                message: format!("HTTP {status}"),
+                request_id: None,
+                status,
+            },
+        }
+    }
+
     async fn send<T: DeserializeOwned + Send + 'static>(
         req: reqwest::RequestBuilder,
     ) -> Result<T, ApiError> {
@@ -172,21 +213,7 @@ impl Client {
             let resp = req.send().await.map_err(network_error)?;
             let status = resp.status().as_u16();
             if !resp.status().is_success() {
-                let body: Result<ErrorEnvelope, _> = resp.json().await;
-                let (code, message, request_id) = match body {
-                    Ok(env) => (
-                        env.error.code,
-                        env.error.message,
-                        Some(env.error.request_id),
-                    ),
-                    Err(_) => ("http_error".into(), format!("HTTP {}", status), None),
-                };
-                return Err(ApiError {
-                    code,
-                    message,
-                    request_id,
-                    status,
-                });
+                return Err(Self::error_from_resp(resp).await);
             }
             resp.json().await.map_err(|e| ApiError {
                 code: "decode_error".into(),
@@ -207,21 +234,7 @@ impl Client {
             let resp = req.send().await.map_err(network_error)?;
             let status = resp.status().as_u16();
             if !resp.status().is_success() {
-                let body: Result<ErrorEnvelope, _> = resp.json().await;
-                let (code, message, request_id) = match body {
-                    Ok(env) => (
-                        env.error.code,
-                        env.error.message,
-                        Some(env.error.request_id),
-                    ),
-                    Err(_) => ("http_error".into(), format!("HTTP {status}"), None),
-                };
-                return Err(ApiError {
-                    code,
-                    message,
-                    request_id,
-                    status,
-                });
+                return Err(Self::error_from_resp(resp).await);
             }
             resp.bytes()
                 .await
@@ -244,21 +257,7 @@ impl Client {
             let status = resp.status().as_u16();
             let session_cookie = response_session_cookie(&resp);
             if !resp.status().is_success() {
-                let body: Result<ErrorEnvelope, _> = resp.json().await;
-                let (code, message, request_id) = match body {
-                    Ok(env) => (
-                        env.error.code,
-                        env.error.message,
-                        Some(env.error.request_id),
-                    ),
-                    Err(_) => ("http_error".into(), format!("HTTP {}", status), None),
-                };
-                return Err(ApiError {
-                    code,
-                    message,
-                    request_id,
-                    status,
-                });
+                return Err(Self::error_from_resp(resp).await);
             }
             let value = resp.json().await.map_err(|e| ApiError {
                 code: "decode_error".into(),
@@ -301,7 +300,6 @@ impl Client {
         Ok((resp.user, cookie))
     }
 
-    #[allow(dead_code)] // used by the CLI milestone
     pub async fn me(&self) -> Result<dto::User, ApiError> {
         let resp: dto::UserResponse =
             Self::send(self.http.get(self.url("/api/v1/auth/me"))).await?;
@@ -710,17 +708,6 @@ impl Client {
     /// Backwards-compatible name for callers that used the original import
     /// endpoint wrapper before it supported arbitrary project files.
     #[allow(dead_code)]
-    pub async fn import_zip(
-        &self,
-        project_id: &str,
-        base_revision: &str,
-        message: &str,
-        files: Vec<dto::ImportFile>,
-    ) -> Result<dto::ImportResult, ApiError> {
-        self.import_files(project_id, base_revision, message, files)
-            .await
-    }
-
     pub async fn import_repo(
         &self,
         name: &str,
@@ -1052,7 +1039,8 @@ pub mod dto {
     pub struct ApiErrorBody {
         pub code: String,
         pub message: String,
-        pub request_id: String,
+        #[serde(default)]
+        pub request_id: Option<String>,
     }
 
     #[derive(Debug, Deserialize)]

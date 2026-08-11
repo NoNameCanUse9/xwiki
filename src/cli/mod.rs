@@ -168,9 +168,16 @@ fn cmd_config(args: &[String]) -> i32 {
             let Some(url) = args.get(1) else {
                 return usage();
             };
-            config::save_server(url);
-            println!("server: {url}");
-            0
+            match config::save_server(url) {
+                Ok(()) => {
+                    println!("server: {url}");
+                    0
+                }
+                Err(e) => {
+                    eprintln!("failed to save server: {e}");
+                    1
+                }
+            }
         }
         _ => usage(),
     }
@@ -226,10 +233,13 @@ async fn cmd_login(args: &[String]) -> i32 {
             match c.create_token("cli-login", "write", ids, prefixes).await {
                 Ok((_, secret)) => {
                     println!("export AGENTDOCS_TOKEN={secret}");
+                    0
                 }
-                Err(e) => eprintln!("token mint failed: {e}"),
+                Err(e) => {
+                    eprintln!("token mint failed: {e}");
+                    1
+                }
             }
-            0
         }
         Err(e) => fail(&e),
     }
@@ -424,7 +434,13 @@ async fn cmd_doc(args: &[String]) -> i32 {
                 .and_then(|i| args.get(i + 1))
                 .cloned()
                 .unwrap_or_else(|| format!("{verb} {path}"));
-            let content = read_stdin_or_file(args);
+            let content = match read_stdin_or_file(args) {
+                Ok(content) => content,
+                Err(e) => {
+                    eprintln!("error: {e}");
+                    return 2;
+                }
+            };
             let op = if verb == "create" { "create" } else { "update" };
             match c.edit_doc(project, path, op, &content, &message).await {
                 Ok(r) => {
@@ -467,16 +483,20 @@ async fn cmd_doc(args: &[String]) -> i32 {
     }
 }
 
-/// Reads doc content from --file <path>, or stdin when piped.
-fn read_stdin_or_file(args: &[String]) -> String {
+/// Reads doc content from `--file <path>`, or stdin when piped. A `--file`
+/// that cannot be read is an error — silently falling back to empty content
+/// would let `doc update` wipe the page.
+fn read_stdin_or_file(args: &[String]) -> Result<String, String> {
     if let Some(i) = args.iter().position(|a| a == "--file") {
         if let Some(path) = args.get(i + 1) {
-            return std::fs::read_to_string(path).unwrap_or_default();
+            return std::fs::read_to_string(path)
+                .map_err(|e| format!("cannot read --file {path}: {e}"));
         }
     }
     let mut buf = String::new();
-    let _ = std::io::Read::read_to_string(&mut std::io::stdin(), &mut buf);
-    buf
+    std::io::Read::read_to_string(&mut std::io::stdin(), &mut buf)
+        .map_err(|e| format!("cannot read stdin: {e}"))?;
+    Ok(buf)
 }
 
 // ----- search -----
