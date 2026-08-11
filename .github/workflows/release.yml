@@ -1,0 +1,97 @@
+name: Release
+
+# 触发方式：推送形如 app-v1.2.3 的 tag
+#   git tag app-v1.2.3
+#   git push origin app-v1.2.3
+#
+# 注意：Git ref 规则禁止冒号，`app:v1.2.3` 无法作为 tag 名（git 会直接
+# 拒绝创建），所以这里用 `app-v*` 匹配。
+#
+# Actions 按 commit SHA 固定版本（zizmor: unpinned-uses），升级时先验证
+# 再改 SHA。
+# zizmor: ignore[cache-poisoning, artipacked] — this workflow only runs on
+# pushed release tags (never PRs), so no untrusted code can seed the cache or
+# inject artifact contents.
+on:
+  push:
+    tags:
+      - 'app-v*'
+
+jobs:
+  build:
+    name: Build ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x64
+            os: ubuntu-latest
+            asset: xwiki-app-linux-x64
+          - name: windows-x64
+            os: windows-latest
+            asset: xwiki-app-windows-x64.exe
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: "Install Linux system deps (gpui: X11/Wayland/fontconfig)"
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libx11-dev \
+            libxkbcommon-dev \
+            libxkbcommon-x11-dev \
+            libwayland-dev \
+            libegl1-mesa-dev \
+            libfontconfig1-dev
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+
+      - name: Cache cargo
+        uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      - name: Build release
+        run: cargo build --release
+
+      - name: Package asset
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#app-v}"
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            cp target/release/xwiki-app.exe "${{ matrix.asset }}"
+          else
+            cp target/release/xwiki-app "${{ matrix.asset }}"
+          fi
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ${{ matrix.asset }}
+          path: ${{ matrix.asset }}
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # 创建 GitHub Release 并上传资产
+    steps:
+      - name: Download assets
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: assets
+          merge-multiple: true
+
+      - name: Create / update release
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          name: AgentDocs ${{ github.ref_name }}
+          tag_name: ${{ github.ref_name }}
+          generate_release_notes: true
+          files: assets/*
