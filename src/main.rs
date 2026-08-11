@@ -87,6 +87,9 @@ fn main() {
         ]);
 
         cx.spawn(async move |cx| {
+            let start_bounds = cx.update(|cx| {
+                Bounds::centered(None, size(px(1024.0), px(680.0)), cx)
+            });
             cx.open_window(
                 WindowOptions {
                     titlebar: Some(TitlebarOptions {
@@ -94,7 +97,10 @@ fn main() {
                         ..Default::default()
                     }),
                     // Plan §0.3: desktop window contract — never smaller than
-                    // 960×640 so panels + main content stay usable.
+                    // 960×640 so panels + main content stay usable. The
+                    // default gpui size is far larger, so pin a modest
+                    // starting size.
+                    window_bounds: Some(WindowBounds::Windowed(start_bounds)),
                     window_min_size: Some(size(px(960.0), px(640.0))),
                     ..Default::default()
                 },
