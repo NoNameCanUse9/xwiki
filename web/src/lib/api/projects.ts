@@ -31,3 +31,16 @@ export function unarchiveProject(id: string) {
     method: "POST",
   });
 }
+
+export function renameProject(id: string, name: string) {
+  return api<ProjectResponse>(`/projects/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ name }),
+  });
+}
+
+export function deleteProject(id: string) {
+  return api<{ deleted: boolean }>(`/projects/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+}

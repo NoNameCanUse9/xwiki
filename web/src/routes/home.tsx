@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import {
@@ -8,8 +8,12 @@ import {
 	KeyRound,
 	LogOut,
 	FolderGit2,
+	MoreHorizontal,
+	Pencil,
 	RotateCcw,
 	ScrollText,
+	Trash2,
+	UserCog,
 	Users,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -18,8 +22,20 @@ import ThemeToggle from "@/components/theme-toggle";
 import ProjectCreateDialog from "@/components/project-create-dialog";
 import ImportProjectDialog from "@/components/import-project-dialog";
 import {
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogHeader,
+	DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { ApiError } from "@/lib/api/client";
+import {
 	archiveProject,
+	deleteProject,
 	listProjects,
+	renameProject,
 	unarchiveProject,
 } from "@/lib/api/projects";
 import type { Project } from "@/lib/api/types";
@@ -33,18 +49,41 @@ function formatDate(iso: string): string {
 	});
 }
 
+const PROJECT_NAME_PATTERN = /^[a-z0-9]+(-[a-z0-9]+)*$/;
+
+const menuItemClass =
+	"flex w-full items-center gap-2 rounded-sm px-3 py-1.5 text-left text-sm text-[var(--color-ink-2)] hover:bg-[var(--color-surface-accent)] hover:text-[var(--color-ink)]";
+
 function ProjectCard({ project }: { project: Project }) {
 	const queryClient = useQueryClient();
 	const [busy, setBusy] = useState(false);
+	const [menuOpen, setMenuOpen] = useState(false);
+	const menuRef = useRef<HTMLDivElement>(null);
+	const [renameOpen, setRenameOpen] = useState(false);
+	const [renameValue, setRenameValue] = useState(project.name);
+	const [renameError, setRenameError] = useState<string | null>(null);
+	const [deleteOpen, setDeleteOpen] = useState(false);
 
-	const onArchive = async (e: React.MouseEvent) => {
-		e.preventDefault();
-		e.stopPropagation();
+	useEffect(() => {
+		if (!menuOpen) return;
+		const onDown = (e: MouseEvent) => {
+			if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+				setMenuOpen(false);
+			}
+		};
+		document.addEventListener("mousedown", onDown);
+		return () => document.removeEventListener("mousedown", onDown);
+	}, [menuOpen]);
+
+	const invalidateProjects = () =>
+		queryClient.invalidateQueries({ queryKey: ["projects"] });
+
+	const onArchive = async () => {
 		setBusy(true);
 		try {
 			await archiveProject(project.id);
 			toast.success(`项目 ${project.name} 已归档`);
-			await queryClient.invalidateQueries({ queryKey: ["projects"] });
+			await invalidateProjects();
 		} catch (err) {
 			toast.error(err instanceof Error ? err.message : "归档失败");
 		} finally {
@@ -52,14 +91,12 @@ function ProjectCard({ project }: { project: Project }) {
 		}
 	};
 
-	const onUnarchive = async (e: React.MouseEvent) => {
-		e.preventDefault();
-		e.stopPropagation();
+	const onUnarchive = async () => {
 		setBusy(true);
 		try {
 			await unarchiveProject(project.id);
 			toast.success(`项目 ${project.name} 已恢复`);
-			await queryClient.invalidateQueries({ queryKey: ["projects"] });
+			await invalidateProjects();
 		} catch (err) {
 			toast.error(err instanceof Error ? err.message : "恢复失败");
 		} finally {
@@ -67,11 +104,61 @@ function ProjectCard({ project }: { project: Project }) {
 		}
 	};
 
+	const confirmDelete = async () => {
+		setBusy(true);
+		try {
+			await deleteProject(project.id);
+			toast.success(`项目 ${project.name} 已删除`);
+			setDeleteOpen(false);
+			await invalidateProjects();
+		} catch (err) {
+			toast.error(err instanceof Error ? err.message : "删除失败");
+		} finally {
+			setBusy(false);
+		}
+	};
+
+	const stopMenuPropagation = (event: React.MouseEvent) => {
+		event.preventDefault();
+		event.stopPropagation();
+	};
+
+	const openRename = () => {
+		setRenameValue(project.name);
+		setRenameError(null);
+		setRenameOpen(true);
+	};
+
+	const saveRename = async () => {
+		const name = renameValue.trim();
+		if (name.length < 1 || name.length > 64 || !PROJECT_NAME_PATTERN.test(name)) {
+			setRenameError("小写字母、数字和单个连字符，1-64 字符");
+			return;
+		}
+		setBusy(true);
+		setRenameError(null);
+		try {
+			await renameProject(project.id, name);
+			toast.success(`项目已重命名为 ${name}`);
+			setRenameOpen(false);
+			await invalidateProjects();
+		} catch (err) {
+			if (err instanceof ApiError && err.code === "project_name_conflict") {
+				setRenameError("同名项目已存在");
+			} else {
+				toast.error(err instanceof Error ? err.message : "重命名失败");
+			}
+		} finally {
+			setBusy(false);
+		}
+	};
+
 	return (
-		<Link
-			to={`/projects/${project.id}/docs`}
-			className="hairline-panel block flex flex-col gap-3 p-5 transition-colors hover:border-[var(--color-rule-2)] hover:bg-[var(--color-surface-accent)]"
-		>
+		<>
+			<Link
+				to={`/projects/${project.id}/docs`}
+				className="hairline-panel block flex flex-col gap-3 p-5 transition-colors hover:border-[var(--color-rule-2)] hover:bg-[var(--color-surface-accent)]"
+			>
 			<div className="flex items-start justify-between gap-3">
 				<div className="min-w-0">
 					<span className="font-display text-lg font-semibold text-[var(--color-ink)]">
@@ -86,39 +173,165 @@ function ProjectCard({ project }: { project: Project }) {
 						{project.description || "—"}
 					</p>
 				</div>
-				{!project.archived ? (
-					<Button
-						variant="ghost"
-						size="sm"
-						disabled={busy}
-						onClick={onArchive}
-						className="shrink-0 gap-1.5 text-[var(--color-ink-3)]"
+				<div className="relative">
+					<button
+						type="button"
+						aria-label={`项目操作 ${project.name}`}
+						aria-haspopup="menu"
+						aria-expanded={menuOpen}
+						onClick={(event) => {
+							event.preventDefault();
+							event.stopPropagation();
+							setMenuOpen((v) => !v);
+						}}
+						className="grid size-7 shrink-0 place-items-center rounded-[var(--radius)] text-[var(--color-ink-3)] hover:bg-[var(--color-surface-accent)] hover:text-[var(--color-ink)]"
 					>
-						<Archive className="size-3.5" />
-						归档
-					</Button>
-				) : (
-					<Button
-						variant="ghost"
-						size="sm"
-						disabled={busy}
-						onClick={onUnarchive}
-						className="shrink-0 gap-1.5 text-[var(--color-accent)]"
-					>
-						<RotateCcw className="size-3.5" />
-						恢复
-					</Button>
-				)}
+						<MoreHorizontal className="size-4" />
+					</button>
+					{menuOpen && (
+						<div
+							role="menu"
+							className="absolute right-0 top-9 z-30 w-36 rounded-[var(--radius)] border border-[var(--color-rule)] bg-[var(--color-paper)] p-1 shadow-lg"
+						>
+							<button
+								type="button"
+								role="menuitem"
+								className={menuItemClass}
+								onClick={(event) => {
+									stopMenuPropagation(event);
+									setMenuOpen(false);
+									openRename();
+								}}
+							>
+								<Pencil className="size-3.5" />
+								重命名
+							</button>
+							<button
+								type="button"
+								role="menuitem"
+								className={`${menuItemClass} text-[var(--color-destructive)]`}
+								disabled={busy}
+								onClick={(event) => {
+									stopMenuPropagation(event);
+									setMenuOpen(false);
+									setDeleteOpen(true);
+								}}
+							>
+								<Trash2 className="size-3.5" />
+								删除
+							</button>
+							{!project.archived ? (
+								<button
+									type="button"
+									role="menuitem"
+									className={menuItemClass}
+									disabled={busy}
+									onClick={(event) => {
+										stopMenuPropagation(event);
+										setMenuOpen(false);
+										void onArchive();
+									}}
+								>
+									<Archive className="size-3.5" />
+									归档
+								</button>
+							) : (
+								<button
+									type="button"
+									role="menuitem"
+									className={menuItemClass}
+									disabled={busy}
+									onClick={(event) => {
+										stopMenuPropagation(event);
+										setMenuOpen(false);
+										void onUnarchive();
+									}}
+								>
+									<RotateCcw className="size-3.5" />
+									恢复
+								</button>
+							)}
+						</div>
+					)}
+				</div>
 			</div>
-			<div className="flex items-center gap-4 border-t border-[var(--color-rule)] pt-3">
-				<span className="mono-label text-[var(--color-ink-3)]">
+			<div className="flex min-w-0 items-center gap-4 border-t border-[var(--color-rule)] pt-3">
+				<span className="mono-label min-w-0 truncate text-[var(--color-ink-3)]">
 					{project.repo_dir}
 				</span>
-				<span className="mono-label ml-auto text-[var(--color-ink-3)]">
+				<span className="mono-label ml-auto shrink-0 text-[var(--color-ink-3)]">
 					{formatDate(project.created_at)}
 				</span>
-			</div>
-		</Link>
+				</div>
+			</Link>
+			<Dialog open={renameOpen} onOpenChange={setRenameOpen}>
+				<DialogContent>
+					<DialogHeader>
+						<DialogTitle>重命名项目</DialogTitle>
+						<DialogDescription>
+							修改项目名称，仓库路径保持不变。
+						</DialogDescription>
+					</DialogHeader>
+					<form
+						onSubmit={(event) => {
+							event.preventDefault();
+							void saveRename();
+						}}
+						className="space-y-4"
+					>
+						<div className="space-y-2">
+							<Label htmlFor={`rename-${project.id}`}>项目名</Label>
+							<Input
+								id={`rename-${project.id}`}
+								value={renameValue}
+								onChange={(event) => setRenameValue(event.target.value)}
+								autoComplete="off"
+								autoFocus
+							/>
+							{renameError && (
+								<p className="text-sm text-[var(--color-destructive)]">{renameError}</p>
+							)}
+						</div>
+						<div className="flex justify-end gap-2 pt-2">
+							<Button type="button" variant="outline" onClick={() => setRenameOpen(false)}>
+								取消
+							</Button>
+							<Button type="submit" disabled={busy}>
+								{busy ? "保存中…" : "保存"}
+							</Button>
+						</div>
+					</form>
+				</DialogContent>
+			</Dialog>
+			<Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+				<DialogContent>
+					<DialogHeader>
+						<DialogTitle>删除项目</DialogTitle>
+						<DialogDescription>
+							确认删除项目「{project.name}」？这将删除项目及其 Git
+							仓库，且无法恢复。
+						</DialogDescription>
+					</DialogHeader>
+					<div className="flex justify-end gap-2 pt-2">
+						<Button
+							type="button"
+							variant="outline"
+							onClick={() => setDeleteOpen(false)}
+						>
+							取消
+						</Button>
+						<Button
+							type="button"
+							variant="destructive"
+							disabled={busy}
+							onClick={() => void confirmDelete()}
+						>
+							{busy ? "删除中…" : "确认删除"}
+						</Button>
+					</div>
+				</DialogContent>
+			</Dialog>
+		</>
 	);
 }
 
@@ -134,6 +347,14 @@ export default function HomePage() {
 
 	const active = (data?.projects ?? []).filter((p) => !p.archived);
 	const archived = (data?.projects ?? []).filter((p) => p.archived);
+
+	type ProjectStatusFilter = "all" | "active" | "archived";
+	const [statusFilter, setStatusFilter] = useState<ProjectStatusFilter>("all");
+	const visibleActive = statusFilter === "archived" ? [] : active;
+	const visibleArchived = statusFilter === "active" ? [] : archived;
+	const hasProjects = active.length > 0 || archived.length > 0;
+	const hasVisibleProjects =
+		visibleActive.length > 0 || visibleArchived.length > 0;
 
 	return (
 		<div className="flex min-h-screen">
@@ -186,26 +407,37 @@ export default function HomePage() {
 						API 文档
 					</Link>
 					<Link
-						to="/settings/tokens"
+						to="/settings/account"
 						className="flex items-center gap-2 rounded-sm px-3 py-2 text-sm text-[var(--color-ink-2)] hover:bg-[var(--color-surface-accent)] hover:text-[var(--color-ink)]"
 					>
-						<KeyRound className="size-4" />
-						Agent Token
+						<UserCog className="size-4" />
+						账号设置
 					</Link>
-					<Link
-						to="/settings/users"
-						className="flex items-center gap-2 rounded-sm px-3 py-2 text-sm text-[var(--color-ink-2)] hover:bg-[var(--color-surface-accent)] hover:text-[var(--color-ink)]"
-					>
-						<Users className="size-4" />
-						用户管理
-					</Link>
-					<Link
-						to="/settings/audit"
-						className="flex items-center gap-2 rounded-sm px-3 py-2 text-sm text-[var(--color-ink-2)] hover:bg-[var(--color-surface-accent)] hover:text-[var(--color-ink)]"
-					>
-						<ScrollText className="size-4" />
-						审计日志
-					</Link>
+					{user?.is_admin && (
+						<>
+							<Link
+								to="/settings/tokens"
+								className="flex items-center gap-2 rounded-sm px-3 py-2 text-sm text-[var(--color-ink-2)] hover:bg-[var(--color-surface-accent)] hover:text-[var(--color-ink)]"
+							>
+								<KeyRound className="size-4" />
+								Agent Token
+							</Link>
+							<Link
+								to="/settings/users"
+								className="flex items-center gap-2 rounded-sm px-3 py-2 text-sm text-[var(--color-ink-2)] hover:bg-[var(--color-surface-accent)] hover:text-[var(--color-ink)]"
+							>
+								<Users className="size-4" />
+								用户管理
+							</Link>
+							<Link
+								to="/settings/audit"
+								className="flex items-center gap-2 rounded-sm px-3 py-2 text-sm text-[var(--color-ink-2)] hover:bg-[var(--color-surface-accent)] hover:text-[var(--color-ink)]"
+							>
+								<ScrollText className="size-4" />
+								审计日志
+							</Link>
+						</>
+					)}
 					<Button
 						variant="outline"
 						className="w-full justify-start gap-2"
@@ -249,6 +481,21 @@ export default function HomePage() {
 								</p>
 							</div>
 							<div className="flex items-center gap-2">
+								<label className="flex items-center gap-2 text-sm text-[var(--color-ink-3)]">
+									<span>项目状态</span>
+									<select
+										aria-label="项目状态"
+										value={statusFilter}
+										onChange={(event) =>
+											setStatusFilter(event.target.value as ProjectStatusFilter)
+										}
+										className="h-8 rounded-[var(--radius)] border border-[var(--color-rule)] bg-[var(--color-paper)] px-2 text-sm text-[var(--color-ink-2)]"
+									>
+										<option value="all">全部</option>
+										<option value="active">活跃</option>
+										<option value="archived">已归档</option>
+									</select>
+								</label>
 								<ImportProjectDialog />
 								<ProjectCreateDialog
 									onCreated={() => {
@@ -271,8 +518,7 @@ export default function HomePage() {
 
 						{!isLoading &&
 							!isError &&
-							active.length === 0 &&
-							archived.length === 0 && (
+							!hasProjects && (
 								<div className="hairline-panel flex flex-col items-center gap-3 px-6 py-14 text-center">
 									<FileText className="size-8 text-[var(--color-ink-3)]" />
 									<p className="font-display text-lg font-semibold text-[var(--color-ink)]">
@@ -284,26 +530,37 @@ export default function HomePage() {
 								</div>
 							)}
 
-						{active.length > 0 && (
+						{!isLoading &&
+							!isError &&
+							hasProjects &&
+							!hasVisibleProjects && (
+								<div className="hairline-panel flex flex-col items-center gap-3 px-6 py-14 text-center">
+									<p className="font-display text-lg font-semibold text-[var(--color-ink)]">
+										暂无符合条件的项目
+									</p>
+								</div>
+							)}
+
+						{visibleActive.length > 0 && (
 							<section className="space-y-4">
 								<p className="mono-label text-[var(--color-ink-3)]">
-									active · {active.length}
+									active · {visibleActive.length}
 								</p>
 								<div className="grid gap-4 lg:grid-cols-2">
-									{active.map((p) => (
+									{visibleActive.map((p) => (
 										<ProjectCard key={p.id} project={p} />
 									))}
 								</div>
 							</section>
 						)}
 
-						{archived.length > 0 && (
+						{visibleArchived.length > 0 && (
 							<section className="space-y-4">
 								<p className="mono-label text-[var(--color-ink-3)]">
-									archived · {archived.length}
+									archived · {visibleArchived.length}
 								</p>
 								<div className="grid gap-4 opacity-70 lg:grid-cols-2">
-									{archived.map((p) => (
+									{visibleArchived.map((p) => (
 										<ProjectCard key={p.id} project={p} />
 									))}
 								</div>

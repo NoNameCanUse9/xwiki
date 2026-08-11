@@ -68,9 +68,9 @@ func (h *ChangesetHandler) Apply(w http.ResponseWriter, r *http.Request) {
 		input.DryRun = true
 	}
 
-	// Agent tokens: project binding + per-path prefix enforcement.
+	// Agent tokens: scope and project binding.
 	if secret := middleware.AgentSecret(r); secret != "" {
-		if !h.authorizeAgentWrite(w, r, projectID, input.Changes) {
+		if !h.authorizeAgentWrite(w, r, projectID) {
 			return
 		}
 	}
@@ -123,28 +123,20 @@ func authorizeAgentRead(svc *agent.Service, w http.ResponseWriter, r *http.Reque
 	if secret == "" {
 		return true // session user
 	}
-	if _, err := svc.Authorize(r.Context(), secret, projectID, "", false); err != nil {
+	if _, err := svc.Authorize(r.Context(), secret, projectID, false); err != nil {
 		response.WriteError(w, r, http.StatusForbidden, "agent_forbidden", "token cannot access this project")
 		return false
 	}
 	return true
 }
 
-// authorizeAgentWrite enforces scope, project binding and per-path prefixes.
-func (h *ChangesetHandler) authorizeAgentWrite(w http.ResponseWriter, r *http.Request, projectID string, changes []project.Change) bool {
+// authorizeAgentWrite enforces scope and project binding for agent writes.
+func (h *ChangesetHandler) authorizeAgentWrite(w http.ResponseWriter, r *http.Request, projectID string) bool {
 	secret := middleware.AgentSecret(r)
-	for _, c := range changes {
-		paths := []string{c.Path}
-		if c.NewPath != "" {
-			paths = append(paths, c.NewPath)
-		}
-		for _, p := range paths {
-			if _, err := h.agentSvc.Authorize(r.Context(), secret, projectID, p, true); err != nil {
-				response.WriteError(w, r, http.StatusForbidden, "agent_forbidden",
-					"token lacks write permission for path "+p)
-				return false
-			}
-		}
+	if _, err := h.agentSvc.Authorize(r.Context(), secret, projectID, true); err != nil {
+		response.WriteError(w, r, http.StatusForbidden, "agent_forbidden",
+			"token lacks write permission")
+		return false
 	}
 	return true
 }

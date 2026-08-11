@@ -26,10 +26,9 @@ func NewService(db *sql.DB, clk clock.Clock) *Service {
 
 // CreateInput is the user-supplied token creation request.
 type CreateInput struct {
-	Name         string
-	Scope        string // "read" | "write"
-	ProjectIDs   []string
-	PathPrefixes []string
+	Name       string
+	Scope      string // "read" | "write"
+	ProjectIDs []string
 }
 
 // CreatedToken carries the one-time secret.
@@ -49,19 +48,13 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (*CreatedToken,
 	if len(input.ProjectIDs) == 0 {
 		return nil, ErrInvalid // tokens must be bound explicitly
 	}
-	for _, p := range input.PathPrefixes {
-		if p == "" || strings.HasPrefix(p, "/") || strings.HasSuffix(p, "/") {
-			return nil, ErrInvalid
-		}
-	}
 	now := s.clock.Now().UTC()
 	t := &Token{
-		ID:           id.New("tok"),
-		Name:         strings.TrimSpace(input.Name),
-		Scope:        input.Scope,
-		ProjectIDs:   input.ProjectIDs,
-		PathPrefixes: input.PathPrefixes,
-		CreatedAt:    now,
+		ID:         id.New("tok"),
+		Name:       strings.TrimSpace(input.Name),
+		Scope:      input.Scope,
+		ProjectIDs: input.ProjectIDs,
+		CreatedAt:  now,
 	}
 	secret, err := s.store.CreateToken(ctx, t)
 	if err != nil {
@@ -81,9 +74,9 @@ func (s *Service) Revoke(ctx context.Context, id string) error {
 }
 
 // Authorize validates a raw secret against the requested access. projectID
-// may be empty for global checks (only scope is verified then). path is the
-// write target path; write=true enforces project binding and path prefixes.
-func (s *Service) Authorize(ctx context.Context, secret, projectID, path string, write bool) (*Token, error) {
+// may be empty for global checks (only scope is verified then). write=true
+// enforces the token's write scope; project access is always project-scoped.
+func (s *Service) Authorize(ctx context.Context, secret, projectID string, write bool) (*Token, error) {
 	t, err := s.store.GetBySecret(ctx, secret)
 	if err != nil {
 		if errors.Is(err, ErrInvalid) {
@@ -101,26 +94,9 @@ func (s *Service) Authorize(ctx context.Context, secret, projectID, path string,
 		if !contains(t.ProjectIDs, projectID) {
 			return nil, ErrForbidden
 		}
-		if write && path != "" && !pathAllowed(t.PathPrefixes, path) {
-			return nil, ErrForbidden
-		}
 	}
 	_ = s.store.TouchToken(ctx, t.ID, s.clock.Now().UTC())
 	return t, nil
-}
-
-// pathAllowed checks a write path against the token's prefix allowlist.
-// An empty allowlist denies everything (tokens must opt in per path).
-func pathAllowed(prefixes []string, p string) bool {
-	if len(prefixes) == 0 {
-		return false
-	}
-	for _, prefix := range prefixes {
-		if p == prefix || strings.HasPrefix(p, prefix+"/") {
-			return true
-		}
-	}
-	return false
 }
 
 // RequestHash hashes the canonical request body for idempotency comparison.

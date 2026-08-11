@@ -36,3 +36,9 @@ export function enableUser(id: string) {
     method: "POST",
   });
 }
+
+export function deleteUser(id: string) {
+  return api<{ ok: boolean }>(`/users/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+}

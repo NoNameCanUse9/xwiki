@@ -49,6 +49,7 @@ func TestOpenAPISpec(t *testing.T) {
 		"/auth/me": {"get"}, "/auth/password": {"post"},
 		"/import/bundle": {"post"}, "/import/repo": {"post"},
 		"/users":              {"get", "post"},
+		"/users/{id}":         {"delete"},
 		"/users/{id}/disable": {"post"}, "/users/{id}/enable": {"post"},
 		"/tokens": {"post", "get"}, "/tokens/{id}": {"delete"},
 		"/projects":               {"post", "get"},

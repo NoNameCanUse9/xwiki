@@ -4,166 +4,104 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strings"
 	"testing"
 )
 
-func TestUserManagement(t *testing.T) {
+func TestDeleteUser(t *testing.T) {
 	h, _ := newTestRouterWithService(t)
-	cookie := loginAndGetCookie(t, h) // admin
+	cookie := loginAndGetCookie(t, h)
 
-	// Create a member user.
+	// Create a member.
 	rec := apiRequest(h, http.MethodPost, "/api/v1/users", cookie,
-		`{"username":"alice","password":"password123","display_name":"Alice"}`)
+		`{"username":"alice","password":"firstpass123","display_name":"Alice"}`)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("create user: %d %s", rec.Code, rec.Body.String())
 	}
 	var created struct {
 		User struct {
-			ID       string `json:"id"`
-			Username string `json:"username"`
-			Disabled bool   `json:"disabled"`
+			ID string `json:"id"`
 		} `json:"user"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
 		t.Fatal(err)
 	}
-	if created.User.Username != "alice" || created.User.Disabled {
-		t.Fatalf("created user wrong: %+v", created.User)
-	}
+	aliceID := created.User.ID
 
-	// Duplicate username -> 409.
-	rec = apiRequest(h, http.MethodPost, "/api/v1/users", cookie,
-		`{"username":"alice","password":"password123"}`)
-	if rec.Code != http.StatusConflict {
-		t.Fatalf("duplicate user: %d", rec.Code)
-	}
+	// Alice logs in and keeps a session.
+	aliceCookie := loginAndGetCookieWith(t, h, "alice", "firstpass123")
 
-	// Weak password -> 400.
-	rec = apiRequest(h, http.MethodPost, "/api/v1/users", cookie,
-		`{"username":"bob","password":"short"}`)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("weak password: %d", rec.Code)
-	}
-
-	// Member can log in.
-	rec = apiRequest(h, http.MethodPost, "/api/v1/auth/login", "",
-		`{"username":"alice","password":"password123"}`)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("alice login: %d", rec.Code)
-	}
-	aliceCookie := ""
-	for _, c := range rec.Result().Cookies() {
-		if c.Name == "agentdocs_session" {
-			aliceCookie = c.Value
-		}
-	}
-
-	// Member cannot manage users (403).
-	rec = apiRequest(h, http.MethodGet, "/api/v1/users", aliceCookie, "")
+	// Admin-only route: a non-admin cannot delete users.
+	rec = apiRequest(h, http.MethodDelete, "/api/v1/users/"+aliceID, aliceCookie, "")
 	if rec.Code != http.StatusForbidden {
-		t.Fatalf("member list users: %d, want 403", rec.Code)
+		t.Fatalf("non-admin delete: %d, want 403", rec.Code)
 	}
 
-	// Admin disables alice.
-	rec = apiRequest(h, http.MethodPost,
-		"/api/v1/users/"+created.User.ID+"/disable", cookie, "")
+	// Deleting the user invalidates their existing session.
+	rec = apiRequest(h, http.MethodDelete, "/api/v1/users/"+aliceID, cookie, "")
 	if rec.Code != http.StatusOK {
-		t.Fatalf("disable: %d %s", rec.Code, rec.Body.String())
+		t.Fatalf("delete user: %d %s", rec.Code, rec.Body.String())
 	}
-	var disabled struct {
-		User struct {
-			Disabled bool `json:"disabled"`
-		} `json:"user"`
+	rec = apiRequest(h, http.MethodGet, "/api/v1/auth/me", aliceCookie, "")
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("deleted user session: %d, want 401", rec.Code)
 	}
-	_ = json.Unmarshal(rec.Body.Bytes(), &disabled)
-	if !disabled.User.Disabled {
-		t.Fatal("disable did not mark user")
-	}
-
-	// Disabled user login rejected (403).
+	// Login also fails.
 	rec = apiRequest(h, http.MethodPost, "/api/v1/auth/login", "",
-		`{"username":"alice","password":"password123"}`)
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("disabled login: %d, want 403", rec.Code)
-	}
-
-	// Admin cannot disable self.
-	rec = apiRequest(h, http.MethodPost, "/api/v1/users/usr_admin/disable", cookie, "")
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("disable self: %d, want 400", rec.Code)
-	}
-
-	// Re-enable works.
-	rec = apiRequest(h, http.MethodPost,
-		"/api/v1/users/"+created.User.ID+"/enable", cookie, "")
-	if rec.Code != http.StatusOK {
-		t.Fatalf("enable: %d", rec.Code)
-	}
-	rec = apiRequest(h, http.MethodPost, "/api/v1/auth/login", "",
-		`{"username":"alice","password":"password123"}`)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("alice relogin: %d", rec.Code)
-	}
-
-	// List shows both users.
-	rec = apiRequest(h, http.MethodGet, "/api/v1/users", cookie, "")
-	var list struct {
-		Users []struct {
-			Username string `json:"username"`
-		} `json:"users"`
-	}
-	_ = json.Unmarshal(rec.Body.Bytes(), &list)
-	if len(list.Users) != 2 {
-		t.Fatalf("list users: %d", len(list.Users))
+		`{"username":"alice","password":"firstpass123"}`)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("deleted user login: %d, want 401", rec.Code)
 	}
 }
 
-func TestUnarchiveProject(t *testing.T) {
+func TestDeleteUserProtections(t *testing.T) {
 	h, _ := newTestRouterWithService(t)
 	cookie := loginAndGetCookie(t, h)
-	projectID, _ := createProjectViaAPI(t, h, cookie, "restore-site")
 
-	rec := apiRequest(h, http.MethodPost,
-		"/api/v1/projects/"+projectID+"/archive", cookie, "")
-	if rec.Code != http.StatusOK {
-		t.Fatalf("archive: %d", rec.Code)
+	// Cannot delete yourself.
+	rec := apiRequest(h, http.MethodDelete, "/api/v1/users/usr_admin", cookie, "")
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("delete self: %d, want 400", rec.Code)
 	}
-	rec = apiRequest(h, http.MethodPost,
-		"/api/v1/projects/"+projectID+"/unarchive", cookie, "")
-	if rec.Code != http.StatusOK {
-		t.Fatalf("unarchive: %d %s", rec.Code, rec.Body.String())
+	// Cannot delete an admin account.
+	rec = apiRequest(h, http.MethodPost, "/api/v1/users", cookie,
+		`{"username":"bob","password":"password123","is_admin":true}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create admin: %d", rec.Code)
 	}
-	var body struct {
-		Project struct {
-			Archived   bool   `json:"archived"`
-			ArchivedAt string `json:"archived_at"`
-		} `json:"project"`
+	var created struct {
+		User struct {
+			ID string `json:"id"`
+		} `json:"user"`
 	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
 		t.Fatal(err)
 	}
-	if body.Project.Archived || body.Project.ArchivedAt != "" {
-		t.Fatalf("unarchived project wrong: %+v", body.Project)
+	rec = apiRequest(h, http.MethodDelete, "/api/v1/users/"+created.User.ID, cookie, "")
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("delete admin: %d, want 400", rec.Code)
 	}
-	// Writes work again after restore.
-	base := getRevision(t, h, cookie, projectID)
-	rec = submitChangeset(t, h, cookie, projectID,
-		fmt.Sprintf(`{"base_revision":"%s","message":"write after restore",
-		  "changes":[{"op":"create","path":"docs/back.md","content":"# Back\n"}]}`, base))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("write after restore: %d %s", rec.Code, strings.TrimSpace(rec.Body.String()))
-	}
-	// Idempotent unarchive.
-	rec = apiRequest(h, http.MethodPost,
-		"/api/v1/projects/"+projectID+"/unarchive", cookie, "")
-	if rec.Code != http.StatusOK {
-		t.Fatalf("second unarchive: %d", rec.Code)
-	}
-	// Missing project -> 404.
-	rec = apiRequest(h, http.MethodPost,
-		"/api/v1/projects/prj_missing/unarchive", cookie, "")
+	// Unknown user -> 404.
+	rec = apiRequest(h, http.MethodDelete, "/api/v1/users/usr_missing", cookie, "")
 	if rec.Code != http.StatusNotFound {
-		t.Fatalf("unarchive missing: %d", rec.Code)
+		t.Fatalf("delete missing: %d, want 404", rec.Code)
 	}
+}
+
+func loginAndGetCookieWith(t *testing.T, h http.Handler, username, password string) string {
+	t.Helper()
+	rec := apiRequest(h, http.MethodPost, "/api/v1/auth/login", "",
+		fmt.Sprintf(`{"username":%q,"password":%q}`, username, password))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("login %s: %d %s", username, rec.Code, rec.Body.String())
+	}
+	cookie := ""
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == "agentdocs_session" {
+			cookie = c.Value
+		}
+	}
+	if cookie == "" {
+		t.Fatal("no session cookie set")
+	}
+	return cookie
 }

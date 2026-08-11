@@ -63,7 +63,7 @@ func (h *UserHandler) Create(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC()
 	u := &user.User{
 		ID: id.New("usr"), Username: req.Username,
-		DisplayName: firstNonEmpty(req.DisplayName, req.Username),
+		DisplayName:  firstNonEmpty(req.DisplayName, req.Username),
 		PasswordHash: hash, IsAdmin: req.IsAdmin,
 		CreatedAt: now, UpdatedAt: now,
 	}
@@ -127,6 +127,35 @@ func (h *UserHandler) setDisabled(w http.ResponseWriter, r *http.Request, disabl
 		return
 	}
 	response.WriteJSON(w, http.StatusOK, map[string]any{"user": publicUserView(updated)})
+}
+
+// Delete handles DELETE /api/v1/users/{id} (admin only).
+func (h *UserHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	userID := request.PathParam(r, "id")
+	me := middleware.UserFrom(r)
+	if me != nil && me.ID == userID {
+		response.WriteError(w, r, http.StatusBadRequest, "cannot_delete_self", "cannot delete your own account")
+		return
+	}
+	target, err := h.svc.GetByID(r.Context(), userID)
+	if err != nil {
+		response.WriteError(w, r, http.StatusNotFound, "user_not_found", "user not found")
+		return
+	}
+	if target.IsAdmin {
+		response.WriteError(w, r, http.StatusBadRequest, "cannot_delete_admin", "admin accounts cannot be deleted")
+		return
+	}
+	if err := h.svc.Delete(r.Context(), userID); err != nil {
+		if err == user.ErrNotFound {
+			response.WriteError(w, r, http.StatusNotFound, "user_not_found", "user not found")
+			return
+		}
+		h.log.Error("delete user failed", "error", err)
+		response.WriteError(w, r, http.StatusInternalServerError, "internal_error", "could not delete user")
+		return
+	}
+	response.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func publicUserView(u *user.User) map[string]any {

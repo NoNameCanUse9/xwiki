@@ -1,5 +1,12 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
-import { archiveProject, createProject, getProject, listProjects } from "./projects";
+import {
+  archiveProject,
+  createProject,
+  deleteProject,
+  getProject,
+  listProjects,
+  renameProject,
+} from "./projects";
 
 function mockFetchOnce(status: number, body: unknown) {
   vi.stubGlobal(
@@ -62,6 +69,30 @@ describe("projects api client", () => {
       RequestInit,
     ];
     expect(init.method).toBe("POST");
+  });
+
+  it("renames a project via PATCH", async () => {
+    mockFetchOnce(200, { project: { id: "prj_1", name: "new-name" } });
+    const res = await renameProject("prj_1", "new-name");
+    expect(res.project.name).toBe("new-name");
+    const [url, init] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [
+      string,
+      RequestInit,
+    ];
+    expect(url).toBe("/api/v1/projects/prj_1");
+    expect(init.method).toBe("PATCH");
+    expect(JSON.parse(String(init.body))).toEqual({ name: "new-name" });
+  });
+
+  it("deletes a project via DELETE", async () => {
+    mockFetchOnce(200, { deleted: true });
+    await expect(deleteProject("prj_1")).resolves.toEqual({ deleted: true });
+    const [url, init] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [
+      string,
+      RequestInit,
+    ];
+    expect(url).toBe("/api/v1/projects/prj_1");
+    expect(init.method).toBe("DELETE");
   });
 
   it("throws ApiError with the server code on 409", async () => {

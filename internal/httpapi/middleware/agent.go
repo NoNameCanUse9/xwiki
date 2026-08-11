@@ -29,7 +29,7 @@ func AgentAuth(svc *agent.Service) func(http.Handler) http.Handler {
 				return
 			}
 			secret := strings.TrimSpace(strings.TrimPrefix(hdr, "Bearer "))
-			t, err := svc.Authorize(r.Context(), secret, "", "", false)
+			t, err := svc.Authorize(r.Context(), secret, "", false)
 			if err != nil {
 				response.WriteError(w, r, http.StatusUnauthorized, "invalid_token", "invalid or revoked agent token")
 				return

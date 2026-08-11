@@ -29,7 +29,6 @@ func gitRun(t *testing.T, dir string, env []string, args ...string) string {
 	return strings.TrimSpace(out.String())
 }
 
-
 func TestGitHTTPCloneAndPush(t *testing.T) {
 	h, _ := newTestRouterWithService(t)
 	cookie := loginAndGetCookie(t, h)
@@ -37,7 +36,7 @@ func TestGitHTTPCloneAndPush(t *testing.T) {
 
 	// Create a write token for the project.
 	secret := createAgentToken(t, h, cookie,
-		fmt.Sprintf(`{"name":"git-bot","scope":"write","project_ids":["%s"],"path_prefixes":["docs"]}`, projectID))
+		fmt.Sprintf(`{"name":"git-bot","scope":"write","project_ids":["%s"]}`, projectID))
 
 	// Clone via the smart HTTP endpoint.
 	url := fmt.Sprintf("http://x:%s@127.0.0.1/git/%s", secret, projectID)
@@ -83,7 +82,7 @@ func TestGitHTTPAuthMatrix(t *testing.T) {
 	readSecret := createAgentToken(t, h, cookie,
 		fmt.Sprintf(`{"name":"reader","scope":"read","project_ids":["%s"]}`, projectID))
 	writeSecret := createAgentToken(t, h, cookie,
-		fmt.Sprintf(`{"name":"writer","scope":"write","project_ids":["%s"],"path_prefixes":["docs"]}`, projectID))
+		fmt.Sprintf(`{"name":"writer","scope":"write","project_ids":["%s"]}`, projectID))
 
 	req := func(path, secret string) *httptest.ResponseRecorder {
 		httpreq := httptest.NewRequest(http.MethodGet, path, nil)

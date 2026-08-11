@@ -92,6 +92,7 @@ func NewRouter(cfg *config.Config, log *slog.Logger, db *sql.DB, users *user.Sto
 				r.Post("/", uh.Create)
 				r.Post("/{id}/disable", uh.Disable)
 				r.Post("/{id}/enable", uh.Enable)
+				r.Delete("/{id}", uh.Delete)
 			})
 		})
 		r.Route("/tokens", func(r chi.Router) {

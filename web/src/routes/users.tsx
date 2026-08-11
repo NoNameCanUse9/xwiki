@@ -1,18 +1,34 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { ArrowLeft, Ban, CheckCircle2, UserPlus, Users } from "lucide-react";
+import {
+  ArrowLeft,
+  Ban,
+  CheckCircle2,
+  Trash2,
+  UserPlus,
+  Users,
+} from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   createUser,
+  deleteUser,
   disableUser,
   enableUser,
   listUsers,
 } from "@/lib/api/users";
 import { ApiError } from "@/lib/api/client";
+import type { UserView } from "@/lib/api/users";
 
 export default function UsersPage() {
   const queryClient = useQueryClient();
@@ -61,6 +77,24 @@ export default function UsersPage() {
       await queryClient.invalidateQueries({ queryKey: ["users"] });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "操作失败");
+    }
+  };
+
+  const [deleteTarget, setDeleteTarget] = useState<UserView | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+
+  const onDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleteBusy(true);
+    try {
+      await deleteUser(deleteTarget.id);
+      toast.success(`用户 ${deleteTarget.username} 已删除`);
+      setDeleteTarget(null);
+      await queryClient.invalidateQueries({ queryKey: ["users"] });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "删除失败");
+    } finally {
+      setDeleteBusy(false);
     }
   };
 
@@ -170,24 +204,35 @@ export default function UsersPage() {
                     </div>
                   </div>
                   {u.username !== "admin" && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="shrink-0 gap-1.5 text-[var(--color-ink-3)]"
-                      onClick={() => void onToggle(u.id, u.disabled)}
-                    >
-                      {u.disabled ? (
-                        <>
-                          <CheckCircle2 className="size-3.5" />
-                          启用
-                        </>
-                      ) : (
-                        <>
-                          <Ban className="size-3.5" />
-                          禁用
-                        </>
-                      )}
-                    </Button>
+                    <div className="flex shrink-0 items-center gap-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="gap-1.5 text-[var(--color-destructive)]"
+                        onClick={() => setDeleteTarget(u)}
+                      >
+                        <Trash2 className="size-3.5" />
+                        删除
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="gap-1.5 text-[var(--color-ink-3)]"
+                        onClick={() => void onToggle(u.id, u.disabled)}
+                      >
+                        {u.disabled ? (
+                          <>
+                            <CheckCircle2 className="size-3.5" />
+                            启用
+                          </>
+                        ) : (
+                          <>
+                            <Ban className="size-3.5" />
+                            禁用
+                          </>
+                        )}
+                      </Button>
+                    </div>
                   )}
                 </div>
               ))}
@@ -201,6 +246,35 @@ export default function UsersPage() {
           xwiki · user management
         </p>
       </footer>
+
+      <Dialog open={deleteTarget !== null} onOpenChange={(v) => !v && setDeleteTarget(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>删除用户</DialogTitle>
+            <DialogDescription>
+              确认删除用户「{deleteTarget?.username}」？其账号、会话将被移除，无法恢复。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setDeleteTarget(null)}
+              disabled={deleteBusy}
+            >
+              取消
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={() => void onDelete()}
+              disabled={deleteBusy}
+            >
+              {deleteBusy ? "删除中…" : "确认删除"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

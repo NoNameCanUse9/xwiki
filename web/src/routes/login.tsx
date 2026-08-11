@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { useNavigate } from "react-router-dom";
+import { Navigate, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -44,6 +44,9 @@ function TerminalCard() {
 }
 
 export default function LoginPage() {
+  const user = useAuthStore((s) => s.user);
+  const initializing = useAuthStore((s) => s.initializing);
+  const navigate = useNavigate();
   const {
     register,
     handleSubmit,
@@ -51,7 +54,17 @@ export default function LoginPage() {
   } = useForm<FormValues>({ resolver: zodResolver(schema) });
   const [error, setError] = useState<string | null>(null);
   const login = useAuthStore((s) => s.login);
-  const navigate = useNavigate();
+  const fetchMe = useAuthStore((s) => s.fetchMe);
+
+  // 检查是否已有有效会话（如 cookie 仍有效）。
+  useEffect(() => {
+    void fetchMe();
+  }, [fetchMe]);
+
+  // 已登录用户访问登录页时直接回到工作区。
+  if (!initializing && user) {
+    return <Navigate to="/" replace />;
+  }
 
   const onSubmit = handleSubmit(async (values) => {
     setError(null);

@@ -195,6 +195,18 @@ paths:
           $ref: "#/components/responses/UserResult"
         "404":
           $ref: "#/components/responses/NotFound"
+  /users/{id}:
+    delete:
+      summary: 删除用户（管理员，会话级联清除）
+      parameters:
+        - $ref: "#/components/parameters/UserID"
+      responses:
+        "200":
+          description: OK
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
 
   /tokens:
     post:
@@ -1029,7 +1041,7 @@ components:
           default: false
     Token:
       type: object
-      required: [id, name, scope, project_ids, path_prefixes, created_at]
+      required: [id, name, scope, project_ids, created_at]
       properties:
         id:
           type: string
@@ -1039,10 +1051,6 @@ components:
           type: string
           enum: [read, write]
         project_ids:
-          type: array
-          items:
-            type: string
-        path_prefixes:
           type: array
           items:
             type: string
@@ -1065,10 +1073,6 @@ components:
           type: string
           enum: [read, write]
         project_ids:
-          type: array
-          items:
-            type: string
-        path_prefixes:
           type: array
           items:
             type: string

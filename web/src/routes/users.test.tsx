@@ -12,6 +12,7 @@ vi.mock("@/lib/api/users", () => ({
   createUser: vi.fn(),
   disableUser: vi.fn(),
   enableUser: vi.fn(),
+  deleteUser: vi.fn(),
 }));
 
 function renderPage() {
@@ -77,5 +78,30 @@ describe("UsersPage", () => {
     renderPage();
     await user.click(await screen.findByRole("button", { name: /禁用/ }));
     expect(usersApi.disableUser).toHaveBeenCalledWith("usr_2");
+  });
+
+  it("deletes a member after web confirmation", async () => {
+    vi.mocked(usersApi.listUsers).mockResolvedValue({
+      users: [
+        adminUser,
+        {
+          id: "usr_2",
+          username: "alice",
+          display_name: "Alice",
+          is_admin: false,
+          disabled: false,
+          created_at: "2026-08-02T12:00:00Z",
+        },
+      ],
+    });
+    vi.mocked(usersApi.deleteUser).mockResolvedValue({ ok: true });
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(await screen.findByRole("button", { name: "删除" }));
+    expect(usersApi.deleteUser).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "确认删除" }));
+    await vi.waitFor(() =>
+      expect(usersApi.deleteUser).toHaveBeenCalledWith("usr_2"),
+    );
   });
 });

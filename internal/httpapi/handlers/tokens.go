@@ -24,10 +24,9 @@ func NewTokenHandler(cfg *config.Config, svc *agent.Service, log *slog.Logger) *
 }
 
 type createTokenRequest struct {
-	Name         string   `json:"name"`
-	Scope        string   `json:"scope"`
-	ProjectIDs   []string `json:"project_ids"`
-	PathPrefixes []string `json:"path_prefixes"`
+	Name       string   `json:"name"`
+	Scope      string   `json:"scope"`
+	ProjectIDs []string `json:"project_ids"`
 }
 
 // Create handles POST /api/v1/tokens.
@@ -38,13 +37,12 @@ func (h *TokenHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	created, err := h.svc.Create(r.Context(), agent.CreateInput{
-		Name: req.Name, Scope: req.Scope,
-		ProjectIDs: req.ProjectIDs, PathPrefixes: req.PathPrefixes,
+		Name: req.Name, Scope: req.Scope, ProjectIDs: req.ProjectIDs,
 	})
 	if err != nil {
 		if errors.Is(err, agent.ErrInvalid) {
 			response.WriteError(w, r, http.StatusBadRequest, "invalid_token_input",
-				"name/scope required, scope read|write, at least one project, prefixes without slashes")
+				"name/scope required, scope read|write, at least one project")
 			return
 		}
 		h.log.Error("create token failed", "error", err, "request_id", request.RequestID(r))

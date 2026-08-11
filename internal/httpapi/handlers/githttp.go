@@ -68,7 +68,7 @@ func (h *GitHTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if secret != "" {
 		write := isWrite
-		if _, err := h.agentSvc.Authorize(r.Context(), secret, projectID, "", write); err != nil {
+		if _, err := h.agentSvc.Authorize(r.Context(), secret, projectID, write); err != nil {
 			response.WriteError(w, r, http.StatusForbidden, "agent_forbidden", "token lacks permission for this operation")
 			return
 		}
@@ -186,7 +186,7 @@ func (h *GitHTTPHandler) proxy(w http.ResponseWriter, r *http.Request, projectID
 	if contentLength >= 0 {
 		w.Header().Set("Content-Length", strconv.FormatInt(contentLength, 10))
 	}
-		w.WriteHeader(status)
+	w.WriteHeader(status)
 	// Write any bytes after the header terminator (skip the separator), then
 	// stream the rest.
 	sepLen := 2

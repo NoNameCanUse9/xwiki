@@ -187,10 +187,10 @@ Token 让 AI Agent 以 Bearer 认证访问。库中只存 SHA-256 哈希，明�
 
 ### POST /api/v1/tokens
 
-请求：`{"name":"ci-bot","scope":"write","project_ids":["prj_..."],"path_prefixes":["docs"]}`
+请求：`{"name":"ci-bot","scope":"write","project_ids":["prj_..."]}`
 
 - 201 `{"token":{...},"secret":"ad_<32hex>"}`（secret 仅此一次）
-- 400 invalid_token_input（scope 非 read|write / 无项目绑定 / 前缀带斜杠）
+- 400 invalid_token_input（scope 非 read|write / 无项目绑定）
 
 ### GET /api/v1/tokens → 200 `{"tokens":[...]}`
 
@@ -200,7 +200,7 @@ Token 让 AI Agent 以 Bearer 认证访问。库中只存 SHA-256 哈希，明�
 
 - 读端点（tree/pages/home/commits/diff/history/revision）：token 需绑定该项目（否则 403 agent_forbidden）
 - `POST /api/v1/projects/{id}/changesets`：
-  - scope 必须 write；每个写入路径（含 new_path）必须以某 path_prefix 开头（否则 403）
+  - scope 必须 write；Token 可在绑定的项目内写入
   - 可选 `Idempotency-Key` 头：同 key 同 body 重放 → 返回首次结果（不新建 commit）；同 key 不同 body → 409 idempotency_conflict
 - 全部 token 操作写入 audit_logs（`GET /api/v1/projects/{id}/audit` 可查，session 登录）
 

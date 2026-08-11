@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import JSZip from "jszip";
 import { FolderUp, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -42,6 +43,56 @@ export default function ImportProjectDialog() {
           .replace(/[^a-z0-9]+/g, "-")
           .replace(/^-|-$/g, ""),
       );
+  };
+
+  const handleZip = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setBusy(true);
+    try {
+      const zip = await JSZip.loadAsync(file);
+      const entries = Object.values(zip.files).filter((entry) => !entry.dir);
+      if (entries.length === 0) {
+        toast.error("zip 中没有文件");
+        setFolderFiles([]);
+        return;
+      }
+      // 若所有条目共享同一顶层目录则剥离它，保持与文件夹导入一致。
+      const tops = new Set(
+        entries.map((entry) => entry.name.split("/")[0]).filter(Boolean),
+      );
+      const stripTop = tops.size === 1 ? [...tops][0] : "";
+      const files: File[] = [];
+      for (const entry of entries) {
+        const rel = stripTop
+          ? entry.name.slice(stripTop.length + 1)
+          : entry.name;
+        const blob = await entry.async("blob");
+        const f = new File([blob], entry.name.split("/").pop() ?? rel, {
+          type: "application/octet-stream",
+        });
+        Object.defineProperty(f, "__relPath", {
+          value: rel,
+          writable: true,
+        });
+        files.push(f);
+      }
+      setFolderFiles(files);
+      if (!name) {
+        setName(
+          file.name
+            .replace(/\.zip$/i, "")
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, "-")
+            .replace(/^-|-$/g, ""),
+        );
+      }
+    } catch {
+      toast.error("无法解析 zip 文件");
+      setFolderFiles([]);
+    } finally {
+      setBusy(false);
+    }
   };
 
   const submit = async () => {
@@ -101,18 +152,34 @@ export default function ImportProjectDialog() {
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="imp-folder">选择文件夹</Label>
-            <Input
-              id="imp-folder"
-              type="file"
-              // @ts-expect-error — webkitdirectory is non-standard but supported by all browsers
-              webkitdirectory=""
-              directory=""
-              multiple
-              onChange={handleFolder}
-              className="cursor-pointer"
-            />
-            {folderFiles.length > 0 && (
+            {folderFiles.length === 0 ? (
+              <>
+                <Label htmlFor="imp-folder">选择文件夹</Label>
+                <Input
+                  id="imp-folder"
+                  type="file"
+                  // @ts-expect-error — webkitdirectory is non-standard but supported by all browsers
+                  webkitdirectory=""
+                  directory=""
+                  multiple
+                  onChange={handleFolder}
+                  className="cursor-pointer"
+                />
+                <div className="flex items-center gap-2">
+                  <span className="h-px flex-1 bg-[var(--color-rule)]" />
+                  <span className="mono-label text-[var(--color-ink-3)]">or</span>
+                  <span className="h-px flex-1 bg-[var(--color-rule)]" />
+                </div>
+                <Label htmlFor="imp-zip">选择 zip 文件</Label>
+                <Input
+                  id="imp-zip"
+                  type="file"
+                  accept=".zip,application/zip"
+                  onChange={(e) => void handleZip(e)}
+                  className="cursor-pointer"
+                />
+              </>
+            ) : (
               <p className="text-xs text-[var(--color-ink-3)]">
                 已选择 {folderFiles.length} 个文件，包含 .git/
                 则保留历史，否则创建新仓库。
