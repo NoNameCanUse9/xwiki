@@ -212,7 +212,7 @@ export default function TokensPage() {
 
       <footer className="border-t border-[var(--color-rule)] px-6 py-4">
         <p className="mono-label text-[var(--color-ink-3)]">
-          agentdocs · phase 06 · tokens
+          xwiki · phase 06 · tokens
         </p>
       </footer>
     </div>

@@ -198,7 +198,7 @@ export default function UsersPage() {
 
       <footer className="border-t border-[var(--color-rule)] px-6 py-4">
         <p className="mono-label text-[var(--color-ink-3)]">
-          agentdocs · user management
+          xwiki · user management
         </p>
       </footer>
     </div>

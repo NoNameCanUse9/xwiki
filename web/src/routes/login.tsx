@@ -28,16 +28,16 @@ function TerminalCard() {
           <span className="size-2.5 rounded-full bg-white/15" />
         </div>
         <span className="mono-label !normal-case text-white/40">
-          agentdocs — session
+          xwiki — session
         </span>
       </div>
       <div className="space-y-1.5 px-4 py-4">
         <p>
           <span className="tok-key">$</span>{" "}
-          <span className="text-white/85">agentdocs admin create -username admin</span>
+          <span className="text-white/85">xwiki admin create -username admin</span>
         </p>
         <p className="tok-muted">› argon2id · session persisted to sqlite</p>
-        <p className="tok-ok">✓ 200 OK — agentdocs_session set (HttpOnly)</p>
+        <p className="tok-ok">✓ 200 OK — xwiki_session set (HttpOnly)</p>
       </div>
     </div>
   );
@@ -77,9 +77,12 @@ export default function LoginPage() {
             <p className="mono-label text-[var(--color-accent)]">
               Git-backed documentation
             </p>
-            <h1 className="font-display text-4xl font-semibold leading-[1.05] text-[var(--color-ink)] sm:text-5xl">
-              AgentDocs
-            </h1>
+            <div className="flex items-center gap-3">
+              <img src="/favicon.svg" alt="" className="size-12 rounded-xl" />
+              <h1 className="font-display text-4xl font-semibold leading-[1.05] text-[var(--color-ink)] sm:text-5xl">
+                XWiki
+              </h1>
+            </div>
             <p className="max-w-[42ch] text-[var(--color-ink-2)]">
               面向人类与 AI Agent 的轻量文档管理系统。一项目一 Git 仓库，
               文档即版本，ChangeSet 原子提交。
@@ -151,7 +154,7 @@ export default function LoginPage() {
       <footer className="border-t border-[var(--color-rule)]">
         <div className="mx-auto flex w-full max-w-6xl items-center justify-between px-6 py-4">
           <span className="mono-label text-[var(--color-ink-3)]">
-            agentdocs · git-backed documentation server
+            xwiki · git-backed documentation server
           </span>
           <span className="mono-label text-[var(--color-ink-3)]">v0.1</span>
         </div>

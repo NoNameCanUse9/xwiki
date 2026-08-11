@@ -140,9 +140,12 @@ export default function HomePage() {
 			{/* Side rail */}
 			<aside className="fixed inset-y-0 left-0 z-30 hidden w-56 shrink-0 flex-col border-r border-[var(--color-rule)] bg-[var(--color-paper-2)] sm:flex">
 				<div className="border-b border-[var(--color-rule)] px-5 py-4">
-					<p className="font-display text-lg font-semibold tracking-tight text-[var(--color-ink)]">
-						AgentDocs
-					</p>
+					<div className="flex items-center gap-2">
+						<img src="/favicon.svg" alt="" className="size-7 rounded-md" />
+						<p className="font-display text-lg font-semibold tracking-tight text-[var(--color-ink)]">
+							XWiki
+						</p>
+					</div>
 					<p className="mono-label mt-1 text-[var(--color-ink-3)]">workspace</p>
 				</div>
 				<nav className="flex-1 space-y-1 overflow-y-auto px-3 py-4">
@@ -217,9 +220,12 @@ export default function HomePage() {
 			{/* Main column */}
 			<div className="flex w-full flex-col">
 				<header className="flex items-center justify-between border-b border-[var(--color-rule)] px-4 py-3 sm:hidden">
-					<p className="font-display text-base font-semibold text-[var(--color-ink)]">
-						AgentDocs
-					</p>
+					<div className="flex items-center gap-2">
+						<img src="/favicon.svg" alt="" className="size-6 rounded-md" />
+						<p className="font-display text-base font-semibold text-[var(--color-ink)]">
+							XWiki
+						</p>
+					</div>
 					<div className="flex items-center gap-2">
 						<ThemeToggle />
 						<Button variant="outline" size="icon" onClick={() => void logout()}>
@@ -308,7 +314,7 @@ export default function HomePage() {
 
 				<footer className="border-t border-[var(--color-rule)] px-6 py-4 sm:ml-56">
 					<p className="mono-label text-[var(--color-ink-3)]">
-						agentdocs · phase 02 · projects
+						xwiki · phase 02 · projects
 					</p>
 				</footer>
 			</div>

@@ -1,4 +1,4 @@
-# AgentDocs
+# XWiki
 
 面向人类与 AI Agent 的轻量 Git 文档管理系统。
 
