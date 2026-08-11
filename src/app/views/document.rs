@@ -61,7 +61,7 @@ impl XWikiApp {
                 Button::new("tree-go-up")
                     .ghost()
                     .compact()
-                    .icon(IconName::ArrowUp)
+                    .icon(IconName::ArrowLeft)
                     .tooltip("返回上一级目录 (←)")
                     .on_click(cx.listener(|this, _, _, cx| {
                         let parent =
