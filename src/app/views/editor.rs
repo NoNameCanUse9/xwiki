@@ -1,7 +1,7 @@
 //! Editor + conflict recovery (plan §5): render methods for this screen/region; state and logic
 //! stay in `crate::app` (mod.rs).
 //!
-//! Layout matches `docs/agentdocs-code/editor.html`:
+//! Layout matches `docs/xwiki-code/editor.html`:
 //!   [toolbar | edit/preview tabs | commit msg | save/cancel]
 //!   [editable document title]
 //!   [editor content / markdown preview]
@@ -204,7 +204,7 @@ impl XWikiApp {
                 div()
             })
             // ── Document title ───────────────────────────────────
-            // Matches: [editable input: "AgentDocs Core Documentation"]
+            // Matches: [editable input: "XWiki Core Documentation"]
             .child(
                 div()
                     .px_6()

@@ -1,4 +1,4 @@
-AgentDocs 桌面端 UI 设计规则
+XWiki 桌面端 UI 设计规则
 一、设计流程规则
 1. 先理解产品，再开始设计
 不能直接套用 Dashboard 模板，必须先明确：
@@ -17,7 +17,7 @@ AgentDocs 桌面端 UI 设计规则
 哪些状态会影响用户数据安全；
 
 哪些数据是真实存在的，哪些不能自行编造。
-AgentDocs 是一个：
+XWiki 是一个：
 面向人类和 AI Agent 的 Git-backed 文档管理桌面工作台。
 核心任务是：
 
@@ -168,7 +168,7 @@ danger；
 success。
 Dark 模式需要保持层级，不要所有区域都变成相同的黑色。
 三、视觉风格规则
-1. AgentDocs 使用 Cobalt Desktop Workspace
+1. XWiki 使用 Cobalt Desktop Workspace
 推荐风格：
 
 
@@ -369,7 +369,7 @@ Mono Label：11–12px
 中文不能因为强行使用英文字体而变成空白、方框或错位。
 五、布局规则
 1. 使用 Desktop Workspace Shell
-AgentDocs 不应该使用简单的页面跳转结构，而要使用持续存在的桌面 Shell：
+XWiki 不应该使用简单的页面跳转结构，而要使用持续存在的桌面 Shell：
 Topbar
 ├── Primary Rail
 ├── Project Panel
@@ -381,7 +381,7 @@ Topbar
 包含：
 
 
-AgentDocs；
+XWiki；
 
 当前项目；
 
@@ -946,13 +946,13 @@ Hallmark 最重要的规则是：
 Philosophy：是否符合产品定位
 Hierarchy：层级是否清晰
 Execution：实现是否精致
-Specificity：是否真正属于 AgentDocs
+Specificity：是否真正属于 XWiki
 Restraint：是否克制而不堆装饰
 Variety：不同页面是否有合理结构变化
 
 每一项低于 3 分都应该重新修改。
 十二、最终验收标准
-一个合格的 AgentDocs 桌面 UI 必须满足：
+一个合格的 XWiki 桌面 UI 必须满足：
 
 
 不是只有首页；
@@ -999,4 +999,4 @@ Dialog 关闭后焦点能返回；
 
 代码通过构建、测试和 UI 启动验证。
 一句话总结：
-AgentDocs 的桌面 UI 应该是一个克制、精确、技术化、键盘优先、状态完整的 Cobalt 文档工作台，而不是一个堆满卡片、渐变和装饰的通用 SaaS Dashboard。
+XWiki 的桌面 UI 应该是一个克制、精确、技术化、键盘优先、状态完整的 Cobalt 文档工作台，而不是一个堆满卡片、渐变和装饰的通用 SaaS Dashboard。

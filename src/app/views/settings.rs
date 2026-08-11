@@ -1,7 +1,7 @@
 //! Settings and access-control view.
 //! State and network operations stay in `crate::app` (mod.rs).
 //!
-//! Layout follows the Stitch "设置 - AgentDocs (Optimized)" demo: a plain
+//! Layout follows the Stitch "设置 - XWiki (Optimized)" demo: a plain
 //! content column with mono UPPERCASE section labels, hairline rules and
 //! compact outline buttons — no card containers.
 
@@ -39,7 +39,8 @@ impl XWikiApp {
                             .child(self.render_settings_service(cx))
                             .child(self.render_settings_token(cx))
                             .child(self.render_settings_user(cx))
-                            .child(self.render_settings_session(cx)),
+                            .child(self.render_settings_session(cx))
+                            .child(self.render_settings_ota(cx)),
                     ),
             )
     }
@@ -165,6 +166,65 @@ impl XWikiApp {
                             .label("保存")
                             .disabled(test_busy || test_failed)
                             .on_click(cx.listener(|this, _, _, cx| this.save_server_settings(cx))),
+                    ),
+            )
+            .child(status)
+    }
+
+    fn render_settings_ota(&self, cx: &mut Context<Self>) -> Div {
+        let theme = cx.theme().clone();
+        let ota_busy = self.settings_ota_loading;
+        let current_version = env!("CARGO_PKG_VERSION");
+        let status: AnyElement = if let Some((ok, message)) = &self.settings_ota_status {
+            div()
+                .text_xs()
+                .text_color(if *ok { theme.success } else { theme.danger })
+                .child(message.clone())
+                .into_any_element()
+        } else {
+            div().into_any_element()
+        };
+
+        div()
+            .v_flex()
+            .gap_2()
+            .pt_4()
+            .border_t_1()
+            .border_color(theme.border)
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap_3()
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_3()
+                            .child(mono_label("OTA 更新").text_color(theme.muted_foreground))
+                            .child(
+                                div()
+                                    .font_family(tokens::FONT_MONO)
+                                    .text_xs()
+                                    .text_color(theme.foreground)
+                                    .child(format!("v{current_version}")),
+                            ),
+                    )
+                    .child(
+                        Button::new("settings-ota-check")
+                            .outline()
+                            .compact()
+                            .icon(IconName::Redo2)
+                            .label(if ota_busy {
+                                "检查中…"
+                            } else {
+                                "检查更新"
+                            })
+                            .loading(ota_busy)
+                            .disabled(ota_busy)
+                            .tooltip("检查 GitHub Releases 最新版本")
+                            .on_click(cx.listener(|this, _, _, cx| this.check_ota_update(cx))),
                     ),
             )
             .child(status)

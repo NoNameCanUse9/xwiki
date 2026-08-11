@@ -1,4 +1,4 @@
-//! AgentDocs HTTP API client (spec: Rust 客户端 `api` 层).
+//! XWiki HTTP API client (spec: Rust 客户端 `api` 层).
 //!
 //! Thin typed client over the Go server's `/api/v1`. Cookie jar is managed
 //! by reqwest (session cookie), errors are unwrapped from the uniform
@@ -126,7 +126,7 @@ struct ErrorEnvelope {
     error: dto::ApiErrorBody,
 }
 
-/// Client for one AgentDocs server; keeps the session cookie jar.
+/// Client for one XWiki server; keeps the session cookie jar.
 #[derive(Clone)]
 pub struct Client {
     base: String,
@@ -272,6 +272,28 @@ impl Client {
 
     pub async fn meta(&self) -> Result<dto::Meta, ApiError> {
         Self::send(self.http.get(self.url("/api/v1/meta"))).await
+    }
+
+    /// Fetch the latest public desktop release from GitHub. This uses a
+    /// separate client so the XWiki session cookie/token is never sent to
+    /// GitHub.
+    pub async fn latest_github_release(owner: &str, repo: &str) -> Result<dto::GithubRelease, ApiError> {
+        let http = reqwest::Client::builder()
+            .user_agent("xwiki")
+            .timeout(std::time::Duration::from_secs(20))
+            .build()
+            .map_err(|error| ApiError {
+                code: "client_error".into(),
+                message: error.to_string(),
+                request_id: None,
+                status: 0,
+            })?;
+        let url = format!("https://api.github.com/repos/{owner}/{repo}/releases/latest");
+        Self::send(
+            http.get(url)
+                .header(reqwest::header::ACCEPT, "application/vnd.github+json"),
+        )
+        .await
     }
 
     pub async fn login(&self, username: &str, password: &str) -> Result<dto::User, ApiError> {
@@ -1360,6 +1382,16 @@ pub mod dto {
         pub api_version: String,
         pub limits: MetaLimits,
         pub capabilities: Vec<String>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    pub struct GithubRelease {
+        pub tag_name: String,
+        #[serde(default)]
+        pub name: String,
+        pub html_url: String,
+        #[serde(default)]
+        pub published_at: Option<String>,
     }
 
     #[derive(Debug, Deserialize)]

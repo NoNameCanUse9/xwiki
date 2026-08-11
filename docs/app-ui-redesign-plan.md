@@ -1,4 +1,4 @@
-# AgentDocs App UI 重设计计划 — Cobalt Desktop Workspace
+# XWiki App UI 重设计计划 — Cobalt Desktop Workspace
 
 > 目标:让 Rust/GPUI App 与网页端共享 Hallmark Cobalt 设计系统,但布局和交互按桌面生产力工具重新设计。
 >
@@ -14,7 +14,7 @@
 
 ### 1.1 产品定位
 
-AgentDocs App 是面向长时间阅读、编辑和版本管理的**桌面文档工作台**。主要输入方式是键盘、鼠标和触控板;主要结构是持续存在的 workspace shell、可调整分栏和命令系统。
+XWiki App 是面向长时间阅读、编辑和版本管理的**桌面文档工作台**。主要输入方式是键盘、鼠标和触控板;主要结构是持续存在的 workspace shell、可调整分栏和命令系统。
 
 ### 1.2 与网页端的关系
 
@@ -151,7 +151,7 @@ UI/UX Pro Max 检索结果支持 **Minimalism & Swiss Style**:高可读性、网
 实现前确认并记录:
 
 - 保留系统 titlebar 或自定义 titlebar 的选择;若自定义,必须保留 Windows 拖动、最小化、最大化、关闭区域。
-- 窗口标题格式:`AgentDocs — 项目 / 文档`。
+- 窗口标题格式:`XWiki — 项目 / 文档`。
 - 系统主题变化与手动主题的优先级。
 - 多显示器/DPI 切换时重新布局,不缓存错误像素尺寸。
 
@@ -401,7 +401,7 @@ src/
 | 冲突/网络错误有恢复路径 | ✅ | 冲突面板 reload/force/abandon;错误区 retry |
 | reduced motion | ❌ | GPUI 未暴露;记录为平台限制 |
 | 读屏语义 | 🟡 | GPUI 限制已记录;保证键盘/焦点/标签 |
-| 桌面窗口契约(最小尺寸/标题) | ✅ | 960×640 min;`AgentDocs — 项目 / 文档` 动态标题 |
+| 桌面窗口契约(最小尺寸/标题) | ✅ | 960×640 min;`XWiki — 项目 / 文档` 动态标题 |
 | 布局持久化 | ✅ | theme/server/layout.json |
 | 无硬编码色值 | ✅ | 抽查视图均走 tokens/主题 |
 

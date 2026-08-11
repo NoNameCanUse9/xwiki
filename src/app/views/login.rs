@@ -255,7 +255,7 @@ impl XWikiApp {
                                                     .font_family(tokens::FONT_MONO)
                                                     .text_xs()
                                                     .text_color(theme.accent)
-                                                    .child("AGENTDOCS"),
+                                                    .child("XWIKI"),
                                             ),
                                     )
                                     .child(

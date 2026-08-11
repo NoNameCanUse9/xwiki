@@ -1,4 +1,4 @@
-//! agentdocs-client CLI (spec: `cli` 层).
+//! xwiki CLI (spec: `cli` 层).
 //!
 //! Exit codes: 0 ok · 2 usage · 3 auth/permission · 4 not found · 5 revision
 //! or lock conflict · 6 network/server error. Data on stdout, progress and
@@ -20,11 +20,11 @@ fn server_from_args(args: &[String]) -> String {
 }
 
 /// Builds a client from --server / saved config, with a bearer token from
-/// AGENTDOCS_TOKEN when set.
+/// XWIKI_TOKEN when set.
 fn client(args: &[String]) -> Client {
     Client::with_token(
         &server_from_args(args),
-        std::env::var("AGENTDOCS_TOKEN").ok(),
+        std::env::var("XWIKI_TOKEN").ok(),
     )
 }
 
@@ -76,7 +76,7 @@ fn fail(err: &ApiError) -> i32 {
 
 fn usage() -> i32 {
     eprintln!(
-        "usage: agentdocs-client <command> [args]
+        "usage: xwiki <command> [args]
 
   server status|info          service meta & capabilities
   config show|set-server <url>
@@ -92,7 +92,7 @@ fn usage() -> i32 {
   audit list <project>
   gui                          launch the desktop app
 
-Global: --server <url>  --json   Env: AGENTDOCS_TOKEN (bearer auth)"
+Global: --server <url>  --json   Env: XWIKI_TOKEN (bearer auth)"
     );
     2
 }
@@ -232,7 +232,7 @@ async fn cmd_login(args: &[String]) -> i32 {
             let prefixes = token_prefixes(args);
             match c.create_token("cli-login", "write", ids, prefixes).await {
                 Ok((_, secret)) => {
-                    println!("export AGENTDOCS_TOKEN={secret}");
+                    println!("export XWIKI_TOKEN={secret}");
                     0
                 }
                 Err(e) => {
@@ -638,7 +638,7 @@ async fn cmd_token(args: &[String]) -> i32 {
             match c.create_token(&name, &scope, ids, prefixes).await {
                 Ok((t, secret)) => {
                     println!("token {} · {}", t.id, secret);
-                    println!("export AGENTDOCS_TOKEN={secret}");
+                    println!("export XWIKI_TOKEN={secret}");
                     0
                 }
                 Err(e) => fail(&e),

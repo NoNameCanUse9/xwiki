@@ -162,7 +162,7 @@ impl XWikiApp {
             .and_then(|value| value.get("info"))
             .and_then(|value| value.get("title"))
             .and_then(serde_json::Value::as_str)
-            .unwrap_or("AgentDocs API")
+            .unwrap_or("XWiki API")
             .to_string();
         let schema_description = spec
             .and_then(|value| value.get("info"))
@@ -1004,7 +1004,7 @@ impl XWikiApp {
                             .items_center()
                             .gap_2()
                             .child(app_icon().size(px(24.0)))
-                            .child(mono_label("AgentDocs").text_color(theme.accent)),
+                            .child(mono_label("XWiki").text_color(theme.accent)),
                     )
                     .child(div().w(px(1.0)).h(px(16.0)).bg(theme.border))
                     .child(

@@ -31,8 +31,8 @@ fn main() {
     // the window; log it to a file too.
     std::panic::set_hook(Box::new(|info| {
         let log = std::env::var("HOME")
-            .map(|h| format!("{h}/.config/agentdocs-client/panic.log"))
-            .unwrap_or_else(|_| "/tmp/agentdocs-client-panic.log".into());
+            .map(|h| format!("{h}/.config/xwiki/panic.log"))
+            .unwrap_or_else(|_| "/tmp/xwiki-panic.log".into());
         let _ = std::fs::create_dir_all(
             log.rsplit_once('/')
                 .map(|(d, _)| d.to_string())
@@ -44,7 +44,7 @@ fn main() {
 
     let args: Vec<String> = std::env::args().skip(1).collect();
     if !args.is_empty() {
-        // With subcommands the binary acts as the agentdocs-client CLI;
+        // With subcommands the binary acts as the xwiki CLI;
         // `gui` forces the desktop app, bare invocation starts the GUI.
         if args[0] != "gui" {
             std::process::exit(cli::run(args));
@@ -93,7 +93,7 @@ fn main() {
             cx.open_window(
                 WindowOptions {
                     titlebar: Some(TitlebarOptions {
-                        title: Some("AgentDocs".into()),
+                        title: Some("XWiki".into()),
                         ..Default::default()
                     }),
                     // Plan §0.3: desktop window contract — never smaller than

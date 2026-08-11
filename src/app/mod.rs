@@ -21,6 +21,9 @@ pub mod views;
 use crate::ui::{mono_label, tokens};
 use crate::{QuickOpen, SaveEditor, TogglePalette, ToggleTheme};
 
+const OTA_GITHUB_OWNER: &str = "NoNameCanUse9";
+const OTA_GITHUB_REPO: &str = "xwiki";
+
 /// Command palette entries: (id, label, hint). Availability is decided by
 /// the current screen state in `palette_commands`.
 #[derive(Clone)]
@@ -243,6 +246,9 @@ pub struct XWikiApp {
     settings_test: Option<(bool, String)>,
     settings_test_detail: Option<String>,
     settings_loading: bool,
+    /// GitHub Releases check state for the settings update section.
+    settings_ota_loading: bool,
+    settings_ota_status: Option<(bool, String)>,
     settings_error: Option<String>,
     settings_tokens: Vec<dto::Token>,
     settings_users: Vec<dto::User>,
@@ -458,6 +464,7 @@ impl XWikiApp {
                     let _ = settings_input.read(cx);
                     app.settings_test = None;
                     app.settings_test_detail = None;
+                    app.settings_ota_status = None;
                     cx.notify();
                 },
             ));
@@ -543,6 +550,8 @@ impl XWikiApp {
             settings_test: None,
             settings_test_detail: None,
             settings_loading: false,
+            settings_ota_loading: false,
+            settings_ota_status: None,
             settings_error: None,
             settings_tokens: Vec::new(),
             settings_users: Vec::new(),
@@ -2767,6 +2776,8 @@ impl XWikiApp {
         self.settings_tokens.clear();
         self.settings_users.clear();
         self.settings_token_secret = None;
+        self.settings_ota_loading = false;
+        self.settings_ota_status = None;
         self.projects.clear();
         cx.notify();
     }
@@ -2998,7 +3009,7 @@ impl XWikiApp {
         matches!(self.screen, Screen::Workspace)
     }
 
-    /// Dynamic window title: AgentDocs — <project> / <doc>.
+    /// Dynamic window title: XWiki — <project> / <doc>.
     fn window_title(&self) -> String {
         if self.screen_is_workspace() {
             if let Some(project) = self.selected_project.as_deref() {
@@ -3009,15 +3020,15 @@ impl XWikiApp {
                     .map(|p| p.name.clone())
                     .unwrap_or_else(|| project.to_string());
                 if let Some(path) = &self.doc_path {
-                    return format!("AgentDocs — {name} / {path}");
+                    return format!("XWiki — {name} / {path}");
                 }
-                return format!("AgentDocs — {name}");
+                return format!("XWiki — {name}");
             }
-            "AgentDocs".into()
+            "XWiki".into()
         } else if matches!(self.screen, Screen::Settings) {
-            "AgentDocs — 设置".into()
+            "XWiki — 设置".into()
         } else {
-            "AgentDocs".into()
+            "XWiki".into()
         }
     }
 
@@ -3947,10 +3958,92 @@ impl XWikiApp {
         match error.status {
             0 => "无法连接到服务，请检查地址和网络连接。".into(),
             401 | 403 => "服务拒绝了请求，请重新登录后再试。".into(),
-            404 => "服务已响应，但未找到 AgentDocs 接口，请检查服务地址。".into(),
+            404 => "服务已响应，但未找到 XWiki 接口，请检查服务地址。".into(),
             400..=499 => format!("请求未被接受（HTTP {}），请检查服务配置。", error.status),
             500..=599 => "服务暂时不可用，请稍后重试。".into(),
             status => format!("连接失败（HTTP {}），请稍后重试。", status),
+        }
+    }
+
+    fn check_ota_update(&mut self, cx: &mut Context<Self>) {
+        if self.settings_ota_loading {
+            return;
+        }
+
+        self.settings_ota_loading = true;
+        self.settings_ota_status = None;
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            let result = Client::latest_github_release(OTA_GITHUB_OWNER, OTA_GITHUB_REPO).await;
+            let _ = this.update(cx, |app, cx| {
+                app.settings_ota_loading = false;
+                match result {
+                    Ok(release) => {
+                        let current = Self::parse_ota_version(env!("CARGO_PKG_VERSION"));
+                        let latest = Self::parse_ota_version(&release.tag_name);
+                        app.settings_ota_status = Some(match (current, latest) {
+                            (Some(current), Some(latest)) if latest > current => (
+                                true,
+                                format!(
+                                    "发现新版本 {} · {}",
+                                    Self::format_ota_version(latest),
+                                    release.html_url
+                                ),
+                            ),
+                            (Some(current), Some(_)) => (
+                                true,
+                                format!(
+                                    "当前已是最新版本 {} · GitHub Releases",
+                                    Self::format_ota_version(current)
+                                ),
+                            ),
+                            _ => (
+                                false,
+                                format!(
+                                    "无法识别 GitHub Release 版本号：{}",
+                                    release.tag_name
+                                ),
+                            ),
+                        });
+                    }
+                    Err(error) => {
+                        app.settings_ota_status = Some((
+                            false,
+                            format!("检查 GitHub Releases 失败：{}", Self::github_release_error(&error)),
+                        ));
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn parse_ota_version(version: &str) -> Option<(u32, u32, u32)> {
+        let version = version
+            .strip_prefix("app-v")
+            .or_else(|| version.strip_prefix('v'))
+            .unwrap_or(version);
+        let version = version.split_once('-').map_or(version, |(core, _)| core);
+        let mut parts = version.split('.');
+        Some((
+            parts.next()?.parse().ok()?,
+            parts.next()?.parse().ok()?,
+            parts.next()?.parse().ok()?,
+        ))
+    }
+
+    fn format_ota_version(version: (u32, u32, u32)) -> String {
+        format!("v{}.{}.{}", version.0, version.1, version.2)
+    }
+
+    fn github_release_error(error: &crate::api::ApiError) -> String {
+        match error.status {
+            0 => "无法连接 GitHub，请检查网络连接。".into(),
+            403 | 429 => "GitHub API 请求受限，请稍后重试。".into(),
+            404 => "GitHub Releases 中没有可用的正式版本。".into(),
+            500..=599 => "GitHub 暂时不可用，请稍后重试。".into(),
+            status => format!("请求失败（HTTP {}），请稍后重试。", status),
         }
     }
 

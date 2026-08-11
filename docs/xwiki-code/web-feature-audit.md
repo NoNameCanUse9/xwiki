@@ -1,4 +1,4 @@
-# AgentDocs Web Demo → Desktop GPUI 功能审计
+# XWiki Web Demo → Desktop GPUI 功能审计
 
 > 参考来源：`login.html`、`workspace.html`、`editor-stitch-original.html`、`history-stitch-original.html`。
 >

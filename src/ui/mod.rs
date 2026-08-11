@@ -17,10 +17,10 @@ use gpui_component::input::InputState;
 use gpui_component::text::TextView;
 use gpui_component::IconName;
 
-const APP_ICON_SVG: &[u8] = include_bytes!("../../assets/agentdocs-app-icon.svg");
+const APP_ICON_SVG: &[u8] = include_bytes!("../../assets/xwiki-icon.svg");
 static APP_ICON_IMAGE: OnceLock<Arc<Image>> = OnceLock::new();
 
-/// The AgentDocs brand mark, embedded at compile time so packaged builds do
+/// The XWiki brand mark, embedded at compile time so packaged builds do
 /// not depend on the source tree at runtime.
 pub fn app_icon() -> Img {
     let image = APP_ICON_IMAGE
@@ -29,7 +29,8 @@ pub fn app_icon() -> Img {
     img(image).flex_none()
 }
 
-/// The app icon rasterized for the OS window/taskbar (`WindowOptions.icon`).
+/// The XWiki icon rasterized for GPUI's X11 `WindowOptions.icon`.
+/// Windows uses the executable resource embedded by `build.rs` instead.
 /// Rendered once via resvg at 256×256; the PNG round-trip unpacks tiny_skia's
 /// premultiplied pixels into plain RGBA, which the windowing system expects.
 pub fn app_icon_rgba() -> Arc<image::RgbaImage> {

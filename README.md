@@ -1,7 +1,7 @@
-# agentdocs-client (xwiki-app)
+# xwiki (xwiki)
 
-AgentDocs 桌面端与 CLI(Rust / GPUI)。通过 HTTP API 对接 Go 服务端
-(`main` 分支的 `agentdocs`),不直接访问服务端 SQLite/Git。
+XWiki 桌面端与 CLI(Rust / GPUI)。通过 HTTP API 对接 Go 服务端
+(`main` 分支的 `xwiki`),不直接访问服务端 SQLite/Git。
 
 ## 构建
 
@@ -17,25 +17,25 @@ libxkbcommon-x11-dev libgl1-mesa-dev libegl1-mesa-dev`(建议同时装
 
 ```bash
 # 桌面端(GUI, WSLg 下可直接显示)
-cargo run            # 或 ./target/release/xwiki-app
+cargo run            # 或 ./target/release/xwiki
 
 # CLI(子命令模式)
-./target/release/xwiki-app server status
-./target/release/xwiki-app login --username admin --password secret123
-export AGENTDOCS_TOKEN=ad_xxx          # login 会铸造一个 write token
-./target/release/xwiki-app project list
-./target/release/xwiki-app doc tree <project-id>
-./target/release/xwiki-app history list <project-id>
+./target/release/xwiki server status
+./target/release/xwiki login --username admin --password secret123
+export XWIKI_TOKEN=ad_xxx          # login 会铸造一个 write token
+./target/release/xwiki project list
+./target/release/xwiki doc tree <project-id>
+./target/release/xwiki history list <project-id>
 ```
 
 退出码:0 成功 · 2 用法 · 3 认证/权限 · 4 不存在 · 5 revision/锁冲突 · 6 网络/服务端。
-全局参数:`--server <url>`(或 `config set-server`)、`--json`、环境变量 `AGENTDOCS_TOKEN`。
+全局参数:`--server <url>`(或 `config set-server`)、`--json`、环境变量 `XWIKI_TOKEN`。
 
 ## 快捷键(桌面端)
 
 - `⌘K` / `Ctrl+K` — 命令面板
 - `⌘⇧T` / `Ctrl+Shift+T` — 切换浅色/深色 Cobalt 主题(持久化到
-  `~/.config/agentdocs-client/theme`)
+  `~/.config/xwiki/theme`)
 
 ## 测试
 

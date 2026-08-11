@@ -1,13 +1,13 @@
-# AgentDocs 桌面端与 CLI 规划
+# XWiki 桌面端与 CLI 规划
 
 ## 总体方案
 
 - 保留 `main` 分支的 Go 服务端、Git 仓库模型和 `/api/v1`，Rust 客户端只通过 HTTP API 工作，不直接访问服务端 SQLite/Git。
-- 构建单一程序 `agentdocs-client`：
+- 构建单一程序 `xwiki`：
   - 双击或无参数运行：启动 GPUI 桌面端。
-  - 带子命令运行：执行 CLI，例如 `agentdocs-client project list`。
-  - `agentdocs-client gui` 可显式启动桌面端。
-- 产品统一命名为 AgentDocs；现有 Go 服务端继续使用 `agentdocs`，避免二进制冲突。
+  - 带子命令运行：执行 CLI，例如 `xwiki project list`。
+  - `xwiki gui` 可显式启动桌面端。
+- 产品统一命名为 XWiki；现有 Go 服务端继续使用 `xwiki`，避免二进制冲突。
 - Windows 为首发平台，Linux 用于日常开发和功能验证；首版提供 Windows MSI 与便携 ZIP。
 - 首版实现网页功能全量对齐，但编辑器采用“Markdown 源码 + 实时预览”，不复刻 Tiptap 所见即所得。
 - `app` 与 `main` 没有共同 Git 历史。实施时以 `main` 新建集成分支，把当前 Rust 原型迁入 `client/`，不直接合并两个无关历史。
@@ -25,7 +25,7 @@
 - 单一客户端配置保存服务地址、语言、主题和窗口布局；凭据不写入配置文件：
   - Windows 使用 Credential Manager。
   - Linux 开发环境使用 Secret Service。
-  - CLI 无人值守时允许 `AGENTDOCS_TOKEN` 临时覆盖 session。
+  - CLI 无人值守时允许 `XWIKI_TOKEN` 临时覆盖 session。
 - HTTP 写操作不自动盲重试；只有携带幂等键的操作才允许安全重试。统一处理 401、403、404、409 revision conflict、410 archived、锁丢失和网络中断。
 - 后端进行向后兼容补强：
   - 增加 `GET /api/v1/meta`，返回服务版本、API 版本、上传限制和 capability 列表。
@@ -80,7 +80,7 @@
   - `audit list`、`openapi export`
 - `doc edit` 获取锁后把内容交给 `$EDITOR`，关闭编辑器后展示 diff、确认 commit message 并提交；异常退出尽力释放锁并保留临时草稿。
 - `doc create/update/import` 支持 `--file` 与 stdin；写操作支持 `--base-revision`、`--message`、`--dry-run`、`--idempotency-key`，适用于脚本和 Agent 自动化。
-- 原有服务端 `agentdocs serve/admin/reindex` 保持不变，不重复放进客户端程序。
+- 原有服务端 `xwiki serve/admin/reindex` 保持不变，不重复放进客户端程序。
 
 ## 测试与验收
 
@@ -93,7 +93,7 @@
 
 ## 明确假设
 
-- 采用未回复问题的推荐默认：程序名为 `agentdocs-client`，并允许最小、向后兼容的后端补强。
+- 采用未回复问题的推荐默认：程序名为 `xwiki`，并允许最小、向后兼容的后端补强。
 - 只维护一个当前服务和当前账号，不做多 profile。
 - 不支持离线同步、本地内嵌服务、自动合并和 Tiptap 式所见即所得。
 - “网页全量对齐”指能力和数据语义对齐，不要求像素级复制网页布局。

@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 fn config_path() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
-    PathBuf::from(home).join(".config/agentdocs-client")
+    PathBuf::from(home).join(".config/xwiki")
 }
 
 /// Writes a file atomically (tmp + rename) so a crash mid-write never leaves
@@ -22,6 +22,8 @@ fn write_atomic(path: &std::path::Path, contents: &str, mode: u32) -> std::io::R
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(mode))?;
     }
+    #[cfg(not(unix))]
+    let _ = mode;
     std::fs::rename(&tmp, path)
 }
 
