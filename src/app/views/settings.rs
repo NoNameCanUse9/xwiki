@@ -39,7 +39,6 @@ impl XWikiApp {
                             .child(self.render_settings_service(cx))
                             .child(self.render_settings_token(cx))
                             .child(self.render_settings_user(cx))
-                            .child(self.render_settings_audit(cx))
                             .child(self.render_settings_session(cx)),
                     ),
             )
@@ -486,105 +485,6 @@ impl XWikiApp {
                     .border_t_1()
                     .border_color(theme.border)
                     .child(user_content),
-            )
-    }
-
-    fn render_settings_audit(&self, cx: &mut Context<Self>) -> Div {
-        let theme = cx.theme().clone();
-        let audit_content: AnyElement = if self.audit_loading {
-            div()
-                .py_4()
-                .font_family(tokens::FONT_BODY)
-                .text_sm()
-                .text_color(theme.muted_foreground)
-                .child("正在加载审计日志…")
-                .into_any_element()
-        } else if let Some(err) = &self.audit_error {
-            div()
-                .py_4()
-                .font_family(tokens::FONT_BODY)
-                .text_sm()
-                .text_color(theme.danger)
-                .child(err.clone())
-                .into_any_element()
-        } else if self.audit_entries.is_empty() {
-            div()
-                .py_4()
-                .font_family(tokens::FONT_BODY)
-                .text_sm()
-                .text_color(theme.muted_foreground)
-                .child("暂无审计记录。")
-                .into_any_element()
-        } else {
-            let mut rows = div().v_flex();
-            for e in &self.audit_entries {
-                rows = rows.child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap_2()
-                        .py_2()
-                        .border_b_1()
-                        .border_color(theme.border)
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_w(px(0.0))
-                                .v_flex()
-                                .gap_0p5()
-                                .child(
-                                    div()
-                                        .font_family(tokens::FONT_MONO)
-                                        .text_xs()
-                                        .text_color(theme.foreground)
-                                        .child(format!("{} · {}", e.actor_id, e.action)),
-                                )
-                                .child(
-                                    div()
-                                        .font_family(tokens::FONT_MONO)
-                                        .text_xs()
-                                        .text_color(theme.muted_foreground)
-                                        .child(if e.path.is_empty() {
-                                            e.created_at.clone()
-                                        } else {
-                                            format!("{} · {}", e.path, e.created_at)
-                                        }),
-                                ),
-                        ),
-                );
-            }
-            rows.into_any_element()
-        };
-        div()
-            .v_flex()
-            .gap_2()
-            .p_4()
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .gap_3()
-                    .child(mono_label("审计日志").text_color(theme.muted_foreground))
-                    .child(
-                        Button::new("refresh-audit")
-                            .outline()
-                            .compact()
-                            .icon(IconName::Redo2)
-                            .label(if self.audit_loading {
-                                "加载中…"
-                            } else {
-                                "刷新"
-                            })
-                            .loading(self.audit_loading)
-                            .on_click(cx.listener(|this, _, _, cx| this.load_audit(cx))),
-                    ),
-            )
-            .child(
-                div()
-                    .border_t_1()
-                    .border_color(theme.border)
-                    .child(audit_content),
             )
     }
 

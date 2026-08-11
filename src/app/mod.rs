@@ -254,10 +254,12 @@ pub struct XWikiApp {
     search_results: Vec<dto::SearchResult>,
     search_loading: bool,
     search_error: Option<String>,
-    /// Audit log for the current project (settings page).
+    /// Audit log page (project picker + entries, mirrors the web audit page).
     audit_entries: Vec<dto::AuditEntry>,
     audit_loading: bool,
     audit_error: Option<String>,
+    audit_projects: Vec<dto::Project>,
+    audit_selected_project: Option<String>,
     /// OpenAPI reference is rendered as a native read-only reference page.
     api_reference_open: bool,
     api_reference_loading: bool,
@@ -278,6 +280,7 @@ enum Screen {
     Workspace,
     Settings,
     ApiReference,
+    Audit,
 }
 
 #[derive(Clone)]
@@ -554,6 +557,8 @@ impl XWikiApp {
             audit_entries: Vec::new(),
             audit_loading: false,
             audit_error: None,
+            audit_projects: Vec::new(),
+            audit_selected_project: None,
             api_reference_open: false,
             api_reference_loading: false,
             api_reference_error: None,
@@ -3387,13 +3392,53 @@ impl XWikiApp {
         .detach();
     }
 
-    /// Load the audit log for the currently selected project (settings
-    /// page). No-op when no project is open.
+    /// Open the audit page: load the project list, default the picker to the
+    /// currently open project (else the first one, like the web audit page),
+    /// then load its audit log.
+    pub(crate) fn open_audit(&mut self, cx: &mut Context<Self>) {
+        let Some(client) = self.client.clone() else {
+            return;
+        };
+        self.screen = Screen::Audit;
+        self.audit_loading = true;
+        self.audit_error = None;
+        cx.notify();
+        cx.spawn(async move |this, cx| match client.projects().await {
+            Ok(projects) => {
+                let _ = this.update(cx, |app, cx| {
+                    app.audit_projects = projects;
+                    let still_valid = app
+                        .audit_selected_project
+                        .as_ref()
+                        .is_some_and(|id| app.audit_projects.iter().any(|p| &p.id == id));
+                    if !still_valid {
+                        app.audit_selected_project = app
+                            .selected_project
+                            .clone()
+                            .filter(|id| app.audit_projects.iter().any(|p| &p.id == id))
+                            .or_else(|| app.audit_projects.first().map(|p| p.id.clone()));
+                    }
+                    app.load_audit(cx);
+                });
+            }
+            Err(error) => {
+                let _ = this.update(cx, |app, cx| {
+                    app.audit_loading = false;
+                    app.audit_error =
+                        Some(format!("项目列表加载失败：{}", Self::friendly_api_error(&error)));
+                    cx.notify();
+                });
+            }
+        })
+        .detach();
+    }
+
+    /// Load the audit log for the project selected on the audit page.
     fn load_audit(&mut self, cx: &mut Context<Self>) {
-        let (Some(client), Some(project)) = (self.client.clone(), self.selected_project.clone())
+        let (Some(client), Some(project)) = (self.client.clone(), self.audit_selected_project.clone())
         else {
             self.audit_entries.clear();
-            self.audit_error = Some("未打开项目，无法查看审计日志。".into());
+            self.audit_error = Some("未选择项目，无法查看审计日志。".into());
             cx.notify();
             return;
         };
@@ -4849,7 +4894,10 @@ impl Render for XWikiApp {
                     } else {
                         this.back_to_projects(cx);
                     }
-                } else if matches!(this.screen, Screen::Settings | Screen::ApiReference) {
+                } else if matches!(
+                    this.screen,
+                    Screen::Settings | Screen::ApiReference | Screen::Audit
+                ) {
                     this.screen = Screen::Workspace;
                     cx.notify();
                 }
@@ -4943,9 +4991,10 @@ impl Render for XWikiApp {
                     .relative()
                     .child(match self.screen {
                         Screen::Login => self.render_login(cx).into_any_element(),
-                        Screen::Settings | Screen::Workspace | Screen::ApiReference => self
-                            .render_authenticated_shell(window, cx)
-                            .into_any_element(),
+                        Screen::Settings | Screen::Workspace | Screen::ApiReference | Screen::Audit => {
+                            self.render_authenticated_shell(window, cx)
+                                .into_any_element()
+                        }
                     })
                     .child(if self.quick_open {
                         self.render_quick_open(cx).into_any_element()

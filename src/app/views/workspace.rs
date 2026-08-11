@@ -506,6 +506,16 @@ impl XWikiApp {
                                     .on_click(
                                         cx.listener(|this, _, _, cx| this.open_api_reference(cx)),
                                     ),
+                            )
+                            .child(
+                                Button::new("sidebar-audit")
+                                    .secondary()
+                                    .outline()
+                                    .compact()
+                                    .w_full()
+                                    .icon(IconName::Inbox)
+                                    .label("Audit Log")
+                                    .on_click(cx.listener(|this, _, _, cx| this.open_audit(cx))),
                             ),
                     ),
                 div()

@@ -89,6 +89,7 @@ impl XWikiApp {
             }
             Screen::Settings => self.render_settings(cx).into_any_element(),
             Screen::ApiReference => self.render_api_reference(cx).into_any_element(),
+            Screen::Audit => self.render_audit(cx).into_any_element(),
             Screen::Login => self.render_login(cx).into_any_element(),
         };
         div()
@@ -715,11 +716,221 @@ impl XWikiApp {
         page.child(content)
     }
 
+    /// Audit log page, mirroring the web audit page (`/audit`): a project
+    /// picker plus per-entry rows of `action`, `actor_type:actor_id`, `path`
+    /// and `created_at`. Entry point lives next to API Reference in the
+    /// sidebar DEVELOPER TOOLS block.
+    pub(crate) fn render_audit(&self, cx: &mut Context<Self>) -> Div {
+        let theme = cx.theme().clone();
+        let page = div()
+            .size_full()
+            .flex()
+            .flex_col()
+            .bg(theme.background)
+            .child(
+                div()
+                    .w_full()
+                    .max_w(px(1200.0))
+                    .mx_auto()
+                    .px_6()
+                    .py_4()
+                    .border_b_1()
+                    .border_color(theme.border)
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .gap_4()
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap_3()
+                                    .child(
+                                        Button::new("close-audit")
+                                            .ghost()
+                                            .compact()
+                                            .icon(IconName::ArrowLeft)
+                                            .label("返回工作区")
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                this.screen = Screen::Workspace;
+                                                cx.notify();
+                                            })),
+                                    )
+                                    .child(div().w(px(1.0)).h(px(20.0)).bg(theme.border))
+                                    .child(
+                                        div()
+                                            .v_flex()
+                                            .gap_1()
+                                            .child(
+                                                mono_label("DEVELOPER / AUDIT")
+                                                    .text_color(theme.accent),
+                                            )
+                                            .child(
+                                                crate::ui::display("审计日志")
+                                                    .text_lg()
+                                                    .font_weight(FontWeight::SEMIBOLD)
+                                                    .text_color(theme.foreground),
+                                            ),
+                                    ),
+                            )
+                            .child(
+                                Button::new("refresh-audit")
+                                    .secondary()
+                                    .outline()
+                                    .compact()
+                                    .icon(IconName::Redo2)
+                                    .label(if self.audit_loading {
+                                        "加载中…"
+                                    } else {
+                                        "刷新"
+                                    })
+                                    .loading(self.audit_loading)
+                                    .disabled(self.audit_selected_project.is_none())
+                                    .on_click(cx.listener(|this, _, _, cx| this.load_audit(cx))),
+                            ),
+                    ),
+            );
+        let picker: AnyElement = if self.audit_projects.is_empty() {
+            div()
+                .text_sm()
+                .text_color(theme.muted_foreground)
+                .child("暂无项目，无法查看审计日志。")
+                .into_any_element()
+        } else {
+            div()
+                .flex()
+                .flex_wrap()
+                .gap_2()
+                .children(self.audit_projects.iter().map(|p| {
+                    let id = p.id.clone();
+                    let selected = self.audit_selected_project.as_deref() == Some(p.id.as_str());
+                    Button::new(format!("audit-project-{}", p.id))
+                        .secondary()
+                        .outline()
+                        .compact()
+                        .label(p.name.clone())
+                        .selected(selected)
+                        .toggled(selected)
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.audit_selected_project = Some(id.clone());
+                            this.load_audit(cx);
+                        }))
+                        .into_any_element()
+                }))
+                .into_any_element()
+        };
+        let entries: AnyElement = if self.audit_loading {
+            div()
+                .py_4()
+                .text_sm()
+                .text_color(theme.muted_foreground)
+                .child("正在加载审计日志…")
+                .into_any_element()
+        } else if let Some(error) = &self.audit_error {
+            div()
+                .py_4()
+                .text_sm()
+                .text_color(theme.danger)
+                .child(error.clone())
+                .into_any_element()
+        } else if self.audit_entries.is_empty() {
+            div()
+                .py_4()
+                .text_sm()
+                .text_color(theme.muted_foreground)
+                .child("暂无审计记录。")
+                .into_any_element()
+        } else {
+            let mut rows = div().v_flex();
+            for e in &self.audit_entries {
+                rows = rows.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_3()
+                        .py_3()
+                        .border_b_1()
+                        .border_color(theme.border)
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w(px(0.0))
+                                .v_flex()
+                                .gap_1()
+                                .child(
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .gap_2()
+                                        .child(mono_label(&e.action).text_color(theme.accent))
+                                        .child(
+                                            mono_label(format!("{}:{}", e.actor_type, e.actor_id))
+                                                .text_color(theme.muted_foreground),
+                                        ),
+                                )
+                                .child(
+                                    mono_label(if e.path.is_empty() {
+                                        "—".into()
+                                    } else {
+                                        e.path.clone()
+                                    })
+                                    .text_color(theme.muted_foreground),
+                                ),
+                        )
+                        .child(
+                            mono_label(&e.created_at)
+                                .flex_shrink_0()
+                                .text_color(theme.muted_foreground),
+                        ),
+                );
+            }
+            rows.into_any_element()
+        };
+        page.child(
+            div()
+                .flex_1()
+                .min_h(px(0.0))
+                .overflow_y_scrollbar()
+                .flex()
+                .items_start()
+                .justify_center()
+                .child(
+                    div()
+                        .w_full()
+                        .flex_none()
+                        .max_w(px(920.0))
+                        .p_6()
+                        .v_flex()
+                        .gap_4()
+                        .child(
+                            div()
+                                .v_flex()
+                                .gap_2()
+                                .child(mono_label("PROJECT").text_color(theme.muted_foreground))
+                                .child(picker),
+                        )
+                        .child(
+                            div()
+                                .v_flex()
+                                .gap_2()
+                                .child(
+                                    mono_label(format!("ENTRIES · {}", self.audit_entries.len()))
+                                        .text_color(theme.muted_foreground),
+                                )
+                                .child(div().border_t_1().border_color(theme.border).child(entries)),
+                        ),
+                ),
+        )
+    }
+
     fn render_shell_topbar(&self, cx: &Context<Self>) -> Div {
         let theme = cx.theme().clone();
         let project = match &self.screen {
             Screen::Settings => "设置".to_string(),
             Screen::ApiReference => "API Reference".to_string(),
+            Screen::Audit => "审计日志".to_string(),
             _ => self
                 .selected_project
                 .as_deref()
@@ -816,7 +1027,6 @@ impl XWikiApp {
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.screen = Screen::Settings;
                                 this.load_settings_access(cx);
-                                this.load_audit(cx);
                                 cx.notify();
                             })),
                     )
