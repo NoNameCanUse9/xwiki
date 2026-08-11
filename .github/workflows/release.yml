@@ -15,7 +15,7 @@ name: Release
 on:
   push:
     tags:
-      - 'app-v*'
+      - "app-v*"
 
 jobs:
   build:
