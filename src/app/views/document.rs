@@ -53,7 +53,36 @@ impl XWikiApp {
         } else {
             tokens::truncate(&self.tree_path, 48)
         };
-        // Header: path + count badge.
+        // Header: path + count badge, plus an up-one-level button whenever
+        // the browser is inside a directory (keyboard ← also does this).
+        let mut header_left = div().flex().items_center().gap_2();
+        if !self.tree_path.is_empty() {
+            header_left = header_left.child(
+                Button::new("tree-go-up")
+                    .ghost()
+                    .compact()
+                    .icon(IconName::ArrowUp)
+                    .tooltip("返回上一级目录 (←)")
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        let parent =
+                            this.tree_path.rsplit_once('/').map(|(p, _)| p.to_string());
+                        this.load_tree(parent.as_deref().unwrap_or(""), cx);
+                    })),
+            );
+        }
+        header_left = header_left
+            .child(
+                Icon::new(IconName::Folder)
+                    .with_size(px(14.0))
+                    .text_color(theme.accent),
+            )
+            .child(
+                div()
+                    .font_family(tokens::FONT_MONO)
+                    .text_xs()
+                    .text_color(theme.foreground)
+                    .child(location_label),
+            );
         list = list.child(
             div()
                 .px_4()
@@ -61,24 +90,7 @@ impl XWikiApp {
                 .flex()
                 .items_center()
                 .justify_between()
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap_2()
-                        .child(
-                            Icon::new(IconName::Folder)
-                                .with_size(px(14.0))
-                                .text_color(theme.accent),
-                        )
-                        .child(
-                            div()
-                                .font_family(tokens::FONT_MONO)
-                                .text_xs()
-                                .text_color(theme.foreground)
-                                .child(location_label),
-                        ),
-                )
+                .child(header_left)
                 .child(
                     div()
                         .px_2()
