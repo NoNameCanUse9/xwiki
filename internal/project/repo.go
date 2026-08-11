@@ -303,12 +303,16 @@ func (r *Repo) ListTree(ctx context.Context, branch, path string) ([]TreeEntry, 
 	if path != "" {
 		treeISH = branch + ":" + strings.TrimSuffix(path, "/")
 	}
-	out, err := gitOutput(ctx, r.Dir, "ls-tree", treeISH)
+	// -z: NUL-separated entries with raw (unquoted) paths. Without it git
+	// quotes non-ASCII names (core.quotePath) as C-style escapes, e.g.
+	// "\346\226\207...", and the quotes become part of the parsed name,
+	// breaking recursion into those directories and zip export.
+	out, err := gitOutput(ctx, r.Dir, "ls-tree", "-z", treeISH)
 	if err != nil {
 		return nil, fmt.Errorf("ls-tree %s: %w", path, err)
 	}
 	var entries []TreeEntry
-	for _, line := range strings.Split(out, "\n") {
+	for _, line := range strings.Split(out, "\x00") {
 		if line == "" {
 			continue
 		}
