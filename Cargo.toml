@@ -27,6 +27,9 @@ reqwest = { version = "0.12", default-features = false, features = [
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 chrono = "0.4"
+resvg = "0.45"
+usvg = "0.45"
+image = "0.25"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 
 [dev-dependencies]

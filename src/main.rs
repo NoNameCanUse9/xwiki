@@ -100,6 +100,7 @@ fn main() {
                     // 960×640 so panels + main content stay usable. The
                     // default gpui size is far larger, so pin a modest
                     // starting size.
+                    icon: Some(crate::ui::app_icon_rgba()),
                     window_bounds: Some(WindowBounds::Windowed(start_bounds)),
                     window_min_size: Some(size(px(960.0), px(640.0))),
                     ..Default::default()

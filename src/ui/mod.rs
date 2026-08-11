@@ -29,6 +29,32 @@ pub fn app_icon() -> Img {
     img(image).flex_none()
 }
 
+/// The app icon rasterized for the OS window/taskbar (`WindowOptions.icon`).
+/// Rendered once via resvg at 256×256; the PNG round-trip unpacks tiny_skia's
+/// premultiplied pixels into plain RGBA, which the windowing system expects.
+pub fn app_icon_rgba() -> Arc<image::RgbaImage> {
+    static ICON: OnceLock<Arc<image::RgbaImage>> = OnceLock::new();
+    ICON.get_or_init(|| {
+        let tree = usvg::Tree::from_data(APP_ICON_SVG, &usvg::Options::default())
+            .expect("app icon svg parses");
+        let size = 256;
+        let mut pixmap = resvg::tiny_skia::Pixmap::new(size, size).expect("icon pixmap");
+        let scale = size as f32 / tree.size().width();
+        resvg::render(
+            &tree,
+            resvg::tiny_skia::Transform::from_scale(scale, scale),
+            &mut pixmap.as_mut(),
+        );
+        let png = pixmap.encode_png().expect("icon png");
+        Arc::new(
+            image::load_from_memory(&png)
+                .expect("icon png decodes")
+                .to_rgba8(),
+        )
+    })
+    .clone()
+}
+
 /// Mono machine-readout label: JetBrains Mono, 11px, UPPERCASE.
 ///
 /// Tracking (web 0.06em) is not exposed by GPUI's `Styled` API — skipped.
