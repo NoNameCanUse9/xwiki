@@ -20,6 +20,45 @@ struct ApiPathEntry {
     operations: Vec<ApiOperationEntry>,
 }
 
+/// Localize an RFC3339 UTC timestamp the way the web audit page does
+/// (`toLocaleString`). Falls back to the raw string when parsing fails.
+/// Localize an RFC3339 UTC timestamp the way the web audit page does
+/// (`toLocaleString`). Falls back to the raw string when parsing fails.
+fn format_audit_time(iso: &str) -> String {
+    chrono::DateTime::parse_from_rfc3339(iso)
+        .map(|dt| {
+            dt.with_timezone(&chrono::Local)
+                .format("%Y-%m-%d %H:%M:%S")
+                .to_string()
+        })
+        .unwrap_or_else(|_| iso.to_string())
+}
+
+#[cfg(test)]
+mod audit_time_tests {
+    use super::format_audit_time;
+
+    #[test]
+    fn localizes_rfc3339_utc() {
+        // TZ-independent check: the local rendering must be the UTC instant
+        // shifted to the machine's local offset.
+        let local = format_audit_time("2026-08-03T04:47:48Z");
+        let expected = chrono::DateTime::parse_from_rfc3339("2026-08-03T04:47:48Z")
+            .unwrap()
+            .with_timezone(&chrono::Local)
+            .format("%Y-%m-%d %H:%M:%S")
+            .to_string();
+        assert_eq!(local, expected);
+        assert!(local.starts_with("2026-08-03"));
+    }
+
+    #[test]
+    fn falls_back_to_raw_on_parse_failure() {
+        assert_eq!(format_audit_time("not-a-timestamp"), "not-a-timestamp");
+        assert_eq!(format_audit_time(""), "");
+    }
+}
+
 fn api_fallback_tag(path: &str) -> &'static str {
     let route = path.to_ascii_lowercase();
     if route.contains("openapi") {
@@ -821,19 +860,22 @@ impl XWikiApp {
                 }))
                 .into_any_element()
         };
-        let entries: AnyElement = if self.audit_loading {
-            div()
-                .py_4()
-                .text_sm()
-                .text_color(theme.muted_foreground)
-                .child("正在加载审计日志…")
-                .into_any_element()
-        } else if let Some(error) = &self.audit_error {
+        let entries: AnyElement = if let Some(error) = &self.audit_error {
             div()
                 .py_4()
                 .text_sm()
                 .text_color(theme.danger)
                 .child(error.clone())
+                .into_any_element()
+        } else if self.audit_projects.is_empty() {
+            // No projects on the server: the web page renders nothing here.
+            div().into_any_element()
+        } else if self.audit_loading {
+            div()
+                .py_4()
+                .text_sm()
+                .text_color(theme.muted_foreground)
+                .child("正在加载审计日志…")
                 .into_any_element()
         } else if self.audit_entries.is_empty() {
             div()
@@ -880,7 +922,7 @@ impl XWikiApp {
                                 ),
                         )
                         .child(
-                            mono_label(&e.created_at)
+                            mono_label(format_audit_time(&e.created_at))
                                 .flex_shrink_0()
                                 .text_color(theme.muted_foreground),
                         ),
@@ -904,6 +946,12 @@ impl XWikiApp {
                         .p_6()
                         .v_flex()
                         .gap_4()
+                        .child(
+                            div()
+                                .text_sm()
+                                .text_color(theme.muted_foreground)
+                                .child("按项目查看操作记录：谁在什么时间对哪个文档执行了什么操作。"),
+                        )
                         .child(
                             div()
                                 .v_flex()

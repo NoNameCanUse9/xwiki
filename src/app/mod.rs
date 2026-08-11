@@ -3407,15 +3407,16 @@ impl XWikiApp {
             Ok(projects) => {
                 let _ = this.update(cx, |app, cx| {
                     app.audit_projects = projects;
-                    let still_valid = app
+                    let contains = |id: &str| app.audit_projects.iter().any(|p| p.id == id);
+                    if !app
                         .audit_selected_project
                         .as_ref()
-                        .is_some_and(|id| app.audit_projects.iter().any(|p| &p.id == id));
-                    if !still_valid {
+                        .is_some_and(|id| contains(id))
+                    {
                         app.audit_selected_project = app
                             .selected_project
                             .clone()
-                            .filter(|id| app.audit_projects.iter().any(|p| &p.id == id))
+                            .filter(|id| contains(id))
                             .or_else(|| app.audit_projects.first().map(|p| p.id.clone()));
                     }
                     app.load_audit(cx);
@@ -3434,11 +3435,15 @@ impl XWikiApp {
     }
 
     /// Load the audit log for the project selected on the audit page.
+    /// With no projects on the server there is nothing to show, so stay
+    /// silent (no error) instead of surfacing a red error — the web audit
+    /// page renders nothing in that case.
     fn load_audit(&mut self, cx: &mut Context<Self>) {
         let (Some(client), Some(project)) = (self.client.clone(), self.audit_selected_project.clone())
         else {
             self.audit_entries.clear();
-            self.audit_error = Some("未选择项目，无法查看审计日志。".into());
+            self.audit_loading = false;
+            self.audit_error = None;
             cx.notify();
             return;
         };
