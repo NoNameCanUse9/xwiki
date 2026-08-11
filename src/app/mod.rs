@@ -1,6 +1,6 @@
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, RwLock};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use gpui::StatefulInteractiveElement;
@@ -163,7 +163,7 @@ pub struct XWikiApp {
     server_input: Entity<InputState>,
     user_input: Entity<InputState>,
     password_input: Entity<InputState>,
-    projects: Arc<RwLock<Vec<ProjectRow>>>,
+    projects: Vec<ProjectRow>,
     filter_input: Entity<InputState>,
     project_filter: ProjectFilter,
     // Document workspace state.
@@ -194,7 +194,10 @@ pub struct XWikiApp {
     editing: bool,
     edit_path: Option<String>,
     lock_held: bool,
-    heartbeat_stop: Arc<AtomicBool>,
+    /// Heartbeat generation counter: each `start_heartbeat` takes a fresh
+    /// generation and every loop iteration bails when the counter moved on,
+    /// so a cancelled edit can never resurrect a stale loop for an old path.
+    heartbeat_generation: Arc<AtomicU64>,
     status_msg: Option<String>,
     save_error: Option<String>,
     saving: bool,
@@ -261,10 +264,9 @@ pub struct XWikiApp {
     audit_projects: Vec<dto::Project>,
     audit_selected_project: Option<String>,
     /// OpenAPI reference is rendered as a native read-only reference page.
-    api_reference_open: bool,
     api_reference_loading: bool,
     api_reference_error: Option<String>,
-    api_reference: Option<String>,
+    api_reference: Option<serde_json::Value>,
     api_reference_selected_path: Option<String>,
     api_reference_selected_method: Option<String>,
     /// Edit requested from a context menu while the doc is still loading.
@@ -327,9 +329,8 @@ impl XWikiApp {
         });
 
         // ponytail: rows are loaded from GET /api/v1/projects on login; this
-        // starts empty.
-        let projects = Arc::new(RwLock::new(Vec::new()));
-
+        // starts empty. Plain Vec — every access happens on the main thread
+        // inside update callbacks, so no lock is needed.
         let filter_input = cx.new(|cx| InputState::new(window, cx).placeholder("搜索项目…"));
 
         let commit_msg = cx.new(|cx| InputState::new(window, cx).placeholder("提交消息…"));
@@ -476,7 +477,7 @@ impl XWikiApp {
             server_input,
             user_input,
             password_input,
-            projects,
+            projects: Vec::new(),
             filter_input,
             project_filter: ProjectFilter::All,
             selected_project: None,
@@ -507,7 +508,7 @@ impl XWikiApp {
             editing: false,
             edit_path: None,
             lock_held: false,
-            heartbeat_stop: Arc::new(AtomicBool::new(true)),
+            heartbeat_generation: Arc::new(AtomicU64::new(0)),
             status_msg: None,
             save_error: None,
             saving: false,
@@ -559,7 +560,6 @@ impl XWikiApp {
             audit_error: None,
             audit_projects: Vec::new(),
             audit_selected_project: None,
-            api_reference_open: false,
             api_reference_loading: false,
             api_reference_error: None,
             api_reference: None,
@@ -580,7 +580,7 @@ impl XWikiApp {
         let server = session.server.clone();
         let username = session.username.clone();
         let client = Client::with_session(&server, Some(session.cookie));
-        config::save_server(&server);
+        let _ = config::save_server(&server);
         self.server_input.update(cx, |state, cx| {
             state.set_value(server.clone(), window, cx);
         });
@@ -610,6 +610,7 @@ impl XWikiApp {
     }
 
     fn open_project(&mut self, project_id: &str, cx: &mut Context<Self>) {
+        self.stop_heartbeat();
         self.selected_project = Some(project_id.to_string());
         self.selected_sha = None;
         self.current_revision = None;
@@ -635,12 +636,20 @@ impl XWikiApp {
             async move |this, cx| match client.revision(&project).await {
                 Ok(revision) => {
                     let _ = this.update(cx, |app, cx| {
+                        // Discard stale responses: the user may have switched
+                        // projects while this request was in flight.
+                        if app.selected_project.as_deref() != Some(project.as_str()) {
+                            return;
+                        }
                         app.current_revision = Some(revision);
                         cx.notify();
                     });
                 }
                 Err(e) => {
                     let _ = this.update(cx, |app, cx| {
+                        if app.selected_project.as_deref() != Some(project.as_str()) {
+                            return;
+                        }
                         app.status_msg = Some(format!("读取 revision 失败: {e}"));
                         cx.notify();
                     });
@@ -660,6 +669,7 @@ impl XWikiApp {
         self.history_open = false;
         self.history_file_path = None;
         self.tree_path = path.to_string();
+        self.tree_focus = None;
         self.doc_path = None;
         self.doc_content.clear();
         self.doc_outline = outline::ParsedDocument {
@@ -676,6 +686,13 @@ impl XWikiApp {
             async move |this, cx| match client.tree(&project, &path).await {
                 Ok(entries) => {
                     let _ = this.update(cx, |app, cx| {
+                        // Discard stale responses: the user may have switched
+                        // projects or directories while this was in flight.
+                        if app.selected_project.as_deref() != Some(project.as_str())
+                            || app.tree_path != path
+                        {
+                            return;
+                        }
                         app.tree_loading = false;
                         app.tree_entries = entries;
                         cx.notify();
@@ -683,8 +700,13 @@ impl XWikiApp {
                 }
                 Err(e) => {
                     let _ = this.update(cx, |app, cx| {
+                        if app.selected_project.as_deref() != Some(project.as_str())
+                            || app.tree_path != path
+                        {
+                            return;
+                        }
                         app.tree_loading = false;
-                        app.tree_error = Some(e.to_string());
+                        app.tree_error = Some(Self::friendly_api_error(&e));
                         cx.notify();
                     });
                 }
@@ -710,6 +732,15 @@ impl XWikiApp {
             match client.page(&project, &path).await {
                 Ok(page) => {
                     let _ = this.update(cx, |app, cx| {
+                        // Discard stale responses: the user may have opened a
+                        // different doc (or switched projects) while this
+                        // request was in flight. Writing stale content here
+                        // would silently corrupt the wrong document on save.
+                        if app.selected_project.as_deref() != Some(project.as_str())
+                            || app.doc_path.as_deref() != Some(path.as_str())
+                        {
+                            return;
+                        }
                         app.doc_content = page.content;
                         app.doc_outline = outline::parse_document(&app.doc_content);
                         app.doc_scroll = ScrollHandle::new();
@@ -725,8 +756,13 @@ impl XWikiApp {
                 }
                 Err(e) => {
                     let _ = this.update(cx, |app, cx| {
+                        if app.selected_project.as_deref() != Some(project.as_str())
+                            || app.doc_path.as_deref() != Some(path.as_str())
+                        {
+                            return;
+                        }
                         app.doc_loading = false;
-                        app.doc_error = Some(e.to_string());
+                        app.doc_error = Some(Self::friendly_api_error(&e));
                         cx.notify();
                     });
                 }
@@ -1069,7 +1105,6 @@ impl XWikiApp {
         let Some(client) = self.client.clone() else {
             return;
         };
-        self.api_reference_open = true;
         self.screen = Screen::ApiReference;
         self.api_reference_loading = true;
         self.api_reference_error = None;
@@ -1078,10 +1113,12 @@ impl XWikiApp {
         cx.notify();
         cx.spawn(async move |this, cx| match client.openapi().await {
             Ok(spec) => {
-                let text = serde_json::to_string_pretty(&spec).unwrap_or_else(|_| "{}".into());
                 let _ = this.update(cx, |app, cx| {
                     app.api_reference_loading = false;
-                    app.api_reference = Some(text);
+                    // Keep the parsed Value: rendering parses the spec on
+                    // every frame, so a raw string would be re-parsed each
+                    // time (the JSON copy is produced on demand instead).
+                    app.api_reference = Some(spec);
                     cx.notify();
                 });
             }
@@ -1097,6 +1134,7 @@ impl XWikiApp {
     }
 
     fn back_to_projects(&mut self, cx: &mut Context<Self>) {
+        self.stop_heartbeat();
         self.selected_project = None;
         self.current_revision = None;
         self.tree_entries.clear();
@@ -1207,21 +1245,24 @@ impl XWikiApp {
         ) else {
             return;
         };
-        let stop = self.heartbeat_stop.clone();
-        stop.store(false, Ordering::Relaxed);
+        let generation = self.heartbeat_generation.clone();
+        let gen = generation.fetch_add(1, Ordering::Relaxed) + 1;
         cx.spawn(async move |this, cx| loop {
-            if stop.load(Ordering::Relaxed) {
+            if generation.load(Ordering::Relaxed) != gen {
                 break;
             }
             cx.background_executor()
                 .timer(Duration::from_secs(25))
                 .await;
-            if stop.load(Ordering::Relaxed) {
+            if generation.load(Ordering::Relaxed) != gen {
                 break;
             }
             if client.heartbeat_lock(&project, &path).await.is_err() {
                 let _ = this.update(cx, |app, cx| {
-                    app.status_msg = Some("锁续租失败".into());
+                    // The lock is gone: stop pretending we hold it, or the
+                    // status bar lies and saves keep firing with a dead lock.
+                    app.lock_held = false;
+                    app.status_msg = Some("锁续租失败，请取消编辑后重新编辑。".into());
                     cx.notify();
                 });
                 break;
@@ -1231,7 +1272,7 @@ impl XWikiApp {
     }
 
     fn stop_heartbeat(&self) {
-        self.heartbeat_stop.store(true, Ordering::Relaxed);
+        self.heartbeat_generation.fetch_add(1, Ordering::Relaxed);
     }
 
     fn cancel_edit(&mut self, cx: &mut Context<Self>) {
@@ -1722,11 +1763,8 @@ impl XWikiApp {
             async move |this, cx| match client.set_archived(&id, archived).await {
                 Ok(p) => {
                     let _ = this.update(cx, |app, cx| {
-                        {
-                            let mut projects = app.projects.write().unwrap();
-                            if let Some(row) = projects.iter_mut().find(|r| r.id == p.id) {
-                                row.archived = p.archived;
-                            }
+                        if let Some(row) = app.projects.iter_mut().find(|r| r.id == p.id) {
+                            row.archived = p.archived;
                         }
                         app.project_action = None;
                         app.notify(
@@ -1844,11 +1882,8 @@ impl XWikiApp {
             async move |this, cx| match client.rename_project(&id, &new_name).await {
                 Ok(p) => {
                     let _ = this.update(cx, |app, cx| {
-                        {
-                            let mut projects = app.projects.write().unwrap();
-                            if let Some(row) = projects.iter_mut().find(|r| r.id == p.id) {
-                                row.name = p.name.clone();
-                            }
+                        if let Some(row) = app.projects.iter_mut().find(|r| r.id == p.id) {
+                            row.name = p.name.clone();
                         }
                         app.project_action = None;
                         app.notify(format!("已重命名为 {}", p.name), cx);
@@ -1951,7 +1986,7 @@ impl XWikiApp {
             async move |this, cx| match client.delete_project(&id).await {
                 Ok(()) => {
                     let _ = this.update(cx, |app, cx| {
-                        app.projects.write().unwrap().retain(|r| r.id != id);
+                        app.projects.retain(|r| r.id != id);
                         if app.selected_project.as_deref() == Some(id.as_str()) {
                             app.selected_project = None;
                         }
@@ -2547,7 +2582,7 @@ impl XWikiApp {
         cx.spawn(async move |this, cx| {
             match client.login_with_session(username.trim(), &password).await {
                 Ok((user, cookie)) => {
-                    config::save_server(&server);
+                    let _ = config::save_server(&server);
                     config::save_username(&user.username);
                     if let Some(cookie) = cookie {
                         config::save_session(&server, &user.username, &cookie);
@@ -2695,11 +2730,13 @@ impl XWikiApp {
             match projects {
                 Ok(list) => {
                     let _ = this.update(cx, |app, cx| {
-                        *app.projects.write().unwrap() =
-                            list.iter().map(ProjectRow::from_dto).collect();
+                        app.projects = list.iter().map(ProjectRow::from_dto).collect();
                         app.loading = false;
                         if let Ok(m) = meta {
                             app.meta_version = Some(m.version);
+                        } else {
+                            // Non-fatal: the project list still works.
+                            app.meta_version = None;
                         }
                         cx.notify();
                     });
@@ -2717,6 +2754,7 @@ impl XWikiApp {
     }
 
     fn logout(&mut self, cx: &mut Context<Self>) {
+        self.stop_heartbeat();
         config::clear_session();
         self.screen = Screen::Login;
         self.client = None;
@@ -2729,7 +2767,7 @@ impl XWikiApp {
         self.settings_tokens.clear();
         self.settings_users.clear();
         self.settings_token_secret = None;
-        *self.projects.write().unwrap() = Vec::new();
+        self.projects.clear();
         cx.notify();
     }
     fn open_new_project_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -2822,6 +2860,10 @@ impl XWikiApp {
                                     app.notify(format!("已重命名为 {to}"), cx);
                                     app.edit_path = Some(to.clone());
                                     app.doc_path = Some(to.clone());
+                                    // The heartbeat loop captured the old
+                                    // path; restart it so the lock on the new
+                                    // path stays fresh while editing.
+                                    app.start_heartbeat(cx);
                                     cx.notify();
                                 });
                             }
@@ -2962,8 +3004,6 @@ impl XWikiApp {
             if let Some(project) = self.selected_project.as_deref() {
                 let name = self
                     .projects
-                    .read()
-                    .unwrap()
                     .iter()
                     .find(|p| Some(p.id.as_str()) == self.selected_project.as_deref())
                     .map(|p| p.name.clone())
@@ -3016,7 +3056,7 @@ impl XWikiApp {
             });
         }
         if self.client.is_some() {
-            for p in self.projects.read().unwrap().iter() {
+            for p in self.projects.iter() {
                 items.push(QuickItem {
                     label: format!("项目 {}", p.name),
                     hint: "project".into(),
@@ -3090,6 +3130,11 @@ impl XWikiApp {
             async move |this, cx| match client.search(&project, &q).await {
                 Ok(results) => {
                     let _ = this.update(cx, |app, cx| {
+                        // Discard stale responses: the query may have changed
+                        // (or been cleared) while the request was in flight.
+                        if app.search_input.read(cx).value().trim() != q {
+                            return;
+                        }
                         app.search_loading = false;
                         app.search_results = results;
                         cx.notify();
@@ -3097,6 +3142,9 @@ impl XWikiApp {
                 }
                 Err(e) => {
                     let _ = this.update(cx, |app, cx| {
+                        if app.search_input.read(cx).value().trim() != q {
+                            return;
+                        }
                         app.search_loading = false;
                         app.search_error = Some(format!("搜索失败: {e}"));
                         cx.notify();
@@ -3335,7 +3383,19 @@ impl XWikiApp {
         self.lock_held = false;
         self.saving = false;
         self.save_error = None;
-        self.edit_path = None;
+        let (client, project, edit_path) = (
+            self.client.clone(),
+            self.selected_project.clone(),
+            self.edit_path.take(),
+        );
+        if let (Some(client), Some(project), Some(path)) = (client, project, edit_path) {
+            // Same as cancel_edit: the server-side lock lingers until its TTL
+            // otherwise, blocking other editors of this doc.
+            cx.spawn(async move |_this, _cx| {
+                let _ = client.release_lock(&project, &path).await;
+            })
+            .detach();
+        }
         if let Some(p) = path {
             self.open_doc(&p, cx);
         }
@@ -3453,6 +3513,11 @@ impl XWikiApp {
         cx.spawn(async move |this, cx| match client.audit(&project).await {
             Ok(entries) => {
                 let _ = this.update(cx, |app, cx| {
+                    // Discard stale responses: the user may have switched the
+                    // project picker while the request was in flight.
+                    if app.audit_selected_project.as_deref() != Some(project.as_str()) {
+                        return;
+                    }
                     app.audit_loading = false;
                     app.audit_entries = entries;
                     cx.notify();
@@ -3460,6 +3525,9 @@ impl XWikiApp {
             }
             Err(e) => {
                 let _ = this.update(cx, |app, cx| {
+                    if app.audit_selected_project.as_deref() != Some(project.as_str()) {
+                        return;
+                    }
                     app.audit_loading = false;
                     app.audit_error = Some(format!(
                         "审计日志加载失败：{}",
@@ -3939,7 +4007,12 @@ impl XWikiApp {
         if self.server_url != url {
             config::clear_session();
         }
-        config::save_server(&url);
+        if config::save_server(&url).is_err() {
+            self.settings_test = Some((false, "服务地址保存失败，请检查配置目录权限。".into()));
+            self.settings_test_detail = None;
+            cx.notify();
+            return;
+        }
         self.server_url = url;
         self.settings_test = None;
         self.settings_test_detail = None;
@@ -5189,7 +5262,7 @@ fn open_new_project_dialog_window(
                         Ok(p) => {
                             h.update(cx, |app, cx| {
                                 app.project_action = None;
-                                app.projects.write().unwrap().push(ProjectRow::from_dto(&p));
+                                app.projects.push(ProjectRow::from_dto(&p));
                                 app.notify("项目已创建".into(), cx);
                                 cx.notify();
                             });

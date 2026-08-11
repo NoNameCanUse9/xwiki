@@ -59,6 +59,16 @@ mod audit_time_tests {
     }
 }
 
+/// HTTP method → accent color for the API reference rows.
+fn method_color(theme: &Theme, method: &str) -> Hsla {
+    match method {
+        "GET" => theme.accent,
+        "POST" | "PUT" | "PATCH" => theme.success,
+        "DELETE" => theme.danger,
+        _ => theme.muted_foreground,
+    }
+}
+
 fn api_fallback_tag(path: &str) -> &'static str {
     let route = path.to_ascii_lowercase();
     if route.contains("openapi") {
@@ -142,25 +152,19 @@ impl XWikiApp {
 
     pub(crate) fn render_api_reference(&self, cx: &mut Context<Self>) -> Div {
         let theme = cx.theme().clone();
-        let spec = self
-            .api_reference
-            .as_deref()
-            .and_then(|value| serde_json::from_str::<serde_json::Value>(value).ok());
+        let spec = self.api_reference.as_ref();
         let schema_version = spec
-            .as_ref()
             .and_then(|value| value.get("openapi"))
             .and_then(serde_json::Value::as_str)
             .unwrap_or("OpenAPI")
             .to_string();
         let schema_title = spec
-            .as_ref()
             .and_then(|value| value.get("info"))
             .and_then(|value| value.get("title"))
             .and_then(serde_json::Value::as_str)
             .unwrap_or("AgentDocs API")
             .to_string();
         let schema_description = spec
-            .as_ref()
             .and_then(|value| value.get("info"))
             .and_then(|value| value.get("description"))
             .and_then(serde_json::Value::as_str)
@@ -168,7 +172,6 @@ impl XWikiApp {
             .to_string();
         let mut path_entries: Vec<ApiPathEntry> = Vec::new();
         if let Some(paths) = spec
-            .as_ref()
             .and_then(|value| value.get("paths"))
             .and_then(serde_json::Value::as_object)
         {
@@ -290,7 +293,6 @@ impl XWikiApp {
                                             .icon(IconName::ArrowLeft)
                                             .label("返回工作区")
                                             .on_click(cx.listener(|this, _, _, cx| {
-                                                this.api_reference_open = false;
                                                 this.screen = Screen::Workspace;
                                                 cx.notify();
                                             })),
@@ -321,7 +323,9 @@ impl XWikiApp {
                                     .disabled(self.api_reference.is_none())
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         if let Some(spec) = this.api_reference.clone() {
-                                            cx.write_to_clipboard(ClipboardItem::new_string(spec));
+                                            let text = serde_json::to_string_pretty(&spec)
+                                                .unwrap_or_else(|_| "{}".into());
+                                            cx.write_to_clipboard(ClipboardItem::new_string(text));
                                             this.notify("OpenAPI JSON 已复制".into(), cx);
                                         }
                                     })),
@@ -453,12 +457,7 @@ impl XWikiApp {
             .collect();
 
         let detail = if let (Some(path), Some(method)) = (selected_path.clone(), selected_method) {
-            let method_color = match method.as_str() {
-                "GET" => theme.accent,
-                "POST" | "PUT" | "PATCH" => theme.success,
-                "DELETE" => theme.danger,
-                _ => theme.muted_foreground,
-            };
+            let detail_color = method_color(&theme, &method);
             let copy_path = path.clone();
             let copy_method = method.clone();
             let method_rows: Vec<AnyElement> = selected_operations
@@ -467,12 +466,7 @@ impl XWikiApp {
                     let active = operation.method == method;
                     let row_path = path.clone();
                     let row_method = operation.method.clone();
-                    let row_color = match operation.method.as_str() {
-                        "GET" => theme.accent,
-                        "POST" | "PUT" | "PATCH" => theme.success,
-                        "DELETE" => theme.danger,
-                        _ => theme.muted_foreground,
-                    };
+                    let row_color = method_color(&theme, &operation.method);
                     let mut row = div()
                         .id(format!("api-method-{}", operation.method))
                         .flex()
@@ -540,11 +534,11 @@ impl XWikiApp {
                                 .px_2()
                                 .py_1()
                                 .rounded(px(tokens::RADIUS_SMALL))
-                                .bg(method_color.opacity(0.14))
+                                .bg(detail_color.opacity(0.14))
                                 .font_family(tokens::FONT_MONO)
                                 .text_xs()
                                 .font_weight(FontWeight::SEMIBOLD)
-                                .text_color(method_color)
+                                .text_color(detail_color)
                                 .child(method.clone()),
                         )
                         .child(

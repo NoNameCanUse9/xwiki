@@ -95,19 +95,11 @@ impl XWikiApp {
                 .p_4()
                 .child(Icon::new(IconName::Search).text_color(theme.muted_foreground))
                 .child(mono_label("没有匹配的版本").text_color(theme.muted_foreground))
-                .child(
-                    Button::new("clear-history-search")
-                        .rounded(px(tokens::RADIUS))
-                        .icon(IconName::Close)
-                        .label("清空搜索")
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            let input = this.history_input.clone();
-                            input.update(cx, |state, cx| {
-                                state.set_value(String::new(), window, cx);
-                            });
-                            cx.notify();
-                        })),
-                )
+                .child(crate::ui::clear_search_button(
+                    "clear-history-search",
+                    self.history_input.clone(),
+                    cx.entity().entity_id(),
+                ))
                 .into_any_element()
         } else {
             let rows: Vec<AnyElement> = visible_indices
@@ -127,7 +119,7 @@ impl XWikiApp {
                     let focused = self.history_focus == Some(commit_index);
                     let is_current = commit_index == 0;
                     div()
-                        .id(format!("rev-{short}"))
+                        .id(format!("rev-{sha}"))
                         .px_3()
                         .py_2()
                         .border_b_1()

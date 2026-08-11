@@ -6,7 +6,7 @@ use gpui::*;
 use gpui_component::{
     button::*,
     input::Input,
-    menu::{ContextMenuExt, DropdownMenu},
+    menu::{ContextMenuExt, DropdownMenu, PopupMenu},
     scroll::ScrollableElement as _,
     *,
 };
@@ -24,8 +24,6 @@ impl XWikiApp {
         let q = self.filter_input.read(cx).value().to_lowercase();
         let projects: Vec<ProjectRow> = self
             .projects
-            .read()
-            .unwrap()
             .iter()
             .filter(|p| {
                 let status_matches = match self.project_filter {
@@ -92,19 +90,11 @@ impl XWikiApp {
                             this.open_new_project_dialog(window, cx)
                         })),
                 ),
-                (false, _) => empty.child(
-                    Button::new("empty-clear-project-search")
-                        .rounded(px(tokens::RADIUS))
-                        .icon(IconName::Close)
-                        .label("清空搜索")
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            let input = this.filter_input.clone();
-                            input.update(cx, |state, cx| {
-                                state.set_value(String::new(), window, cx);
-                            });
-                            cx.notify();
-                        })),
-                ),
+                (false, _) => empty.child(crate::ui::clear_search_button(
+                    "empty-clear-project-search",
+                    self.filter_input.clone(),
+                    cx.entity().entity_id(),
+                )),
             };
         }
 
@@ -123,15 +113,13 @@ impl XWikiApp {
             let id = p.id.clone();
             let name = p.name.clone();
             let archived = p.archived;
-            let _action_id = id.clone();
-            let _action_busy = self.project_action.as_deref() == Some(id.as_str());
             let status_color = if archived {
                 theme.muted_foreground
             } else {
                 theme.accent
             };
             let card = div()
-                .id(format!("project-card-{}", p.name))
+                .id(format!("project-card-{id}"))
                 .flex_none()
                 .w(px(card_width))
                 .h(px(tokens::CARD_HEIGHT))
@@ -189,36 +177,11 @@ impl XWikiApp {
                                         .icon(IconName::EllipsisVertical)
                                         .tooltip("项目操作")
                                         .dropdown_menu(move |menu, _window, _cx| {
-                                            let mut m = menu.menu(
-                                                "打开项目",
-                                                Box::new(ProjectContextAction {
-                                                    project_id: menu_id.clone(),
-                                                }),
-                                            );
-                                            m = m.menu(
-                                                if menu_archived {
-                                                    "取消归档"
-                                                } else {
-                                                    "归档项目"
-                                                },
-                                                Box::new(ProjectArchiveAction {
-                                                    project_id: menu_id.clone(),
-                                                    archived: !menu_archived,
-                                                }),
-                                            );
-                                            m = m.menu(
-                                                "重命名",
-                                                Box::new(ProjectRenameAction {
-                                                    project_id: menu_id.clone(),
-                                                    current_name: menu_name.clone(),
-                                                }),
-                                            );
-                                            m.menu(
-                                                "删除项目",
-                                                Box::new(ProjectDeleteAction {
-                                                    project_id: menu_id.clone(),
-                                                    project_name: menu_name.clone(),
-                                                }),
+                                            project_menu(
+                                                menu,
+                                                menu_id.clone(),
+                                                menu_name.clone(),
+                                                menu_archived,
                                             )
                                         })
                                 }),
@@ -279,38 +242,7 @@ impl XWikiApp {
                     cx.listener(move |this, _, _, cx| this.open_project(&click_id, cx))
                 });
             let card = card.context_menu(move |menu, _window, _cx| {
-                let mut m = menu.menu(
-                    "打开项目",
-                    Box::new(ProjectContextAction {
-                        project_id: id.clone(),
-                    }),
-                );
-                m = m.menu(
-                    if archived {
-                        "取消归档"
-                    } else {
-                        "归档项目"
-                    },
-                    Box::new(ProjectArchiveAction {
-                        project_id: id.clone(),
-                        archived: !archived,
-                    }),
-                );
-                m = m.menu(
-                    "重命名",
-                    Box::new(ProjectRenameAction {
-                        project_id: id.clone(),
-                        current_name: name.clone(),
-                    }),
-                );
-                m = m.menu(
-                    "删除项目",
-                    Box::new(ProjectDeleteAction {
-                        project_id: id.clone(),
-                        project_name: name.clone(),
-                    }),
-                );
-                m
+                project_menu(menu, id.clone(), name.clone(), archived)
             });
             grid = grid.child(card);
         }
@@ -383,7 +315,7 @@ impl XWikiApp {
         let card_width = ((content_width - 12.0 * (columns as f32 - 1.0)) / columns as f32)
             .clamp(tokens::CARD_MIN_WIDTH, tokens::CARD_MAX_WIDTH);
         let (project_count, active_count) = {
-            let projects = self.projects.read().unwrap();
+            let projects = &self.projects;
             (
                 projects.len(),
                 projects.iter().filter(|project| !project.archived).count(),
@@ -421,7 +353,7 @@ impl XWikiApp {
                             ),
                     )
                     .child({
-                        let projects = self.projects.read().unwrap();
+                        let projects = &self.projects;
                         let items: Vec<AnyElement> = projects
                             .iter()
                             .map(|p| {
@@ -430,7 +362,7 @@ impl XWikiApp {
                                 let is_selected =
                                     self.selected_project.as_deref() == Some(p.id.as_str());
                                 let row = div()
-                                    .id(format!("nav-{}", p.name))
+                                    .id(format!("nav-{}", p.id))
                                     .flex()
                                     .flex_none()
                                     .items_center()
@@ -442,8 +374,6 @@ impl XWikiApp {
                                         Icon::new(IconName::Folder).with_size(px(16.0)).text_color(
                                             if is_selected {
                                                 theme2.accent
-                                            } else if p.archived {
-                                                theme2.muted_foreground
                                             } else {
                                                 theme2.muted_foreground
                                             },
@@ -748,4 +678,33 @@ impl XWikiApp {
             ),
         )
     }
+}
+
+/// The four project actions shared by the card dropdown and its context
+/// menu — kept in one place so the two menus can't drift apart.
+fn project_menu(menu: PopupMenu, id: String, name: String, archived: bool) -> PopupMenu {
+    let mut m = menu.menu("打开项目", Box::new(ProjectContextAction {
+        project_id: id.clone(),
+    }));
+    m = m.menu(
+        if archived { "取消归档" } else { "归档项目" },
+        Box::new(ProjectArchiveAction {
+            project_id: id.clone(),
+            archived: !archived,
+        }),
+    );
+    m = m.menu(
+        "重命名",
+        Box::new(ProjectRenameAction {
+            project_id: id.clone(),
+            current_name: name.clone(),
+        }),
+    );
+    m.menu(
+        "删除项目",
+        Box::new(ProjectDeleteAction {
+            project_id: id.clone(),
+            project_name: name.clone(),
+        }),
+    )
 }

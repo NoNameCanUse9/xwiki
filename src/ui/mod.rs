@@ -9,10 +9,13 @@ pub mod tokens;
 use std::sync::{Arc, OnceLock};
 
 use gpui::{
-    div, img, px, Div, ElementId, Image, ImageFormat, Img, IntoElement, ParentElement as _,
-    Styled as _,
+    div, img, px, Div, ElementId, Entity, EntityId, Image, ImageFormat, Img, IntoElement,
+    ParentElement as _, Styled as _,
 };
+use gpui_component::button::Button;
+use gpui_component::input::InputState;
 use gpui_component::text::TextView;
+use gpui_component::IconName;
 
 const APP_ICON_SVG: &[u8] = include_bytes!("../../assets/agentdocs-app-icon.svg");
 static APP_ICON_IMAGE: OnceLock<Arc<Image>> = OnceLock::new();
@@ -62,4 +65,24 @@ pub fn display(text: impl IntoElement) -> Div {
 /// Markdown rendered at the reading measure (web `TextView::markdown`).
 pub fn markdown(id: impl Into<ElementId>, content: String) -> TextView {
     TextView::markdown(id, content).w_full()
+}
+
+/// The "清空搜索" empty-state button shared by the project grid and the
+/// history timeline: clears the given search input and repaints `app_id`
+/// (the owning view entity, since plain `App` has no no-arg `notify`).
+pub fn clear_search_button(
+    id: impl Into<ElementId>,
+    input: Entity<InputState>,
+    app_id: EntityId,
+) -> Button {
+    Button::new(id)
+        .rounded(px(tokens::RADIUS))
+        .icon(IconName::Close)
+        .label("清空搜索")
+        .on_click(move |_, window, cx| {
+            input.update(cx, |state, cx| {
+                state.set_value(String::new(), window, cx);
+            });
+            cx.notify(app_id);
+        })
 }
