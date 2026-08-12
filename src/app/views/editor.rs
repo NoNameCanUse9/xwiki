@@ -164,6 +164,16 @@ impl XWikiApp {
                     .text_xs()
                     .text_color(theme.danger)
                     .child(msg.clone())
+                    .child(if self.editing && !self.lock_held {
+                        Button::new("reacquire-lock")
+                            .compact()
+                            .rounded(px(tokens::RADIUS_SMALL))
+                            .icon(IconName::Redo2)
+                            .label("重新获取锁")
+                            .on_click(cx.listener(|this, _, _, cx| this.reacquire_lock(cx)))
+                    } else {
+                        Button::new("status-placeholder").hidden()
+                    })
             } else {
                 div()
             })

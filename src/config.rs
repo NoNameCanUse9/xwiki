@@ -258,4 +258,28 @@ mod tests {
         clear_session();
         assert!(load_session().is_none());
     }
+
+    #[test]
+    fn draft_roundtrip_preserves_base_revision() {
+        let _lock = TEST_HOME_LOCK.lock().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        std::env::set_var("HOME", home.path());
+        let draft = Draft {
+            server: "http://server".into(),
+            username: "alice".into(),
+            project: "docs".into(),
+            original_path: "guide.md".into(),
+            target_path: "guide.md".into(),
+            content: "draft content".into(),
+            message: "save later".into(),
+            base_revision: "rev-original".into(),
+            updated_at: chrono::Utc::now().timestamp(),
+        };
+        upsert_draft(draft);
+        let loaded = load_drafts();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].base_revision, "rev-original");
+        remove_draft("http://server", "alice", "docs", "guide.md");
+        assert!(load_drafts().is_empty());
+    }
 }

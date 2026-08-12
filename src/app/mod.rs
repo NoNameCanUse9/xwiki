@@ -92,6 +92,14 @@ fn merge_history_page(
     page.has_more
 }
 
+fn draft_base_revision(server_revision: &str, draft_revision: &str) -> String {
+    if draft_revision.is_empty() {
+        server_revision.to_string()
+    } else {
+        draft_revision.to_string()
+    }
+}
+
 /// Command palette entries: (id, label, hint). Availability is decided by
 /// the current screen state in `palette_commands`.
 #[derive(Clone)]
@@ -1419,8 +1427,10 @@ impl XWikiApp {
                     filename = draft.target_path;
                 }
                 message = draft.message;
-                if !draft.base_revision.is_empty() {
-                    self.edit_base_revision = Some(draft.base_revision);
+                let server_revision = self.current_revision.as_deref().unwrap_or_default();
+                let base_revision = draft_base_revision(server_revision, &draft.base_revision);
+                if !base_revision.is_empty() {
+                    self.edit_base_revision = Some(base_revision);
                 }
                 self.status_msg = Some("已恢复本地草稿".into());
             }
@@ -1506,6 +1516,37 @@ impl XWikiApp {
 
     fn stop_heartbeat(&self) {
         self.heartbeat_generation.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn reacquire_lock(&mut self, cx: &mut Context<Self>) {
+        let (Some(client), Some(project), Some(path)) = (
+            self.client.clone(),
+            self.selected_project.clone(),
+            self.edit_path.clone(),
+        ) else {
+            return;
+        };
+        self.status_msg = Some("正在重新获取文档锁…".into());
+        cx.spawn(
+            async move |this, cx| match client.acquire_lock(&project, &path).await {
+                Ok(_) => {
+                    let _ = this.update(cx, |app, cx| {
+                        app.lock_held = true;
+                        app.status_msg = Some("文档锁已恢复，内容仍保留在编辑器中。".into());
+                        app.start_heartbeat(cx);
+                        cx.notify();
+                    });
+                }
+                Err(error) => {
+                    let _ = this.update(cx, |app, cx| {
+                        app.lock_held = false;
+                        app.status_msg = Some(format!("无法重新获取文档锁：{error}"));
+                        cx.notify();
+                    });
+                }
+            },
+        )
+        .detach();
     }
 
     fn cancel_edit(&mut self, cx: &mut Context<Self>) {
@@ -3795,6 +3836,7 @@ impl XWikiApp {
             self.edit_path.take(),
         );
         if let (Some(client), Some(project), Some(path)) = (client, project, edit_path) {
+            config::remove_draft(&self.server_url, &self.username, &project, &path);
             // Same as cancel_edit: the server-side lock lingers until its TTL
             // otherwise, blocking other editors of this doc.
             cx.spawn(async move |_this, _cx| {
@@ -5793,8 +5835,10 @@ fn import_folder_picker_button(folder: Entity<InputState>, handle: Entity<XWikiA
 
 #[cfg(test)]
 mod import_path_prompt_tests {
+    #[cfg(unix)]
+    use super::collect_import_files;
     use super::{
-        collect_import_files, folder_path_prompt_options, history_page_offset, merge_history_page,
+        draft_base_revision, folder_path_prompt_options, history_page_offset, merge_history_page,
         read_file_limited, TokenDraft,
     };
     use crate::api::dto::{Commit, CommitListResponse};
@@ -5875,6 +5919,12 @@ mod import_path_prompt_tests {
         assert_eq!(draft.projects(), vec!["project-a".to_string()]);
         draft.set_scope("owner");
         assert_eq!(draft.scope(), "write");
+    }
+
+    #[test]
+    fn persisted_draft_keeps_original_revision_for_conflict_detection() {
+        assert_eq!(draft_base_revision("server-rev", ""), "server-rev");
+        assert_eq!(draft_base_revision("server-rev", "draft-rev"), "draft-rev");
     }
 
     #[cfg(unix)]
