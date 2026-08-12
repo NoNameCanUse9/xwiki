@@ -28,6 +28,7 @@ pub(crate) struct ParsedDocument {
 /// lets the TOC use ScrollHandle's item positioning without replacing the
 /// project's Markdown renderer.
 pub(crate) fn parse_document(source: &str) -> ParsedDocument {
+    let front_matter_end = yaml_front_matter_end(source).unwrap_or_default();
     let headings = to_mdast(source, &ParseOptions::default())
         .ok()
         .and_then(|root| match root {
@@ -35,15 +36,17 @@ pub(crate) fn parse_document(source: &str) -> ParsedDocument {
                 root.children
                     .iter()
                     .filter_map(|node| match node {
-                        Node::Heading(heading) if heading.depth <= 3 => {
-                            heading.position.as_ref().map(|position| {
+                        Node::Heading(heading) if heading.depth <= 3 => heading
+                            .position
+                            .as_ref()
+                            .filter(|position| position.start.offset >= front_matter_end)
+                            .map(|position| {
                                 (
                                     position.start.offset,
                                     heading.depth,
                                     heading_text(&heading.children),
                                 )
-                            })
-                        }
+                            }),
                         _ => None,
                     })
                     .filter(|(_, _, text)| !text.is_empty())
@@ -89,6 +92,32 @@ pub(crate) fn parse_document(source: &str) -> ParsedDocument {
     }
 
     ParsedDocument { entries, sections }
+}
+
+/// Returns the byte offset immediately after a leading YAML front matter block.
+///
+/// This mirrors the server's rendering rule: only a delimiter at the beginning
+/// of the file with a matching `---` or `...` delimiter counts as metadata.
+fn yaml_front_matter_end(source: &str) -> Option<usize> {
+    let content = source.strip_prefix('\u{feff}').unwrap_or(source);
+    let mut offset = source.len() - content.len();
+    let mut lines = content.split_inclusive('\n');
+
+    let first = lines.next()?;
+    if first.trim_end_matches(['\r', '\n']) != "---" {
+        return None;
+    }
+    offset += first.len();
+
+    for line in lines {
+        offset += line.len();
+        match line.trim_end_matches(['\r', '\n']) {
+            "---" | "..." => return Some(offset),
+            _ => {}
+        }
+    }
+
+    None
 }
 
 fn heading_text(nodes: &[Node]) -> String {
@@ -158,6 +187,25 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["标题", "真标题"]
         );
+    }
+
+    #[test]
+    fn excludes_leading_yaml_metadata_from_the_outline() {
+        let parsed = parse_document(
+            "---\ntitle: 资讯管理\nmodule: 资讯管理\nversion: v1.0\nsummary: 平台资讯的创建、查询、详情、修改\n---\n\n# 资讯管理\n\n## 创建资讯",
+        );
+
+        assert_eq!(
+            parsed
+                .entries
+                .iter()
+                .map(|entry| entry.text.as_str())
+                .collect::<Vec<_>>(),
+            vec!["资讯管理", "创建资讯"]
+        );
+        assert!(parsed.sections[0]
+            .source
+            .starts_with("---\ntitle: 资讯管理"));
     }
 
     #[test]

@@ -14,7 +14,23 @@ gpui_platform = { git = "https://github.com/zed-industries/zed.git", features = 
   "wayland",
   "runtime_shaders",
 ] }
-gpui-component = { git = "https://github.com/longbridge/gpui-component" }
+gpui-component = { git = "https://github.com/longbridge/gpui-component", features = [
+  "tree-sitter-bash",
+  "tree-sitter-c",
+  "tree-sitter-cpp",
+  "tree-sitter-css",
+  "tree-sitter-go",
+  "tree-sitter-html",
+  "tree-sitter-java",
+  "tree-sitter-javascript",
+  "tree-sitter-markdown",
+  "tree-sitter-python",
+  "tree-sitter-rust",
+  "tree-sitter-toml",
+  "tree-sitter-tsx",
+  "tree-sitter-typescript",
+  "tree-sitter-yaml",
+] }
 gpui-component-assets = { git = "https://github.com/longbridge/gpui-component" }
 markdown = "1"
 base64 = "0.22"
