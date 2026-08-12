@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 )
 
 // CommitSummary is one row of the commit log.
@@ -208,9 +207,9 @@ func (s *Service) RevertCommit(ctx context.Context, projectID, sha, message stri
 	if p.IsArchived() {
 		return nil, ErrArchived
 	}
-	mu, _ := projectLocks.LoadOrStore(p.ID, &sync.Mutex{})
-	mu.(*sync.Mutex).Lock()
-	defer mu.(*sync.Mutex).Unlock()
+	mu := lockFor(p.ID)
+	mu.Lock()
+	defer mu.Unlock()
 
 	repo := &Repo{Dir: filepath.Join(s.reposRoot, p.ID, "repo.git")}
 	branch, err := repo.DefaultBranch(ctx)

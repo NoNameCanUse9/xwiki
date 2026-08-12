@@ -112,17 +112,20 @@ func (h *TransferHandler) ImportBundle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer file.Close()
+	const maxBundleBytes = 256 << 20
 	buf := make([]byte, 0, 1<<20)
 	chunk := make([]byte, 1<<20)
 	for {
 		n, err := file.Read(chunk)
-		buf = append(buf, chunk[:n]...)
+		if n > 0 {
+			if len(buf)+n > maxBundleBytes {
+				response.WriteError(w, r, http.StatusRequestEntityTooLarge, "bundle_too_large", "bundle exceeds 256 MiB")
+				return
+			}
+			buf = append(buf, chunk[:n]...)
+		}
 		if err != nil {
 			break
-		}
-		if len(buf) > 256<<20 {
-			response.WriteError(w, r, http.StatusRequestEntityTooLarge, "bundle_too_large", "bundle exceeds 256 MiB")
-			return
 		}
 	}
 	res, err := h.svc.ImportBundle(r.Context(), project.ImportBundleInput{Name: name, Bundle: buf})

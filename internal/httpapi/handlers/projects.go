@@ -112,7 +112,7 @@ func (h *ProjectHandler) ImportFolder(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		defer f.Close()
-		buf, err := io.ReadAll(f)
+		buf, err := io.ReadAll(io.LimitReader(f, project.MaxImportFileBytes+1))
 		if err != nil {
 			response.WriteError(w, r, http.StatusBadRequest, "invalid_upload", "cannot read uploaded file")
 			return

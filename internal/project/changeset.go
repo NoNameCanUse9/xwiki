@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"os"
 	"path"
 	"path/filepath"
@@ -63,8 +64,16 @@ const MaxChangesetFiles = 100
 // MaxDocBlobBytes caps the size of a single document (read and write).
 const MaxDocBlobBytes = 2 << 20 // 2 MiB
 
-// projectLocks serializes writes per project within this process.
-var projectLocks sync.Map // projectID -> *sync.Mutex
+// projectLocks serializes writes per project within this process. A striped
+// pool instead of a grow-only map: bounded memory no matter how many projects
+// are created and deleted over the process lifetime.
+var projectLocks [64]sync.Mutex
+
+func lockFor(projectID string) *sync.Mutex {
+	h := fnv.New32a()
+	h.Write([]byte(projectID))
+	return &projectLocks[h.Sum32()%uint32(len(projectLocks))]
+}
 
 // ErrArchived reports writes to an archived project.
 var ErrArchived = errors.New("project is archived")
@@ -93,9 +102,9 @@ func (s *Service) ApplyChangeset(ctx context.Context, projectID string, input Ch
 		return nil, ErrArchived
 	}
 
-	mu, _ := projectLocks.LoadOrStore(p.ID, &sync.Mutex{})
-	mu.(*sync.Mutex).Lock()
-	defer mu.(*sync.Mutex).Unlock()
+	mu := lockFor(p.ID)
+	mu.Lock()
+	defer mu.Unlock()
 
 	repo := &Repo{Dir: filepath.Join(s.reposRoot, p.ID, "repo.git")}
 	branch, err := repo.DefaultBranch(ctx)

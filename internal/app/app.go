@@ -94,6 +94,7 @@ func (a *App) Run(ctx context.Context) error {
 		Addr:              a.cfg.HTTPAddr,
 		Handler:           a.handler,
 		ReadHeaderTimeout: 5 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 	errCh := make(chan error, 1)
 	go func() { errCh <- srv.ListenAndServe() }()
