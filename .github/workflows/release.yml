@@ -91,9 +91,14 @@ jobs:
         id: version
         run: echo "tag=${GITHUB_REF_NAME//:/-}" >> "$GITHUB_OUTPUT" # app:v1.2.3 -> app-v1.2.3 (镜像 tag 不能含冒号)
 
+      # GHCR 要求仓库名小写；github.repository 的 owner 可能含大写（如 NoNameCanUse9）
+      - name: Lowercase image repository
+        id: repo
+        run: echo "name=${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
       - name: Build and push image
         uses: docker/build-push-action@v6
         with:
           context: .
           push: true
-          tags: ghcr.io/${{ github.repository }}:${{ steps.version.outputs.tag }}
+          tags: ghcr.io/${{ steps.repo.outputs.name }}:${{ steps.version.outputs.tag }}
