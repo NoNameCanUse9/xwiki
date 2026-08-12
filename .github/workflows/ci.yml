@@ -23,3 +23,36 @@ jobs:
       - run: pnpm build
         working-directory: web
       - run: docker build -t xwiki-ci .
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { path: server, ref: main }
+      - uses: actions/checkout@v4
+        with: { path: app, ref: app }
+      - uses: actions/setup-go@v5
+        with: { go-version: '1.24' }
+      - uses: dtolnay/rust-toolchain@stable
+        with: { components: rustfmt }
+      - name: Install GUI build deps
+        run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev libfreetype6-dev libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev
+      - name: Build server
+        run: go build -o xwiki ./cmd/xwiki
+        working-directory: server
+      - name: Seed admin and start server
+        working-directory: server
+        run: |
+          git config --global user.email ci@xwiki.local
+          git config --global user.name "xwiki ci"
+          XWIKI_DATA_DIR=/tmp/xwiki-data ./xwiki admin create -username admin -password secret123
+          XWIKI_DATA_DIR=/tmp/xwiki-data XWIKI_HTTP_ADDR=127.0.0.1:9090 ./xwiki serve &
+          for i in $(seq 1 60); do
+            curl -sf http://127.0.0.1:9090/api/v1/meta >/dev/null && exit 0
+            sleep 1
+          done
+          exit 1
+      - name: Run cross-branch contract tests
+        working-directory: app
+        env:
+          XWIKI_TEST_SERVER: http://127.0.0.1:9090
+        run: cargo test e2e_contracts -- --ignored
