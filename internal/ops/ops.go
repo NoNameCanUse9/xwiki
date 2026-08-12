@@ -209,6 +209,14 @@ func BackupRestore(input, dataDir string) error {
 
 func Doctor(dataDir string) error {
 	var problems []string
+	if b, err := os.ReadFile(filepath.Join(dataDir, ".xwiki.lock")); err == nil {
+		pid, parseErr := strconv.Atoi(strings.TrimSpace(string(b)))
+		if parseErr == nil && processExists(pid) {
+			problems = append(problems, fmt.Sprintf("data directory is locked by pid %d", pid))
+		} else {
+			problems = append(problems, "stale data directory lock")
+		}
+	}
 	if _, err := exec.LookPath("git"); err != nil {
 		problems = append(problems, "git is not available")
 	} else if out, err := exec.Command("git", "--version").CombinedOutput(); err != nil {
@@ -224,6 +232,9 @@ func Doctor(dataDir string) error {
 		problems = append(problems, err.Error())
 	}
 	if err := checkRepositories(dataDir, true); err != nil {
+		problems = append(problems, err.Error())
+	}
+	if err := checkProjectRepositories(dataDir); err != nil {
 		problems = append(problems, err.Error())
 	}
 	if len(problems) > 0 {
@@ -431,6 +442,54 @@ func checkRepositories(dataDir string, strict bool) error {
 		cmd := exec.Command("git", "--git-dir", repo, "fsck", "--full")
 		if out, err := cmd.CombinedOutput(); err != nil {
 			return fmt.Errorf("git fsck %s: %v: %s", ent.Name(), err, strings.TrimSpace(string(out)))
+		}
+		if out, err := exec.Command("git", "--git-dir", repo, "worktree", "prune", "--dry-run").CombinedOutput(); err == nil && strings.TrimSpace(string(out)) != "" {
+			return fmt.Errorf("残留 worktree %s: %s", ent.Name(), strings.TrimSpace(string(out)))
+		}
+	}
+	return nil
+}
+
+func checkProjectRepositories(dataDir string) error {
+	dbPath := filepath.Join(dataDir, "xwiki.db")
+	if _, err := os.Stat(dbPath); errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		return fmt.Errorf("sqlite project check: %w", err)
+	}
+	defer db.Close()
+	rows, err := db.Query("SELECT id, repo_dir FROM projects")
+	if err != nil {
+		return fmt.Errorf("project/repository query: %w", err)
+	}
+	defer rows.Close()
+	known := map[string]bool{}
+	for rows.Next() {
+		var id, repoDir string
+		if err := rows.Scan(&id, &repoDir); err != nil {
+			return err
+		}
+		known[id] = true
+		if _, err := os.Stat(filepath.Join(dataDir, repoDir)); err != nil {
+			return fmt.Errorf("project %s repository missing: %w", id, err)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	root := filepath.Join(dataDir, "repos")
+	entries, err := os.ReadDir(root)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if entry.IsDir() && entry.Name() != ".trash" && !known[entry.Name()] {
+			return fmt.Errorf("orphan repository: %s", entry.Name())
 		}
 	}
 	return nil
