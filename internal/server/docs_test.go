@@ -112,7 +112,7 @@ func TestDocsTreePagesHome(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	appendDocToRepo(t, repo.Dir, "docs/guide.md", "# Guide\n\nhello *world*\n", "main")
+	appendDocToRepo(t, repo.Dir, "docs/guide.md", "---\ntitle: Guide\nmodule: docs\nversion: v1.0\nsummary: hello world\n---\n\n# Guide\n\nhello *world*\n", "main")
 
 	// Tree listing (root + docs/).
 	rec := apiRequest(h, http.MethodGet,
@@ -158,7 +158,8 @@ func TestDocsTreePagesHome(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil {
 		t.Fatal(err)
 	}
-	if page.Path != "docs/guide.md" || page.Format != "raw" || !strings.Contains(page.Raw, "# Guide") {
+	if page.Path != "docs/guide.md" || page.Format != "raw" ||
+		!strings.Contains(page.Raw, "title: Guide") || !strings.Contains(page.Raw, "# Guide") {
 		t.Fatalf("raw page wrong: %+v", page)
 	}
 
@@ -175,7 +176,8 @@ func TestDocsTreePagesHome(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &htmlPage); err != nil {
 		t.Fatal(err)
 	}
-	if htmlPage.Format != "html" || !strings.Contains(htmlPage.Content, "<h1>Guide</h1>") ||
+	if htmlPage.Format != "html" || strings.Contains(htmlPage.Content, "title: Guide") ||
+		!strings.Contains(htmlPage.Content, "<h1>Guide</h1>") ||
 		!strings.Contains(htmlPage.Content, "<em>world</em>") {
 		t.Fatalf("html page wrong: %+v", htmlPage.Content)
 	}
