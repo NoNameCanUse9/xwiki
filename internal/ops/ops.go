@@ -155,6 +155,14 @@ func BackupCreate(dataDir, output, service string) error {
 }
 
 func BackupRestore(input, dataDir string) error {
+	var lock *DataLock
+	if _, err := os.Stat(dataDir); err == nil {
+		lock, err = AcquireDataLock(dataDir)
+		if err != nil {
+			return err
+		}
+		defer lock.Close()
+	}
 	if _, err := os.Stat(dataDir); err == nil {
 		ents, readErr := os.ReadDir(dataDir)
 		if readErr != nil {

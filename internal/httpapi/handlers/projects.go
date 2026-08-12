@@ -61,6 +61,11 @@ func (h *ProjectHandler) Create(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	if h.searchSvc != nil {
+		if _, err := h.searchSvc.ReindexProject(r.Context(), p.ID); err != nil {
+			h.log.Warn("reindex after project create failed", "error", err, "project_id", p.ID)
+		}
+	}
 	response.WriteJSON(w, http.StatusCreated, map[string]any{"project": p})
 }
 
@@ -257,6 +262,11 @@ func (h *ProjectHandler) Rename(w http.ResponseWriter, r *http.Request) {
 			response.WriteError(w, r, http.StatusInternalServerError, "internal_error", "could not rename project")
 		}
 		return
+	}
+	if h.searchSvc != nil {
+		if _, err := h.searchSvc.ReindexProject(r.Context(), projectID); err != nil {
+			h.log.Warn("reindex after project rename failed", "error", err, "project_id", projectID)
+		}
 	}
 	response.WriteJSON(w, http.StatusOK, map[string]any{"project": p})
 }
