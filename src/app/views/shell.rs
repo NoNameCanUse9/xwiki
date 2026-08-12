@@ -2,10 +2,10 @@
 
 use gpui::*;
 use gpui_component::scroll::ScrollableElement as _;
-use gpui_component::{button::*, *};
+use gpui_component::{button::*, tooltip::Tooltip, *};
 
 use crate::app::{Screen, XWikiApp};
-use crate::ui::{app_icon, mono_label, tokens};
+use crate::ui::{app_icon, mono_label, refresh_icon, tokens};
 
 #[derive(Clone)]
 struct ApiOperationEntry {
@@ -1044,6 +1044,24 @@ impl XWikiApp {
                             .tooltip(format!("快速打开 ({} P)", tokens::MOD_KEY))
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.toggle_quick_open(window, cx)
+                            })),
+                    )
+                    .child(
+                        div()
+                            .id("shell-refresh")
+                            .size(px(28.0))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded(px(tokens::RADIUS_SMALL))
+                            .cursor_pointer()
+                            .hover(|style| style.bg(theme.list_hover))
+                            .child(refresh_icon().size(px(16.0)))
+                            .tooltip(|window, cx| Tooltip::new("刷新当前页面").build(window, cx))
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                if !this.editing {
+                                    this.refresh_current_view(cx);
+                                }
                             })),
                     )
                     .child(

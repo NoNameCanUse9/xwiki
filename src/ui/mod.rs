@@ -18,13 +18,28 @@ use gpui_component::text::TextView;
 use gpui_component::IconName;
 
 const APP_ICON_SVG: &[u8] = include_bytes!("../../assets/xwiki-icon.svg");
+const REFRESH_ICON_SVG: &[u8] = include_bytes!("../../assets/refresh.svg");
 static APP_ICON_IMAGE: OnceLock<Arc<Image>> = OnceLock::new();
+static REFRESH_ICON_IMAGE: OnceLock<Arc<Image>> = OnceLock::new();
 
 /// The XWiki brand mark, embedded at compile time so packaged builds do
 /// not depend on the source tree at runtime.
 pub fn app_icon() -> Img {
     let image = APP_ICON_IMAGE
         .get_or_init(|| Arc::new(Image::from_bytes(ImageFormat::Svg, APP_ICON_SVG.to_vec())))
+        .clone();
+    img(image).flex_none()
+}
+
+/// Standard two-arrow refresh mark used by the shell toolbar.
+pub fn refresh_icon() -> Img {
+    let image = REFRESH_ICON_IMAGE
+        .get_or_init(|| {
+            Arc::new(Image::from_bytes(
+                ImageFormat::Svg,
+                REFRESH_ICON_SVG.to_vec(),
+            ))
+        })
         .clone();
     img(image).flex_none()
 }

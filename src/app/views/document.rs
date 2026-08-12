@@ -1,7 +1,6 @@
 //! Document workspace (plan §5): render methods for this screen/region; state and logic
 //! stay in `crate::app` (mod.rs).
 
-use gpui::prelude::FluentBuilder;
 use gpui::InteractiveElement;
 use gpui::*;
 use gpui_component::{
@@ -9,10 +8,10 @@ use gpui_component::{
     input::Input,
     menu::{ContextMenuExt, DropdownMenu},
     scroll::ScrollableElement as _,
+    tooltip::Tooltip,
     *,
 };
 
-use crate::app::project_changes::PatchLineKind;
 use crate::app::{
     DocDeleteAction, DocRenameAction, EditDocAction, ProjectExportAction, TreeContextAction,
     XWikiApp,
@@ -419,89 +418,43 @@ impl XWikiApp {
     }
 
     fn render_project_changes(&self, cx: &mut Context<Self>) -> AnyElement {
-        const MAX_RENDERED_DIFF_LINES: usize = 400;
-        const VISIBLE_COMMITS: usize = 5;
-
         let theme = cx.theme().clone();
-        let mut timeline = div()
-            .flex_none()
-            .h(px(236.0))
-            .mt_4()
-            .w_full()
-            .rounded(px(tokens::RADIUS))
-            .border_1()
-            .border_color(theme.border)
-            .overflow_hidden()
-            .child(
-                div()
-                    .px_4()
-                    .py_2()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .bg(theme.sidebar)
-                    .child(mono_label("CHANGES · ROADMAP").text_color(theme.accent))
-                    .child(
-                        mono_label(format!("已加载 {} 次", self.project_commits.len()))
-                            .text_color(theme.muted_foreground),
-                    ),
-            );
+        let mut timeline = div().size_full().v_flex().child(
+            div()
+                .px_2()
+                .py_1()
+                .flex()
+                .items_center()
+                .child(mono_label("CHANGES · ROADMAP").text_color(theme.accent)),
+        );
 
-        if self.project_commits.is_empty() {
-            let content = if self.project_changes_loading {
-                "加载项目变更…".to_string()
-            } else if let Some(error) = &self.project_changes_error {
-                error.clone()
-            } else {
-                "还没有文档变更".to_string()
-            };
+        if self.project_commits.is_empty() && self.project_changes_error.is_some() {
             timeline = timeline.child(
                 div()
-                    .border_t_1()
-                    .border_color(theme.border)
-                    .px_4()
-                    .py_4()
-                    .text_sm()
-                    .text_color(if self.project_changes_error.is_some() {
-                        theme.danger
-                    } else {
-                        theme.muted_foreground
-                    })
-                    .child(content),
+                    .px_2()
+                    .text_xs()
+                    .text_color(theme.danger)
+                    .child(self.project_changes_error.clone().unwrap_or_default()),
             );
-            if self.project_changes_error.is_some() {
-                timeline = timeline.child(
-                    Button::new("retry-project-changes")
-                        .ghost()
-                        .label("重试")
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.load_project_changes(true, cx);
-                        })),
-                );
-            }
         }
 
         if !self.project_commits.is_empty() {
-            let commits: Vec<_> = self.project_commits.iter().take(VISIBLE_COMMITS).collect();
-            let selected_sha = self.project_change_expanded.as_deref();
-            let mut nodes = div()
-                .flex_none()
-                .w_full()
-                .px_4()
-                .pt_4()
-                .flex()
-                .items_start();
+            const NODE_WIDTH: f32 = 168.0;
+            const NODE_HEIGHT: f32 = 60.0;
+            const NODE_SLOT_HEIGHT: f32 = 18.0;
 
-            for (index, commit) in commits.iter().enumerate() {
+            let commit_count = self.project_commits.len();
+            let mut nodes = div().flex().flex_none().h(px(NODE_HEIGHT));
+
+            for (index, commit) in self.project_commits.iter().enumerate() {
                 let sha = commit.sha.clone();
-                let selected = selected_sha == Some(sha.as_str());
-                let toggle_sha = sha.clone();
-                let line_color = if index == 0 || selected {
+                let is_top = index % 2 == 0;
+                let line_color = if index == 0 {
                     theme.accent.opacity(0.7)
                 } else {
                     theme.border
                 };
-                let node_color = if selected || index == 0 {
+                let node_color = if index == 0 {
                     theme.accent
                 } else {
                     theme.muted_foreground
@@ -511,295 +464,199 @@ impl XWikiApp {
                 } else {
                     commit.message.clone()
                 };
+                let title = tokens::truncate(
+                    message.lines().next().unwrap_or("（无提交信息）").trim(),
+                    24,
+                );
+                let author = commit.author.clone();
+                let date = commit.date.clone();
+                let tooltip_sha = sha.clone();
+                let tooltip_theme = theme.clone();
 
-                let mut track = div().w_full().flex().items_center();
+                let mut track = div().w_full().h(px(24.0)).flex().items_center();
                 if index > 0 {
                     track = track.child(div().flex_1().h(px(1.0)).bg(line_color));
                 }
                 track = track.child(
                     div()
-                        .size(px(12.0))
+                        .size(px(14.0))
                         .flex_none()
-                        .rounded(px(6.0))
+                        .rounded(px(7.0))
                         .border_2()
                         .border_color(node_color)
-                        .bg(if selected { node_color } else { theme.sidebar }),
+                        .bg(if index == 0 {
+                            node_color
+                        } else {
+                            theme.sidebar
+                        }),
                 );
-                if index + 1 < commits.len() {
+                if index + 1 < commit_count {
                     track = track.child(div().flex_1().h(px(1.0)).bg(theme.border));
                 }
+
+                let make_title = || {
+                    div()
+                        .w_full()
+                        .h(px(NODE_SLOT_HEIGHT))
+                        .px_2()
+                        .text_center()
+                        .text_xs()
+                        .whitespace_nowrap()
+                        .overflow_hidden()
+                        .text_ellipsis()
+                        .text_color(if index == 0 {
+                            theme.foreground
+                        } else {
+                            theme.muted_foreground
+                        })
+                        .child(title.clone())
+                };
+                let top_slot = if is_top {
+                    div()
+                        .h(px(NODE_SLOT_HEIGHT))
+                        .flex()
+                        .items_end()
+                        .justify_center()
+                        .child(make_title())
+                } else {
+                    div().h(px(NODE_SLOT_HEIGHT))
+                };
+                let bottom_slot = if is_top {
+                    div().h(px(NODE_SLOT_HEIGHT))
+                } else {
+                    div()
+                        .h(px(NODE_SLOT_HEIGHT))
+                        .flex()
+                        .items_start()
+                        .justify_center()
+                        .child(make_title())
+                };
 
                 nodes = nodes.child(
                     div()
                         .id(format!("project-roadmap-node-{sha}"))
-                        .flex_1()
-                        .min_w(px(0.0))
+                        .w(px(NODE_WIDTH))
+                        .flex_none()
+                        .h(px(NODE_HEIGHT))
                         .v_flex()
-                        .items_center()
-                        .cursor_pointer()
+                        .child(top_slot)
                         .child(track)
-                        .child(
-                            div()
-                                .w_full()
-                                .mt_2()
-                                .px_1()
-                                .text_center()
-                                .text_xs()
-                                .font_weight(if selected {
-                                    FontWeight::SEMIBOLD
-                                } else {
-                                    FontWeight::NORMAL
-                                })
-                                .text_color(if selected {
-                                    theme.foreground
-                                } else {
-                                    theme.muted_foreground
-                                })
-                                .whitespace_nowrap()
-                                .overflow_hidden()
-                                .text_ellipsis()
-                                .child(message),
-                        )
-                        .child(
-                            div()
-                                .w_full()
-                                .px_1()
-                                .text_center()
-                                .font_family(tokens::FONT_MONO)
-                                .text_xs()
-                                .text_color(theme.muted_foreground)
-                                .whitespace_nowrap()
-                                .overflow_hidden()
-                                .text_ellipsis()
-                                .child(format!("{} · {}", commit.author, commit.date)),
-                        )
-                        .child(
-                            div()
-                                .mt_1()
-                                .font_family(tokens::FONT_MONO)
-                                .text_xs()
-                                .text_color(if selected {
-                                    theme.accent
-                                } else {
-                                    theme.muted_foreground
-                                })
-                                .child(sha.chars().take(8).collect::<String>()),
-                        )
-                        .hover(|style| style.opacity(0.82))
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.toggle_project_change(&toggle_sha, cx);
-                        })),
-                );
-            }
-
-            timeline = timeline.child(nodes).child(
-                div()
-                    .flex_none()
-                    .px_4()
-                    .pt_2()
-                    .text_xs()
-                    .text_color(theme.muted_foreground)
-                    .child("点击节点查看该版本涉及的文档变更"),
-            );
-        }
-
-        if self.project_change_expanded.is_some() {
-            let mut detail = div()
-                .flex_1()
-                .min_h(px(0.0))
-                .mt_2()
-                .border_t_1()
-                .border_color(theme.border)
-                .px_4()
-                .py_3()
-                .v_flex()
-                .gap_3()
-                .overflow_y_scrollbar();
-
-            if self.project_change_loading {
-                detail =
-                    detail.child(mono_label("加载变更详情…").text_color(theme.muted_foreground));
-            } else if let Some(error) = &self.project_change_error {
-                detail = detail.child(
-                    div()
-                        .text_xs()
-                        .text_color(theme.danger)
-                        .child(error.clone()),
-                );
-            } else if self.project_change_files.is_empty() {
-                detail = detail.child(
-                    div()
-                        .text_xs()
-                        .text_color(theme.muted_foreground)
-                        .child("本次提交没有可显示的文本变更"),
-                );
-            } else {
-                let mut rendered_lines = 0usize;
-                for file in &self.project_change_files {
-                    let file_path = file.path.clone();
-                    let open_path = file_path.clone();
-                    let mut file_panel = div()
-                        .rounded(px(tokens::RADIUS_SMALL))
-                        .border_1()
-                        .border_color(theme.border)
-                        .overflow_hidden()
-                        .child(
-                            div()
-                                .id(format!("project-change-file-{file_path}"))
-                                .px_3()
-                                .py_2()
-                                .flex()
-                                .items_center()
-                                .gap_2()
-                                .cursor_pointer()
-                                .bg(theme.sidebar)
-                                .hover(|style| style.bg(theme.list_hover))
-                                .child(
-                                    Icon::new(IconName::File)
-                                        .with_size(px(14.0))
-                                        .text_color(theme.accent),
-                                )
-                                .child(
-                                    div()
-                                        .font_family(tokens::FONT_MONO)
-                                        .text_xs()
-                                        .text_color(theme.accent)
-                                        .child(file_path),
-                                )
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.open_doc(&open_path, cx);
-                                })),
-                        );
-
-                    for hunk in &file.hunks {
-                        if rendered_lines >= MAX_RENDERED_DIFF_LINES {
-                            break;
-                        }
-                        let location_line = if hunk.new_start > 0 {
-                            hunk.new_start
-                        } else {
-                            hunk.old_start
-                        };
-                        let mut hunk_panel = div().border_t_1().border_color(theme.border).child(
-                            div()
-                                .px_3()
-                                .py_1()
-                                .flex()
-                                .items_center()
-                                .gap_3()
-                                .bg(theme.accent.opacity(0.08))
-                                .child(
-                                    div()
-                                        .font_family(tokens::FONT_MONO)
-                                        .text_xs()
-                                        .text_color(theme.accent)
-                                        .child(format!("{}:L{}", file.path, location_line)),
-                                )
-                                .when(!hunk.heading.is_empty(), |row| {
-                                    row.child(
-                                        div()
-                                            .text_xs()
-                                            .text_color(theme.muted_foreground)
-                                            .child(format!("§ {}", hunk.heading)),
-                                    )
-                                }),
-                        );
-                        for line in &hunk.lines {
-                            if rendered_lines >= MAX_RENDERED_DIFF_LINES {
-                                break;
-                            }
-                            rendered_lines += 1;
-                            let (marker, number, color, background) = match line.kind {
-                                PatchLineKind::Add => (
-                                    "+",
-                                    line.new_line,
-                                    theme.success,
-                                    theme.success.opacity(0.1),
-                                ),
-                                PatchLineKind::Delete => {
-                                    ("−", line.old_line, theme.danger, theme.danger.opacity(0.1))
-                                }
-                                PatchLineKind::Context => (
-                                    " ",
-                                    line.new_line,
-                                    theme.muted_foreground,
-                                    theme.transparent,
-                                ),
-                            };
-                            hunk_panel = hunk_panel.child(
+                        .child(bottom_slot)
+                        .tooltip(move |window, cx| {
+                            let message = message.clone();
+                            let author = author.clone();
+                            let date = date.clone();
+                            let tooltip_sha = tooltip_sha.clone();
+                            let tooltip_theme = tooltip_theme.clone();
+                            Tooltip::element(move |_, _| {
                                 div()
-                                    .px_3()
-                                    .py_0p5()
-                                    .flex()
-                                    .gap_2()
-                                    .bg(background)
-                                    .font_family(tokens::FONT_MONO)
-                                    .text_xs()
-                                    .text_color(color)
-                                    .child(div().w(px(42.0)).text_right().child(
-                                        number.map(|value| value.to_string()).unwrap_or_default(),
-                                    ))
-                                    .child(div().w(px(12.0)).child(marker))
-                                    .child(line.content.clone()),
-                            );
-                        }
-                        file_panel = file_panel.child(hunk_panel);
-                    }
-                    detail = detail.child(file_panel);
-                    if rendered_lines >= MAX_RENDERED_DIFF_LINES {
-                        break;
-                    }
-                }
-                if rendered_lines >= MAX_RENDERED_DIFF_LINES {
-                    detail =
-                        detail.child(div().text_xs().text_color(theme.muted_foreground).child(
-                            "Diff 较大，仅显示前 400 行；可通过 commit SHA 获取完整 patch。",
-                        ));
-                }
+                                    .v_flex()
+                                    .gap_1()
+                                    .max_w(px(360.0))
+                                    .child(
+                                        div()
+                                            .text_sm()
+                                            .font_weight(FontWeight::SEMIBOLD)
+                                            .whitespace_normal()
+                                            .text_color(tooltip_theme.popover_foreground)
+                                            .child(message.clone()),
+                                    )
+                                    .child(
+                                        div()
+                                            .font_family(tokens::FONT_MONO)
+                                            .text_xs()
+                                            .text_color(tooltip_theme.muted_foreground)
+                                            .child(format!("{} · {}", author, date)),
+                                    )
+                                    .child(
+                                        div()
+                                            .font_family(tokens::FONT_MONO)
+                                            .text_xs()
+                                            .text_color(tooltip_theme.accent)
+                                            .child(tooltip_sha.clone()),
+                                    )
+                            })
+                            .build(window, cx)
+                        }),
+                );
             }
-            timeline = timeline.child(detail);
-        } else if !self.project_commits.is_empty() {
+
+            let scroll_handle = self.project_changes_scroll.clone();
+            let scroll_strip = div()
+                .relative()
+                .flex_1()
+                .min_w(px(0.0))
+                .h(px(NODE_HEIGHT))
+                .child(
+                    div()
+                        .id("project-roadmap-scroll-area")
+                        .size_full()
+                        .track_scroll(&scroll_handle)
+                        .overflow_x_scroll()
+                        .child(nodes),
+                )
+                .horizontal_scrollbar(&scroll_handle);
+            let scroll_left_handle = self.project_changes_scroll.clone();
+            let scroll_right_handle = self.project_changes_scroll.clone();
+            let scroll_left = div()
+                .id("project-roadmap-scroll-left")
+                .flex_none()
+                .size(px(24.0))
+                .flex()
+                .items_center()
+                .justify_center()
+                .cursor_pointer()
+                .child(
+                    Icon::new(IconName::ArrowLeft)
+                        .with_size(px(14.0))
+                        .text_color(theme.muted_foreground),
+                )
+                .on_click(cx.listener(move |_, _, _, cx| {
+                    let offset = scroll_left_handle.offset();
+                    let next_x = offset.x + px(240.0);
+                    scroll_left_handle.set_offset(point(
+                        if next_x > px(0.0) { px(0.0) } else { next_x },
+                        offset.y,
+                    ));
+                    cx.notify();
+                }));
+            let scroll_right = div()
+                .id("project-roadmap-scroll-right")
+                .flex_none()
+                .size(px(24.0))
+                .flex()
+                .items_center()
+                .justify_center()
+                .cursor_pointer()
+                .child(
+                    Icon::new(IconName::ArrowRight)
+                        .with_size(px(14.0))
+                        .text_color(theme.muted_foreground),
+                )
+                .on_click(cx.listener(move |_, _, _, cx| {
+                    let offset = scroll_right_handle.offset();
+                    let max_x = scroll_right_handle.max_offset().x;
+                    let next_x = offset.x - px(240.0);
+                    scroll_right_handle.set_offset(point(
+                        if next_x < -max_x { -max_x } else { next_x },
+                        offset.y,
+                    ));
+                    cx.notify();
+                }));
+
             timeline = timeline.child(
                 div()
-                    .flex_1()
-                    .min_h(px(0.0))
+                    .flex_none()
                     .flex()
                     .items_center()
-                    .justify_center()
-                    .text_xs()
-                    .text_color(theme.muted_foreground)
-                    .child("选择一个节点查看文件变更"),
+                    .gap_1()
+                    .px_2()
+                    .child(scroll_left)
+                    .child(scroll_strip)
+                    .child(scroll_right),
             );
         }
 
-        if let Some(error) = &self.project_changes_error {
-            timeline = timeline.child(
-                div()
-                    .flex_none()
-                    .px_4()
-                    .py_1()
-                    .text_xs()
-                    .text_color(theme.danger)
-                    .child(error.clone()),
-            );
-        }
-        if self.project_changes_has_more
-            || (self.project_changes_loading && !self.project_commits.is_empty())
-        {
-            timeline = timeline.child(
-                Button::new("load-older-project-changes")
-                    .ghost()
-                    .label(if self.project_changes_loading {
-                        "加载中…"
-                    } else {
-                        "加载更早的改动"
-                    })
-                    .disabled(self.project_changes_loading)
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.load_project_changes(false, cx);
-                    })),
-            );
-        }
         timeline.into_any_element()
     }
 
@@ -857,14 +714,88 @@ impl XWikiApp {
         } else {
             format!("docs / {}", self.tree_path)
         };
-        let mut browser_content = div()
+        let browser_content = div()
             .w(px(tokens::MEASURE))
             .max_w_full()
             .mx_auto()
             .child(self.render_tree(cx));
-        if self.tree_path.is_empty() {
-            browser_content = browser_content.child(self.render_project_changes(cx));
-        }
+        let file_list = if self.tree_loading {
+            div()
+                .flex_1()
+                .min_h(px(0.0))
+                .p_6()
+                .v_flex()
+                .gap_3()
+                .children((0..6).map(|i| {
+                    div()
+                        .id(format!("browser-skeleton-{i}"))
+                        .h(px(34.0))
+                        .w_full()
+                        .rounded(px(tokens::RADIUS_SMALL))
+                        .bg(theme.skeleton)
+                }))
+                .into_any_element()
+        } else if let Some(err) = &self.tree_error {
+            div()
+                .flex_1()
+                .flex()
+                .flex_col()
+                .items_center()
+                .justify_center()
+                .gap_3()
+                .child(mono_label("目录加载失败").text_color(theme.danger))
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(theme.muted_foreground)
+                        .child(err.clone()),
+                )
+                .child(
+                    Button::new("retry-browser-tree")
+                        .rounded(px(tokens::RADIUS))
+                        .icon(IconName::Redo2)
+                        .label("重试")
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            let path = this.tree_path.clone();
+                            this.load_tree(&path, cx);
+                        })),
+                )
+                .into_any_element()
+        } else {
+            div()
+                .flex_1()
+                .min_h(px(0.0))
+                .overflow_y_scrollbar()
+                .p_6()
+                .child(browser_content)
+                .into_any_element()
+        };
+        let roadmap = if self.tree_path.is_empty() {
+            div()
+                .flex_none()
+                .h(relative(0.2))
+                .w_full()
+                .px_6()
+                .child(
+                    div()
+                        .w(px(tokens::MEASURE))
+                        .max_w_full()
+                        .h_full()
+                        .mx_auto()
+                        .child(self.render_project_changes(cx)),
+                )
+                .into_any_element()
+        } else {
+            div().into_any_element()
+        };
+        let content = div()
+            .flex_1()
+            .min_h(px(0.0))
+            .v_flex()
+            .overflow_hidden()
+            .child(file_list)
+            .child(roadmap);
+
         div()
             .size_full()
             .flex()
@@ -938,55 +869,7 @@ impl XWikiApp {
                             })),
                     ),
             )
-            .child(if self.tree_loading {
-                div()
-                    .flex_1()
-                    .p_6()
-                    .v_flex()
-                    .gap_3()
-                    .children((0..6).map(|i| {
-                        div()
-                            .id(format!("browser-skeleton-{i}"))
-                            .h(px(34.0))
-                            .w_full()
-                            .rounded(px(tokens::RADIUS_SMALL))
-                            .bg(theme.skeleton)
-                    }))
-                    .into_any_element()
-            } else if let Some(err) = &self.tree_error {
-                div()
-                    .flex_1()
-                    .flex()
-                    .flex_col()
-                    .items_center()
-                    .justify_center()
-                    .gap_3()
-                    .child(mono_label("目录加载失败").text_color(theme.danger))
-                    .child(
-                        div()
-                            .text_sm()
-                            .text_color(theme.muted_foreground)
-                            .child(err.clone()),
-                    )
-                    .child(
-                        Button::new("retry-browser-tree")
-                            .rounded(px(tokens::RADIUS))
-                            .icon(IconName::Redo2)
-                            .label("重试")
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                let path = this.tree_path.clone();
-                                this.load_tree(&path, cx);
-                            })),
-                    )
-                    .into_any_element()
-            } else {
-                div()
-                    .flex_1()
-                    .overflow_y_scrollbar()
-                    .p_6()
-                    .child(browser_content)
-                    .into_any_element()
-            })
+            .child(content)
     }
 
     pub(crate) fn render_doc_rail(&self, cx: &mut Context<Self>) -> Div {
