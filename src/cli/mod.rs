@@ -562,7 +562,7 @@ async fn cmd_history(args: &[String]) -> i32 {
                 .windows(2)
                 .find(|w| w[0] == "--limit")
                 .and_then(|w| w[1].parse().ok())
-                .unwrap_or(50);
+                .unwrap_or(20);
             let offset = args
                 .windows(2)
                 .find(|w| w[0] == "--offset")
