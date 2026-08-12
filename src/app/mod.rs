@@ -3750,7 +3750,27 @@ impl XWikiApp {
     fn resolve_conflict_force(&mut self, cx: &mut Context<Self>) {
         self.conflict = None;
         self.save_error = None;
-        self.save_edit(cx);
+        let (Some(client), Some(project)) = (self.client.clone(), self.selected_project.clone())
+        else {
+            return;
+        };
+        cx.spawn(
+            async move |this, cx| match client.revision(&project).await {
+                Ok(revision) => {
+                    let _ = this.update(cx, |app, cx| {
+                        app.edit_base_revision = Some(revision);
+                        app.save_edit(cx);
+                    });
+                }
+                Err(error) => {
+                    let _ = this.update(cx, |app, cx| {
+                        app.save_error = Some(format!("读取最新 revision 失败: {error}"));
+                        cx.notify();
+                    });
+                }
+            },
+        )
+        .detach();
     }
 
     /// Abandon the edit, releasing the lock.
