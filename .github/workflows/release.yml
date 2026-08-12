@@ -102,4 +102,6 @@ jobs:
         with:
           context: .
           push: true
-          tags: ghcr.io/${{ steps.repo.outputs.name }}:${{ steps.version.outputs.tag }}
+          tags: |
+            ghcr.io/${{ steps.repo.outputs.name }}:${{ steps.version.outputs.tag }}
+            ghcr.io/${{ steps.repo.outputs.name }}:latest
