@@ -7,6 +7,21 @@
 use crate::api::{ApiError, Client};
 use crate::config;
 
+fn read_password(prompt: &str) -> String {
+    print!("{prompt}");
+    std::io::Write::flush(&mut std::io::stdout()).ok();
+    #[cfg(unix)]
+    let _ = std::process::Command::new("stty").arg("-echo").status();
+    let mut s = String::new();
+    std::io::stdin().read_line(&mut s).ok();
+    #[cfg(unix)]
+    {
+        let _ = std::process::Command::new("stty").arg("echo").status();
+        println!();
+    }
+    s.trim().to_string()
+}
+
 #[cfg(test)]
 mod tests;
 
@@ -22,19 +37,16 @@ fn server_from_args(args: &[String]) -> String {
 /// Builds a client from --server / saved config, with a bearer token from
 /// XWIKI_TOKEN when set.
 fn client(args: &[String]) -> Client {
-    Client::with_token(
-        &server_from_args(args),
-        std::env::var("XWIKI_TOKEN").ok(),
-    )
+    Client::with_token(&server_from_args(args), std::env::var("XWIKI_TOKEN").ok())
 }
 
-/// --prefix values (repeatable); defaults to ["docs"] so a write token can
-/// touch the conventional docs tree without extra flags.
-fn token_prefixes(args: &[String]) -> Vec<String> {
+/// --project values (repeatable). An explicit project scope prevents tokens
+/// from accidentally receiving access to every project.
+fn token_projects(args: &[String]) -> Vec<String> {
     let mut out = Vec::new();
     let mut i = 0;
     while i < args.len() {
-        if args[i] == "--prefix" {
+        if args[i] == "--project" {
             if let Some(p) = args.get(i + 1) {
                 out.push(p.clone());
                 i += 2;
@@ -42,9 +54,6 @@ fn token_prefixes(args: &[String]) -> Vec<String> {
             }
         }
         i += 1;
-    }
-    if out.is_empty() {
-        out.push("docs".into());
     }
     out
 }
@@ -187,6 +196,20 @@ fn cmd_config(args: &[String]) -> i32 {
 
 async fn cmd_login(args: &[String]) -> i32 {
     let c = client(args);
+    match c.meta().await {
+        Ok(meta) if meta.api_version == "1" => {}
+        Ok(meta) => {
+            eprintln!(
+                "服务器 API 版本 {} 不受支持，请升级客户端",
+                meta.api_version
+            );
+            return 2;
+        }
+        Err(e) => {
+            eprintln!("无法检查服务器版本: {e}");
+            return fail(&e);
+        }
+    }
     let (mut username, mut password) = (None, None);
     let mut i = 0;
     while i < args.len() {
@@ -210,11 +233,7 @@ async fn cmd_login(args: &[String]) -> i32 {
         s.trim().to_string()
     });
     let password = password.unwrap_or_else(|| {
-        print!("password: ");
-        std::io::Write::flush(&mut std::io::stdout()).ok();
-        let mut s = String::new();
-        std::io::stdin().read_line(&mut s).ok();
-        s.trim().to_string()
+        read_password("password: ")
     });
     match c.login(&username, &password).await {
         Ok(u) => {
@@ -229,8 +248,13 @@ async fn cmd_login(args: &[String]) -> i32 {
             if ids.is_empty() {
                 eprintln!("note: no projects yet — create one first, then re-run login");
             }
-            let prefixes = token_prefixes(args);
-            match c.create_token("cli-login", "write", ids, prefixes).await {
+            let scoped = token_projects(args);
+            let ids = if scoped.is_empty() { ids } else { scoped };
+            if ids.is_empty() {
+                eprintln!("token creation requires at least one --project");
+                return 2;
+            }
+            match c.create_token("cli-login", "write", ids).await {
                 Ok((_, secret)) => {
                     println!("export XWIKI_TOKEN={secret}");
                     0
@@ -350,18 +374,19 @@ async fn cmd_project(args: &[String]) -> i32 {
                 s.trim().to_string()
             };
             let password = {
-                print!("confirm password: ");
-                std::io::Write::flush(&mut std::io::stdout()).ok();
-                let mut s = String::new();
-                std::io::stdin().read_line(&mut s).ok();
-                s.trim().to_string()
+                read_password("confirm password: ")
             };
             if username.is_empty() || password.is_empty() {
                 eprintln!("aborted: empty credentials");
                 return 2;
             }
-            match c.login(&username, &password).await {
-                Ok(_) => {}
+            let session_client = Client::new(&server_from_args(args));
+            match session_client.login(&username, &password).await {
+                Ok(user) if user.username == username => {}
+                Ok(_) => {
+                    eprintln!("aborted: username does not match current account");
+                    return 2;
+                }
                 Err(e) => {
                     eprintln!("aborted: password verification failed: {e}");
                     return 2;
@@ -528,7 +553,22 @@ async fn cmd_history(args: &[String]) -> i32 {
             let Some(project) = args.get(1) else {
                 return usage();
             };
-            match c.commits(project, 50).await {
+            let query = args
+                .windows(2)
+                .find(|w| w[0] == "--query")
+                .map(|w| w[1].as_str())
+                .unwrap_or("");
+            let limit = args
+                .windows(2)
+                .find(|w| w[0] == "--limit")
+                .and_then(|w| w[1].parse().ok())
+                .unwrap_or(50);
+            let offset = args
+                .windows(2)
+                .find(|w| w[0] == "--offset")
+                .and_then(|w| w[1].parse().ok())
+                .unwrap_or(0);
+            match c.commits_search_page(project, query, limit, offset).await {
                 Ok(cs) => {
                     for c in cs {
                         let short: String = c.sha.chars().take(7).collect();
@@ -582,13 +622,16 @@ async fn cmd_lock(args: &[String]) -> i32 {
         return usage();
     };
     match verb {
-        "status" => match c.acquire_lock(project, path).await {
-            // status uses the same shape; acquire is idempotent-ish for the holder
-            Ok(l) => {
+        "status" => match c.lock_status(project, path).await {
+            Ok(Some(l)) => {
                 println!(
                     "{} · held by {} · expires {}",
                     l.path, l.username, l.expires_at
                 );
+                0
+            }
+            Ok(None) => {
+                println!("unlocked");
                 0
             }
             Err(e) => fail(&e),
@@ -634,8 +677,13 @@ async fn cmd_token(args: &[String]) -> i32 {
                 .await
                 .map(|ps| ps.into_iter().map(|p| p.id).collect())
                 .unwrap_or_default();
-            let prefixes = token_prefixes(args);
-            match c.create_token(&name, &scope, ids, prefixes).await {
+            let scoped = token_projects(args);
+            let ids = if scoped.is_empty() { ids } else { scoped };
+            if ids.is_empty() {
+                eprintln!("token creation requires at least one --project");
+                return 2;
+            }
+            match c.create_token(&name, &scope, ids).await {
                 Ok((t, secret)) => {
                     println!("token {} · {}", t.id, secret);
                     println!("export XWIKI_TOKEN={secret}");

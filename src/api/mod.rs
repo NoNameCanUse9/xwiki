@@ -43,8 +43,7 @@ mod tests {
         // missing it must not fail the whole decode (that would mask the
         // real error code — e.g. revision_conflict — as http_error).
         let e: dto::ApiErrorBody =
-            serde_json::from_str(r#"{"code":"revision_conflict","message":"stale"}"#)
-                .unwrap();
+            serde_json::from_str(r#"{"code":"revision_conflict","message":"stale"}"#).unwrap();
         assert_eq!(e.code, "revision_conflict");
         assert_eq!(e.request_id, None);
     }
@@ -164,9 +163,7 @@ impl Client {
             // An invalid token (e.g. control chars from the environment)
             // must not panic startup — skip it and let the server reject
             // the anonymous request instead.
-            if let Ok(value) =
-                reqwest::header::HeaderValue::from_str(&format!("Bearer {t}"))
-            {
+            if let Ok(value) = reqwest::header::HeaderValue::from_str(&format!("Bearer {t}")) {
                 headers.insert(reqwest::header::AUTHORIZATION, value);
             }
         }
@@ -311,7 +308,10 @@ impl Client {
     /// Fetch the latest public desktop release from GitHub. This uses a
     /// separate client so the XWiki session cookie/token is never sent to
     /// GitHub.
-    pub async fn latest_github_release(owner: &str, repo: &str) -> Result<dto::GithubRelease, ApiError> {
+    pub async fn latest_github_release(
+        owner: &str,
+        repo: &str,
+    ) -> Result<dto::GithubRelease, ApiError> {
         let http = reqwest::Client::builder()
             .user_agent("xwiki")
             .timeout(std::time::Duration::from_secs(20))
@@ -415,6 +415,23 @@ impl Client {
         .await
     }
 
+    pub async fn page_at(
+        &self,
+        project_id: &str,
+        path: &str,
+        revision: &str,
+    ) -> Result<dto::DocPage, ApiError> {
+        Self::send(
+            self.http
+                .get(self.url(&format!(
+                    "/api/v1/projects/{}/docs/pages/{}",
+                    project_id, path
+                )))
+                .query(&[("format", "raw"), ("at", revision)]),
+        )
+        .await
+    }
+
     pub async fn revision(&self, project_id: &str) -> Result<String, ApiError> {
         let resp: dto::RevisionResponse = Self::send(
             self.http
@@ -451,7 +468,12 @@ impl Client {
                 .query(&[("path", path)]),
         )
         .await?;
-        Ok(resp.lock)
+        resp.lock.ok_or_else(|| ApiError {
+            code: "lock_missing".into(),
+            message: "server returned no lock".into(),
+            request_id: None,
+            status: 500,
+        })
     }
 
     pub async fn heartbeat_lock(
@@ -465,7 +487,12 @@ impl Client {
                 .query(&[("path", path)]),
         )
         .await?;
-        Ok(resp.lock)
+        resp.lock.ok_or_else(|| ApiError {
+            code: "lock_missing".into(),
+            message: "server returned no lock".into(),
+            request_id: None,
+            status: 500,
+        })
     }
 
     pub async fn release_lock(&self, project_id: &str, path: &str) -> Result<bool, ApiError> {
@@ -476,6 +503,20 @@ impl Client {
         )
         .await?;
         Ok(resp.released)
+    }
+
+    pub async fn lock_status(
+        &self,
+        project_id: &str,
+        path: &str,
+    ) -> Result<Option<dto::Lock>, ApiError> {
+        let resp: dto::LockResponse = Self::send(
+            self.http
+                .get(self.url(&format!("/api/v1/projects/{}/locks", project_id)))
+                .query(&[("path", path)]),
+        )
+        .await?;
+        Ok(resp.lock)
     }
 
     pub async fn commits(
@@ -492,10 +533,22 @@ impl Client {
         limit: u32,
         offset: u32,
     ) -> Result<Vec<dto::Commit>, ApiError> {
+        self.commits_search_page(project_id, "", limit, offset)
+            .await
+    }
+
+    pub async fn commits_search_page(
+        &self,
+        project_id: &str,
+        query: &str,
+        limit: u32,
+        offset: u32,
+    ) -> Result<Vec<dto::Commit>, ApiError> {
         let resp: dto::CommitListResponse = Self::send(
             self.http
                 .get(self.url(&format!("/api/v1/projects/{}/commits", project_id)))
                 .query(&[
+                    ("q", query.to_string()),
                     ("limit", limit.to_string()),
                     ("offset", offset.to_string()),
                 ]),
@@ -902,21 +955,18 @@ impl Client {
         name: &str,
         scope: &str,
         project_ids: Vec<String>,
-        path_prefixes: Vec<String>,
     ) -> Result<(dto::Token, String), ApiError> {
         #[derive(Serialize)]
         struct Body<'a> {
             name: &'a str,
             scope: &'a str,
             project_ids: Vec<String>,
-            path_prefixes: Vec<String>,
         }
         let resp: dto::TokenCreateResponse =
             Self::send(self.http.post(self.url("/api/v1/tokens")).json(&Body {
                 name,
                 scope,
                 project_ids,
-                path_prefixes,
             }))
             .await?;
         Ok((resp.token, resp.secret))
@@ -1178,6 +1228,8 @@ pub mod dto {
         #[serde(default)]
         pub content: String,
         #[serde(default)]
+        pub revision: String,
+        #[serde(default)]
         pub encoding: String,
     }
 
@@ -1222,7 +1274,7 @@ pub mod dto {
 
     #[derive(Debug, Deserialize)]
     pub struct LockResponse {
-        pub lock: Lock,
+        pub lock: Option<Lock>,
     }
 
     #[derive(Debug, Deserialize)]
@@ -1242,6 +1294,8 @@ pub mod dto {
     pub struct CommitListResponse {
         #[serde(default, deserialize_with = "crate::api::de_null_default")]
         pub commits: Vec<Commit>,
+        #[serde(default)]
+        pub has_more: bool,
     }
 
     #[derive(Debug, Deserialize)]
