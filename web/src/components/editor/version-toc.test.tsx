@@ -29,6 +29,30 @@ describe("extractToc", () => {
 		expect(entries[1].level).toBe(2);
 		expect(root.querySelector("h1")?.id).toBeTruthy();
 	});
+
+	it("excludes rendered yaml front matter headings", () => {
+		const root = document.createElement("div");
+		root.innerHTML = `
+			<hr>
+			<h2>title: 资讯管理\nmodule: 资讯管理\nversion: v1.0\nsummary: 平台资讯的创建、查询、详情、修改</h2>
+			<h1>资讯管理</h1>
+			<h2>创建资讯</h2>
+		`;
+
+		expect(extractToc(root).map((entry) => entry.text)).toEqual([
+			"资讯管理",
+			"创建资讯",
+		]);
+	});
+
+	it("keeps ordinary headings that contain a colon", () => {
+		const root = document.createElement("div");
+		root.innerHTML = "<hr><h2>API: Overview</h2>";
+
+		expect(extractToc(root).map((entry) => entry.text)).toEqual([
+			"API: Overview",
+		]);
+	});
 });
 
 describe("TocPanel", () => {

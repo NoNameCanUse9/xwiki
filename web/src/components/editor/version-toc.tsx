@@ -15,6 +15,23 @@ export interface TocEntry {
 
 const headingSelector = "h1, h2, h3";
 
+/** Goldmark/CommonMark can render leading YAML front matter as `<hr>` followed
+ * by one large setext `<h2>`. Keep that rendering artifact out of the TOC. */
+function isRenderedFrontMatterHeading(
+	root: HTMLElement,
+	heading: Element,
+): boolean {
+	if (heading.tagName !== "H2") return false;
+	const delimiter = heading.previousElementSibling;
+	if (delimiter?.tagName !== "HR" || delimiter !== root.firstElementChild) {
+		return false;
+	}
+
+	const text = (heading.textContent ?? "").trim();
+	const yamlKeys = text.match(/(?:^|\n)\s*[A-Za-z_][\w.-]*\s*:/g) ?? [];
+	return yamlKeys.length >= 2;
+}
+
 function formatDate(iso: string): string {
 	return new Date(iso).toLocaleDateString("zh-CN", {
 		year: "numeric",
@@ -33,6 +50,7 @@ function headingEl(e: TocEntry): HTMLElement | null {
 export function extractToc(root: HTMLElement): TocEntry[] {
 	const out: TocEntry[] = [];
 	root.querySelectorAll(headingSelector).forEach((el, i) => {
+		if (isRenderedFrontMatterHeading(root, el)) return;
 		const level = Number(el.tagName[1]);
 		const text = (el.textContent ?? "").trim();
 		if (!text) return;
