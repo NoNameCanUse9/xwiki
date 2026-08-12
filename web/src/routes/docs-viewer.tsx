@@ -561,15 +561,18 @@ export default function DocsViewerPage() {
 	// commit; message stays empty so the backend stamps 时间 + 用户名.
 	const commitDraft = async (): Promise<boolean> => {
 		if (!editing || saving) return false;
-		if (!editBaseRevision) {
-			toast.error("文档版本尚未加载，请稍后再试");
-			return false;
-		}
 		setSaving(true);
 		setSaveState("saving");
 		try {
+			let baseRevision = editBaseRevision;
+			if (!baseRevision) {
+				// Compatibility fallback for older servers that did not yet expose
+				// DocPage.revision; current servers always use the captured page SHA.
+				baseRevision = (await getRevision(id)).revision;
+				setEditBaseRevision(baseRevision);
+			}
 			await submitChangeset(id, {
-				base_revision: editBaseRevision,
+				base_revision: baseRevision,
 				// 留空则后端生成默认：时间 + 操作者 修改 <path>
 				message: commitMessage.trim(),
 				changes: [{ op: "update", path: filePath, content: draftRef.current }],
