@@ -18,6 +18,7 @@ use gpui_component::{
 use crate::api::{dto, Client};
 use crate::config;
 mod outline;
+mod project_changes;
 pub mod views;
 use crate::ui::{mono_label, tokens};
 use crate::{QuickOpen, SaveEditor, TogglePalette, ToggleTheme};
@@ -232,6 +233,17 @@ pub struct XWikiApp {
     history_compare_open: bool,
     /// Selected commit sha (highlight in the history list).
     selected_sha: Option<String>,
+    // Project-root change roadmap (separate from the per-file history panel).
+    project_commits: Vec<dto::Commit>,
+    project_changes_loading: bool,
+    project_changes_error: Option<String>,
+    project_changes_has_more: bool,
+    project_change_expanded: Option<String>,
+    project_change_loading: bool,
+    project_change_error: Option<String>,
+    project_change_files: Vec<project_changes::FilePatch>,
+    project_changes_generation: u64,
+    project_change_generation: u64,
     /// Panel layout (widths + history visibility), persisted via config.
     layout: config::Layout,
     /// Server URL as resolved at login (status bar).
@@ -543,6 +555,16 @@ impl XWikiApp {
             commit_patch: None,
             history_compare_open: false,
             selected_sha: None,
+            project_commits: Vec::new(),
+            project_changes_loading: false,
+            project_changes_error: None,
+            project_changes_has_more: false,
+            project_change_expanded: None,
+            project_change_loading: false,
+            project_change_error: None,
+            project_change_files: Vec::new(),
+            project_changes_generation: 0,
+            project_change_generation: 0,
             layout: config::load_layout(),
             server_url: config::load_server(),
             current_revision: None,
@@ -626,6 +648,7 @@ impl XWikiApp {
 
     fn open_project(&mut self, project_id: &str, cx: &mut Context<Self>) {
         self.stop_heartbeat();
+        self.reset_project_changes();
         self.selected_project = Some(project_id.to_string());
         self.selected_sha = None;
         self.current_revision = None;
@@ -700,6 +723,11 @@ impl XWikiApp {
         self.doc_loading = false;
         self.tree_loading = true;
         self.tree_error = None;
+        if path.is_empty() {
+            self.load_project_changes(true, cx);
+        } else {
+            self.clear_project_change_detail();
+        }
         let path = path.to_string();
         cx.spawn(
             async move |this, cx| match client.tree(&project, &path).await {
@@ -734,6 +762,111 @@ impl XWikiApp {
         .detach();
     }
 
+    fn reset_project_changes(&mut self) {
+        self.project_changes_generation = self.project_changes_generation.wrapping_add(1);
+        self.project_commits.clear();
+        self.project_changes_loading = false;
+        self.project_changes_error = None;
+        self.project_changes_has_more = false;
+        self.clear_project_change_detail();
+    }
+
+    fn clear_project_change_detail(&mut self) {
+        self.project_change_generation = self.project_change_generation.wrapping_add(1);
+        self.project_change_expanded = None;
+        self.project_change_loading = false;
+        self.project_change_error = None;
+        self.project_change_files.clear();
+    }
+
+    fn load_project_changes(&mut self, reset: bool, cx: &mut Context<Self>) {
+        let (Some(client), Some(project)) = (self.client.clone(), self.selected_project.clone())
+        else {
+            return;
+        };
+        if self.project_changes_loading {
+            return;
+        }
+        if reset {
+            self.reset_project_changes();
+        }
+        let offset = self.project_commits.len() as u32;
+        let generation = self.project_changes_generation;
+        self.project_changes_loading = true;
+        self.project_changes_error = None;
+        cx.spawn(async move |this, cx| {
+            let result = client.commits_page(&project, 20, offset).await;
+            let _ = this.update(cx, |app, cx| {
+                if app.selected_project.as_deref() != Some(project.as_str())
+                    || app.project_commits.len() as u32 != offset
+                    || app.project_changes_generation != generation
+                {
+                    return;
+                }
+                app.project_changes_loading = false;
+                match result {
+                    Ok(commits) => {
+                        app.project_changes_has_more = commits.len() == 20;
+                        app.project_commits.extend(commits);
+                    }
+                    Err(error) => {
+                        app.project_changes_error = Some(format!(
+                            "加载项目变更失败: {}",
+                            Self::friendly_api_error(&error)
+                        ));
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn toggle_project_change(&mut self, sha: &str, cx: &mut Context<Self>) {
+        if self.project_change_expanded.as_deref() == Some(sha) {
+            self.clear_project_change_detail();
+            cx.notify();
+            return;
+        }
+        let (Some(client), Some(project)) = (self.client.clone(), self.selected_project.clone())
+        else {
+            return;
+        };
+        let sha = sha.to_string();
+        self.project_change_generation = self.project_change_generation.wrapping_add(1);
+        let generation = self.project_change_generation;
+        self.project_change_expanded = Some(sha.clone());
+        self.project_change_loading = true;
+        self.project_change_error = None;
+        self.project_change_files.clear();
+        cx.spawn(async move |this, cx| {
+            let result = client.commit_patch(&project, &sha).await;
+            let _ = this.update(cx, |app, cx| {
+                if app.selected_project.as_deref() != Some(project.as_str())
+                    || app.project_change_expanded.as_deref() != Some(sha.as_str())
+                    || app.project_change_generation != generation
+                {
+                    return;
+                }
+                app.project_change_loading = false;
+                match result {
+                    Ok(patch) => {
+                        app.project_change_files =
+                            project_changes::parse_document_patch(&patch.patch);
+                    }
+                    Err(error) => {
+                        app.project_change_error = Some(format!(
+                            "加载变更详情失败: {}",
+                            Self::friendly_api_error(&error)
+                        ));
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
     fn open_doc(&mut self, path: &str, cx: &mut Context<Self>) {
         let Some(client) = self.client.clone() else {
             return;
@@ -741,6 +874,7 @@ impl XWikiApp {
         let Some(project) = self.selected_project.clone() else {
             return;
         };
+        self.clear_project_change_detail();
         self.history_open = false;
         self.history_file_path = None;
         self.doc_path = Some(path.to_string());
@@ -1150,6 +1284,7 @@ impl XWikiApp {
 
     fn back_to_projects(&mut self, cx: &mut Context<Self>) {
         self.stop_heartbeat();
+        self.reset_project_changes();
         self.selected_project = None;
         self.current_revision = None;
         self.tree_entries.clear();
@@ -1202,6 +1337,9 @@ impl XWikiApp {
         if self.tree_entries.is_empty() {
             self.load_tree(&path, cx);
         } else {
+            if path.is_empty() {
+                self.load_project_changes(true, cx);
+            }
             cx.notify();
         }
     }

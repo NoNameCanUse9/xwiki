@@ -483,10 +483,22 @@ impl Client {
         project_id: &str,
         limit: u32,
     ) -> Result<Vec<dto::Commit>, ApiError> {
+        self.commits_page(project_id, limit, 0).await
+    }
+
+    pub async fn commits_page(
+        &self,
+        project_id: &str,
+        limit: u32,
+        offset: u32,
+    ) -> Result<Vec<dto::Commit>, ApiError> {
         let resp: dto::CommitListResponse = Self::send(
             self.http
                 .get(self.url(&format!("/api/v1/projects/{}/commits", project_id)))
-                .query(&[("limit", limit.to_string())]),
+                .query(&[
+                    ("limit", limit.to_string()),
+                    ("offset", offset.to_string()),
+                ]),
         )
         .await?;
         Ok(resp.commits)
