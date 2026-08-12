@@ -1,15 +1,16 @@
 name: Release
 
-# 触发方式：推送形如 app-v1.2.3 的 tag（且该 commit 在 main 分支上）
-#   git tag app-v1.2.3
+# 触发方式：推送形如 backend-v1.2.3 的 tag（且该 commit 在 main 分支上）
+#   git tag backend-v1.2.3
 #   git push origin main --tags
 #
-# 注意：Git ref 规则禁止冒号，`app:v1.2.3` 无法作为 tag 名（git 会直接
-# 拒绝创建），所以用 `app-v*` 匹配。
+# 注意：Git ref 规则禁止冒号，`backend:v1.2.3` 无法作为 tag 名（git 会直接
+# 拒绝创建），所以用 `backend-v*` 匹配。app 分支（Rust 桌面客户端）的
+# release 用 `app-v*`。
 on:
   push:
     tags:
-      - 'app-v*'
+      - 'backend-v*'
 
 permissions:
   contents: write   # 创建 GitHub Release
@@ -59,8 +60,8 @@ jobs:
       - name: Extract version from tag
         id: version
         run: |
-          echo "name=${GITHUB_REF_NAME//:/ }" >> "$GITHUB_OUTPUT" # app-v1.2.3 -> app-v1.2.3
-          echo "version=${GITHUB_REF_NAME#app-}" >> "$GITHUB_OUTPUT" # app-v1.2.3 -> v1.2.3
+          echo "name=${GITHUB_REF_NAME//:/ }" >> "$GITHUB_OUTPUT" # backend-v1.2.3 -> backend-v1.2.3
+          echo "version=${GITHUB_REF_NAME#backend-}" >> "$GITHUB_OUTPUT" # backend-v1.2.3 -> v1.2.3
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -89,7 +90,7 @@ jobs:
 
       - name: Extract image tag from git tag
         id: version
-        run: echo "tag=${GITHUB_REF_NAME//:/-}" >> "$GITHUB_OUTPUT" # app:v1.2.3 -> app-v1.2.3 (镜像 tag 不能含冒号)
+        run: echo "tag=${GITHUB_REF_NAME//:/-}" >> "$GITHUB_OUTPUT" # backend-v1.2.3 -> backend-v1.2.3 (镜像 tag 不能含冒号)
 
       # GHCR 要求仓库名小写；github.repository 的 owner 可能含大写（如 NoNameCanUse9）
       - name: Lowercase image repository
