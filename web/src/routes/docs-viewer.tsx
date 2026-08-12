@@ -22,7 +22,6 @@ import {
 	DialogTitle,
 } from "@/components/ui/dialog";
 import { getRevision, submitChangeset } from "@/lib/api/changesets";
-import { fileHistory } from "@/lib/api/history";
 import { createShare } from "@/lib/api/shares";
 import {
 	acquireLock,
@@ -37,7 +36,6 @@ import CommandPalette from "@/components/editor/command-palette";
 import ProjectSearch from "@/components/editor/project-search";
 import RichEditor from "@/components/editor/rich-editor";
 import FileMenu from "@/components/editor/file-menu";
-import ImportFilesButton from "@/components/editor/import-files";
 import NewEntryButton from "@/components/editor/new-entry";
 import RowActions from "@/components/editor/row-actions";
 import AttachmentsPanel from "@/components/editor/attachments";
@@ -45,6 +43,7 @@ import { ProjectChanges } from "@/components/editor/project-changes";
 import { enhanceRenderedMarkdown } from "@/components/editor/markdown-render";
 import {
 	extractToc,
+	HistoryPanel,
 	TocPanel,
 	VersionPanel,
 	useVersionedPage,
@@ -468,12 +467,6 @@ export default function DocsViewerPage() {
 
 	const pageQuery = useVersionedPage(id, filePath, atSha);
 
-	const historyQuery = useQuery({
-		queryKey: ["history", id, filePath],
-		queryFn: () => fileHistory(id, filePath),
-		enabled: showHistory && !showHome,
-	});
-
 	const selectVersion = (sha: string | null) => {
 		setAtSha(sha);
 		setTocEntries([]);
@@ -762,6 +755,17 @@ export default function DocsViewerPage() {
 					</div>
 				</aside>
 			)}
+			{showHistory && !showHome && !editing && (
+				<aside className="fixed inset-y-0 right-0 z-30 hidden w-80 flex-col border-l border-[var(--color-rule)] bg-[var(--color-paper-2)] sm:flex">
+					<HistoryPanel
+						projectId={id}
+						filePath={filePath}
+						currentVersion={atSha}
+						onSelect={selectVersion}
+						onClose={() => setShowHistory(false)}
+					/>
+				</aside>
+			)}
 
 			<CommandPalette projectId={id} />
 			<Dialog open={commitOpen} onOpenChange={setCommitOpen}>
@@ -880,12 +884,15 @@ export default function DocsViewerPage() {
 								)}
 							</div>
 						)}
-						{!showHome && <ImportFilesButton projectId={id} />}
 						<ProjectSearch projectId={id} />
 					</div>
 				</header>
 
-				<main className="flex-1 px-6 py-8 sm:ml-64 sm:px-10">
+				<main
+					className={`flex-1 px-6 py-8 sm:ml-64 sm:px-10 ${
+						showHistory && !showHome && !editing ? "sm:mr-80" : ""
+					}`}
+				>
 					<div
 						className={`mx-auto w-full transition-[max-width] duration-200 ${
 							editing ? "max-w-4xl" : "max-w-3xl"
@@ -973,7 +980,6 @@ export default function DocsViewerPage() {
 								</span>
 								<div className="flex items-center gap-2">
 									<NewEntryButton projectId={id} />
-									<ImportFilesButton projectId={id} />
 								</div>
 							</div>
 						)}
@@ -1000,34 +1006,6 @@ export default function DocsViewerPage() {
 						{!showHome && !editing && showAttachments && (
 							<div className="mt-10">
 								<AttachmentsPanel projectId={id} />
-							</div>
-						)}
-						{showHistory && !editing && (
-							<div className="hairline-panel mt-4 px-5">
-								<p className="mono-label py-3 text-[var(--color-ink-3)]">
-									history · {filePath}
-								</p>
-								{historyQuery.isLoading && (
-									<p className="mono-label pb-3 text-[var(--color-ink-3)]">
-										loading…
-									</p>
-								)}
-								{historyQuery.data?.commits.map((c) => (
-									<div
-										key={c.sha}
-										className="flex items-center justify-between gap-3 border-t border-[var(--color-rule)] py-2.5"
-									>
-										<p className="truncate font-mono text-xs text-[var(--color-accent)]">
-											{c.sha.slice(0, 8)}
-										</p>
-										<p className="min-w-0 flex-1 truncate text-sm text-[var(--color-ink)]">
-											{c.message}
-										</p>
-										<p className="mono-label shrink-0 text-[var(--color-ink-3)]">
-											{new Date(c.date).toLocaleDateString("zh-CN")}
-										</p>
-									</div>
-								))}
 							</div>
 						)}
 						{editing && !showHome && !isDirPath && (

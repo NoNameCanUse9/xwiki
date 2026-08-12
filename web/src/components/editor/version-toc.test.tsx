@@ -3,11 +3,12 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
-import { extractToc, TocPanel, VersionPanel } from "./version-toc";
+import { extractToc, HistoryPanel, TocPanel, VersionPanel } from "./version-toc";
 import * as historyApi from "@/lib/api/history";
 
 vi.mock("@/lib/api/history", () => ({
 	fileHistory: vi.fn(),
+	getCommitDiff: vi.fn(),
 }));
 
 function wrap(ui: React.ReactNode) {
@@ -114,5 +115,74 @@ describe("VersionPanel", () => {
 		expect(onSelect).toHaveBeenCalledWith("a".repeat(40));
 		await userEvent.click(screen.getByText("最新版本"));
 		expect(onSelect).toHaveBeenCalledWith(null);
+	});
+});
+
+describe("HistoryPanel", () => {
+	beforeEach(() => vi.clearAllMocks());
+
+	it("shows author, datetime and full sha per commit", async () => {
+		vi.mocked(historyApi.fileHistory).mockResolvedValue({
+			path: "docs/a.md",
+			commits: [
+				{
+					sha: "8b6ea694750e4ca4e398db4e91b5e21e6c42268b",
+					message: "补充颜色说明",
+					author: "admin",
+					date: "2026-08-12T11:41:58+08:00",
+				},
+				{
+					sha: "85680604050f6f3d166c438d086ca3e4afdfa6cb",
+					message: "add cabinet note doc",
+					author: "alice",
+					date: "2026-08-11T09:00:00+08:00",
+				},
+			],
+		});
+		wrap(
+			<HistoryPanel
+				projectId="p1"
+				filePath="docs/a.md"
+				currentVersion={null}
+				onSelect={vi.fn()}
+				onClose={vi.fn()}
+			/>,
+		);
+		expect(await screen.findByText(/admin/)).toBeInTheDocument();
+		expect(screen.getByText(/alice/)).toBeInTheDocument();
+		expect(
+			screen.getByText("8b6ea694750e4ca4e398db4e91b5e21e6c42268b"),
+		).toBeInTheDocument();
+	});
+
+	it("loads and shows per-file diff stats on expand", async () => {
+		vi.mocked(historyApi.fileHistory).mockResolvedValue({
+			path: "docs/a.md",
+			commits: [
+				{
+					sha: "8b6ea694750e4ca4e398db4e91b5e21e6c42268b",
+					message: "补充颜色说明",
+					author: "admin",
+					date: "2026-08-12T11:41:58+08:00",
+				},
+			],
+		});
+		vi.mocked(historyApi.getCommitDiff).mockResolvedValue({
+			sha: "8b6ea694750e4ca4e398db4e91b5e21e6c42268b",
+			format: "numstat",
+			stats: [{ path: "docs/a.md", added: 3, deleted: 1 }],
+		});
+		wrap(
+			<HistoryPanel
+				projectId="p1"
+				filePath="docs/a.md"
+				currentVersion={null}
+				onSelect={vi.fn()}
+				onClose={vi.fn()}
+			/>,
+		);
+		await userEvent.click(await screen.findByLabelText("展开详情"));
+		expect(await screen.findByText(/\+3 -1/)).toBeInTheDocument();
+		expect(screen.getAllByText(/docs\/a\.md/).length).toBeGreaterThan(0);
 	});
 });

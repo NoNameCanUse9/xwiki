@@ -17,9 +17,28 @@ const BLOCK_MATH = /\\\[([\s\S]+?)\\\]/g;
  */
 export async function enhanceRenderedMarkdown(root: HTMLElement): Promise<void> {
   // 1. Code highlighting (skip mermaid blocks — they are handled next).
-  root.querySelectorAll("pre code[class*='language-']").forEach((el) => {
-    if (el.textContent && !el.classList.contains("language-mermaid") && !el.classList.contains("hljs")) {
-      hljs.highlightElement(el as HTMLElement);
+  //    Blocks with a `language-X` class highlight directly; language-less
+  //    blocks (the editor's code command emits a bare ``` fence) get a JSON
+  //    sniff first, then auto-detection — highlight.js never auto-detects
+  //    JSON by design.
+  root.querySelectorAll("pre code").forEach((el) => {
+    if (!el.textContent || el.classList.contains("hljs")) return;
+    if (el.classList.contains("language-mermaid")) return;
+    const langMatch = el.className.match(/\blang(?:uage)?-([\w-]+)/);
+    if (langMatch) {
+      if (hljs.getLanguage(langMatch[1])) hljs.highlightElement(el as HTMLElement);
+      return;
+    }
+    const text = el.textContent;
+    let lang = "";
+    if (isJson(text)) {
+      lang = "json";
+    } else {
+      lang = hljs.highlightAuto(text).language ?? "";
+    }
+    if (lang && lang !== "plaintext") {
+      el.innerHTML = hljs.highlight(text, { language: lang }).value;
+      el.classList.add("hljs", `language-${lang}`);
     }
   });
 
@@ -84,4 +103,18 @@ function escapeHtml(s: string): string {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
+}
+
+// True when the trimmed text parses as JSON and starts with an object/array
+// opener (a JS object literal like `{a: 1}` fails JSON.parse, so it falls
+// through to auto-detection).
+function isJson(text: string): boolean {
+  const t = text.trim();
+  if (!t.startsWith("{") && !t.startsWith("[")) return false;
+  try {
+    JSON.parse(t);
+    return true;
+  } catch {
+    return false;
+  }
 }
