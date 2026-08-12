@@ -1,5 +1,8 @@
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+use std::cell::RefCell;
+use std::collections::BTreeSet;
 use std::io::Read;
+use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -8,6 +11,7 @@ use gpui::StatefulInteractiveElement;
 use gpui::*;
 use gpui_component::{
     button::*,
+    checkbox::Checkbox,
     dialog::DialogContent,
     input::{Input, InputEvent, InputState},
     notification::Notification,
@@ -26,9 +30,67 @@ const MAX_IMPORT_FILE_BYTES: usize = 5 * 1024 * 1024;
 const MAX_IMPORT_TOTAL_BYTES: usize = 128 * 1024 * 1024;
 const MAX_IMPORT_FILES: usize = 10_000;
 const MAX_IMPORT_DIRECTORIES: usize = 100_000;
+const HISTORY_PAGE_SIZE: u32 = 20;
 
 const OTA_GITHUB_OWNER: &str = "NoNameCanUse9";
 const OTA_GITHUB_REPO: &str = "xwiki";
+
+#[derive(Clone, Default)]
+struct TokenDraft {
+    write: bool,
+    projects: BTreeSet<String>,
+}
+
+impl TokenDraft {
+    fn scope(&self) -> &'static str {
+        if self.write {
+            "write"
+        } else {
+            "read"
+        }
+    }
+
+    fn set_scope(&mut self, scope: &str) {
+        match scope {
+            "read" => self.write = false,
+            "write" => self.write = true,
+            _ => {}
+        }
+    }
+
+    fn set_project(&mut self, project_id: &str, selected: bool) {
+        if selected {
+            self.projects.insert(project_id.to_string());
+        } else {
+            self.projects.remove(project_id);
+        }
+    }
+
+    fn projects(&self) -> Vec<String> {
+        self.projects.iter().cloned().collect()
+    }
+}
+
+fn history_page_offset(reset: bool, loaded: usize) -> u32 {
+    if reset {
+        0
+    } else {
+        loaded as u32
+    }
+}
+
+fn merge_history_page(
+    commits: &mut Vec<dto::Commit>,
+    page: dto::CommitListResponse,
+    reset: bool,
+) -> bool {
+    if reset {
+        *commits = page.commits;
+    } else {
+        commits.extend(page.commits);
+    }
+    page.has_more
+}
 
 /// Command palette entries: (id, label, hint). Availability is decided by
 /// the current screen state in `palette_commands`.
@@ -219,6 +281,8 @@ pub struct XWikiApp {
     history_file_path: Option<String>,
     history_input: Entity<InputState>,
     history_loading: bool,
+    history_has_more: bool,
+    history_generation: u64,
     history_detail_loading: bool,
     history_error: Option<String>,
     history_focus: Option<usize>,
@@ -451,16 +515,20 @@ impl XWikiApp {
                 },
             ));
         }
-        // History search filters the revision timeline without another
-        // network request.
+        // History search is server-backed so it covers every ref and commit,
+        // not only the currently loaded page.
         {
             let history = history_input.clone();
             subs.push(cx.subscribe_in(
                 &history_input,
                 window,
-                move |_, _, _: &InputEvent, _, cx| {
+                move |app, _, _: &InputEvent, _, cx| {
                     let _ = history.read(cx);
-                    cx.notify();
+                    if app.history_open {
+                        app.load_history_page(true, cx);
+                    } else {
+                        cx.notify();
+                    }
                 },
             ));
         }
@@ -548,6 +616,8 @@ impl XWikiApp {
             history_file_path: None,
             history_input,
             history_loading: false,
+            history_has_more: false,
+            history_generation: 0,
             history_detail_loading: false,
             history_error: None,
             history_focus: None,
@@ -1665,7 +1735,9 @@ impl XWikiApp {
     }
 
     fn clear_history_data(&mut self) {
+        self.history_generation = self.history_generation.wrapping_add(1);
         self.commits.clear();
+        self.history_has_more = false;
         self.commit_detail = None;
         self.diff_stats.clear();
         self.commit_patch = None;
@@ -1675,6 +1747,16 @@ impl XWikiApp {
     }
 
     fn load_file_history(&mut self, cx: &mut Context<Self>) {
+        self.load_history_page(true, cx);
+    }
+
+    fn load_more_history(&mut self, cx: &mut Context<Self>) {
+        if self.history_has_more {
+            self.load_history_page(false, cx);
+        }
+    }
+
+    fn load_history_page(&mut self, reset: bool, cx: &mut Context<Self>) {
         let (Some(client), Some(project), Some(path)) = (
             self.client.clone(),
             self.selected_project.clone(),
@@ -1682,25 +1764,52 @@ impl XWikiApp {
         ) else {
             return;
         };
+        if self.history_loading && !reset {
+            return;
+        }
+        if reset {
+            self.history_generation = self.history_generation.wrapping_add(1);
+            self.commits.clear();
+            self.history_has_more = false;
+            self.history_focus = None;
+            self.selected_sha = None;
+            self.commit_detail = None;
+            self.diff_stats.clear();
+            self.commit_patch = None;
+        }
+        let generation = self.history_generation;
+        let query = self.history_input.read(cx).value().trim().to_string();
+        let offset = history_page_offset(reset, self.commits.len());
         self.history_loading = true;
         self.history_error = None;
-        cx.spawn(
-            async move |this, cx| match client.file_history(&project, &path).await {
-                Ok(list) => {
-                    let first_sha = list.first().map(|commit| commit.sha.clone());
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            match client
+                .commits_search_page(&project, &query, HISTORY_PAGE_SIZE, offset)
+                .await
+            {
+                Ok(page) => {
                     let _ = this.update(cx, |app, cx| {
                         if !app.history_open
                             || app.history_file_path.as_deref() != Some(path.as_str())
+                            || app.history_generation != generation
                         {
                             return;
                         }
                         app.history_loading = false;
                         app.history_error = None;
-                        app.history_focus = first_sha.as_ref().map(|_| 0);
-                        app.selected_sha = first_sha.clone();
-                        app.commits = list;
-                        if let Some(sha) = first_sha {
-                            app.select_commit(&sha, cx);
+                        app.history_has_more = merge_history_page(&mut app.commits, page, reset);
+                        let first_sha = app.commits.first().map(|commit| commit.sha.clone());
+                        if reset {
+                            app.history_focus = first_sha.as_ref().map(|_| 0);
+                            app.selected_sha = first_sha.clone();
+                        }
+                        if reset {
+                            if let Some(sha) = first_sha {
+                                app.select_commit(&sha, cx);
+                            } else {
+                                cx.notify();
+                            }
                         } else {
                             cx.notify();
                         }
@@ -1710,16 +1819,17 @@ impl XWikiApp {
                     let _ = this.update(cx, |app, cx| {
                         if !app.history_open
                             || app.history_file_path.as_deref() != Some(path.as_str())
+                            || app.history_generation != generation
                         {
                             return;
                         }
                         app.history_loading = false;
-                        app.history_error = Some(format!("加载文件历史失败: {e}"));
+                        app.history_error = Some(format!("加载版本历史失败: {e}"));
                         cx.notify();
                     });
                 }
-            },
-        )
+            }
+        })
         .detach();
     }
 
@@ -3866,25 +3976,23 @@ impl XWikiApp {
         let Some(client) = self.client.clone() else {
             return;
         };
-        let project_ids: Vec<String> = self.projects.iter().map(|p| p.id.clone()).collect();
+        let projects: Vec<(String, String)> = self
+            .projects
+            .iter()
+            .map(|project| (project.id.clone(), project.name.clone()))
+            .collect();
         let handle = cx.entity();
         window.open_dialog(cx, move |dialog, window, cx| {
             let name_state = cx.new(|cx| InputState::new(window, cx).placeholder("ci-docs"));
-            let scope_state = cx.new(|cx| {
-                let mut state = InputState::new(window, cx).placeholder("read");
-                state.set_value(String::from("read"), window, cx);
-                state
-            });
-            let project_state = cx.new(|cx| {
-                let mut state = InputState::new(window, cx).placeholder("项目 ID（逗号分隔）");
-                state.set_value(project_ids.join(","), window, cx);
-                state
-            });
+            let draft = Rc::new(RefCell::new(TokenDraft::default()));
             let content_name = name_state.clone();
-            let content_scope = scope_state.clone();
-            let content_projects = project_state.clone();
+            let content_draft = draft.clone();
+            let content_projects = projects.clone();
             let content_builder = move |content: DialogContent, _: &mut Window, cx: &mut App| {
                 let theme = cx.theme();
+                let scope = content_draft.borrow().scope();
+                let read_draft = content_draft.clone();
+                let write_draft = content_draft.clone();
                 content.child(
                     div()
                         .v_flex()
@@ -3893,12 +4001,52 @@ impl XWikiApp {
                         .child(mono_label("名称").text_color(theme.muted_foreground))
                         .child(Input::new(&content_name).w_full())
                         .child(mono_label("权限范围").text_color(theme.muted_foreground))
-                        .child(Input::new(&content_scope).w_full())
                         .child(
-                            mono_label("项目范围（至少一个，逗号分隔）")
+                            h_flex()
+                                .gap_2()
+                                .child(
+                                    Button::new("token-scope-read")
+                                        .label("只读")
+                                        .selected(scope == "read")
+                                        .on_click(move |_, window, _| {
+                                            read_draft.borrow_mut().set_scope("read");
+                                            window.refresh();
+                                        }),
+                                )
+                                .child(
+                                    Button::new("token-scope-write")
+                                        .label("读写")
+                                        .selected(scope == "write")
+                                        .on_click(move |_, window, _| {
+                                            write_draft.borrow_mut().set_scope("write");
+                                            window.refresh();
+                                        }),
+                                ),
+                        )
+                        .child(
+                            mono_label("项目范围（至少选择一个）")
                                 .text_color(theme.muted_foreground),
                         )
-                        .child(Input::new(&content_projects).w_full()),
+                        .child(
+                            div()
+                                .max_h(px(220.0))
+                                .overflow_y_scrollbar()
+                                .v_flex()
+                                .gap_2()
+                                .children(content_projects.iter().map(|(id, name)| {
+                                    let project_id = id.clone();
+                                    let project_draft = content_draft.clone();
+                                    Checkbox::new(format!("token-project-{id}"))
+                                        .checked(content_draft.borrow().projects.contains(id))
+                                        .label(format!("{name} · {id}"))
+                                        .on_click(move |checked, window, _| {
+                                            project_draft
+                                                .borrow_mut()
+                                                .set_project(&project_id, *checked);
+                                            window.refresh();
+                                        })
+                                })),
+                        ),
                 )
             };
             let cancel = Button::new("cancel-create-token")
@@ -3907,8 +4055,7 @@ impl XWikiApp {
                 .label("取消")
                 .on_click(|_, window, cx| window.close_dialog(cx));
             let create_name = name_state.clone();
-            let create_scope = scope_state.clone();
-            let create_project_state = project_state.clone();
+            let create_draft = draft.clone();
             let create_client = client.clone();
             let create_handle = handle.clone();
             let create = Button::new("confirm-create-token")
@@ -3918,22 +4065,12 @@ impl XWikiApp {
                 .label("创建 Token")
                 .on_click(move |_, window, cx| {
                     let name = create_name.read(cx).value().trim().to_string();
-                    let scope = create_scope.read(cx).value().trim().to_string();
-                    if name.is_empty() || scope.is_empty() {
-                        window.push_notification(
-                            Notification::error("Token 名称和权限范围不能为空"),
-                            cx,
-                        );
+                    if name.is_empty() {
+                        window.push_notification(Notification::error("Token 名称不能为空"), cx);
                         return;
                     }
-                    let projects: Vec<String> = create_project_state
-                        .read(cx)
-                        .value()
-                        .split(',')
-                        .map(str::trim)
-                        .filter(|id| !id.is_empty())
-                        .map(str::to_string)
-                        .collect();
+                    let scope = create_draft.borrow().scope().to_string();
+                    let projects = create_draft.borrow().projects();
                     if projects.is_empty() {
                         window.push_notification(Notification::error("至少选择一个项目"), cx);
                         return;
@@ -5656,7 +5793,11 @@ fn import_folder_picker_button(folder: Entity<InputState>, handle: Entity<XWikiA
 
 #[cfg(test)]
 mod import_path_prompt_tests {
-    use super::{collect_import_files, folder_path_prompt_options, read_file_limited};
+    use super::{
+        collect_import_files, folder_path_prompt_options, history_page_offset, merge_history_page,
+        read_file_limited, TokenDraft,
+    };
+    use crate::api::dto::{Commit, CommitListResponse};
 
     #[test]
     fn project_import_picker_selects_one_directory() {
@@ -5676,6 +5817,64 @@ mod import_path_prompt_tests {
 
         assert!(read_file_limited(&path, 3).is_err());
         assert_eq!(read_file_limited(&path, 4).unwrap(), b"1234");
+    }
+
+    #[test]
+    fn history_pagination_resets_then_appends_and_keeps_has_more() {
+        let commit = |sha: &str| Commit {
+            sha: sha.into(),
+            message: sha.into(),
+            author: "admin".into(),
+            date: "2026-08-13T00:00:00Z".into(),
+        };
+        let mut commits = vec![commit("stale")];
+
+        let has_more = merge_history_page(
+            &mut commits,
+            CommitListResponse {
+                commits: vec![commit("a")],
+                has_more: true,
+            },
+            true,
+        );
+        assert_eq!(
+            commits.iter().map(|c| c.sha.as_str()).collect::<Vec<_>>(),
+            ["a"]
+        );
+        assert!(has_more);
+        assert_eq!(history_page_offset(false, commits.len()), 1);
+
+        let has_more = merge_history_page(
+            &mut commits,
+            CommitListResponse {
+                commits: vec![commit("b")],
+                has_more: false,
+            },
+            false,
+        );
+        assert_eq!(
+            commits.iter().map(|c| c.sha.as_str()).collect::<Vec<_>>(),
+            ["a", "b"]
+        );
+        assert!(!has_more);
+        assert_eq!(history_page_offset(true, commits.len()), 0);
+    }
+
+    #[test]
+    fn token_draft_starts_unscoped_and_only_accepts_known_permissions() {
+        let mut draft = TokenDraft::default();
+        assert_eq!(draft.scope(), "read");
+        assert!(draft.projects().is_empty());
+
+        draft.set_scope("write");
+        draft.set_project("project-b", true);
+        draft.set_project("project-a", true);
+        draft.set_project("project-b", false);
+
+        assert_eq!(draft.scope(), "write");
+        assert_eq!(draft.projects(), vec!["project-a".to_string()]);
+        draft.set_scope("owner");
+        assert_eq!(draft.scope(), "write");
     }
 
     #[cfg(unix)]

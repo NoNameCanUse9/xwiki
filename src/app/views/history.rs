@@ -10,24 +10,13 @@ use crate::ui::{mono_label, tokens};
 impl XWikiApp {
     pub(crate) fn render_history_view(&self, cx: &mut Context<Self>) -> Div {
         let theme = cx.theme().clone();
-        let query = self.history_input.read(cx).value().to_lowercase();
-        let visible_indices: Vec<usize> = self
-            .commits
-            .iter()
-            .enumerate()
-            .filter(|(_, commit)| {
-                query.is_empty()
-                    || commit.message.to_lowercase().contains(&query)
-                    || commit.author.to_lowercase().contains(&query)
-                    || commit.sha.to_lowercase().starts_with(&query)
-            })
-            .map(|(index, _)| index)
-            .collect();
+        let has_query = !self.history_input.read(cx).value().trim().is_empty();
+        let visible_indices: Vec<usize> = (0..self.commits.len()).collect();
         let added: u32 = self.diff_stats.iter().map(|stat| stat.added).sum();
         let deleted: u32 = self.diff_stats.iter().map(|stat| stat.deleted).sum();
         let selected_sha = self.selected_sha.as_deref();
 
-        let timeline_content = if self.history_loading {
+        let timeline_content = if self.history_loading && self.commits.is_empty() {
             div()
                 .v_flex()
                 .gap_2()
@@ -64,7 +53,7 @@ impl XWikiApp {
                         .rounded(px(tokens::RADIUS))
                         .icon(IconName::Redo2)
                         .label("重试")
-                        .on_click(cx.listener(|this, _, _, cx| this.load_file_history(cx))),
+                        .on_click(cx.listener(|this, _, _, cx| this.load_history_page(true, cx))),
                 )
                 .into_any_element()
         } else if self.commits.is_empty() {
@@ -82,7 +71,11 @@ impl XWikiApp {
                         .text_center()
                         .text_xs()
                         .text_color(theme.muted_foreground)
-                        .child("文档保存后，版本会出现在这里。"),
+                        .child(if has_query {
+                            "没有匹配的提交。"
+                        } else {
+                            "文档保存后，版本会出现在这里。"
+                        }),
                 )
                 .into_any_element()
         } else if visible_indices.is_empty() {
@@ -218,7 +211,27 @@ impl XWikiApp {
                         .into_any_element()
                 })
                 .collect();
-            div().v_flex().children(rows).into_any_element()
+            div()
+                .v_flex()
+                .children(rows)
+                .child(if self.history_has_more || self.history_loading {
+                    div().p_3().child(
+                        Button::new("load-more-history")
+                            .w_full()
+                            .rounded(px(tokens::RADIUS))
+                            .label(if self.history_loading {
+                                "加载中…"
+                            } else {
+                                "加载更多"
+                            })
+                            .loading(self.history_loading)
+                            .disabled(self.history_loading)
+                            .on_click(cx.listener(|this, _, _, cx| this.load_more_history(cx))),
+                    )
+                } else {
+                    div()
+                })
+                .into_any_element()
         };
 
         let keyboard_indices = visible_indices.clone();
@@ -525,7 +538,7 @@ impl XWikiApp {
                                     if let Some(sha) = this.selected_sha.clone() {
                                         this.select_commit(&sha, cx);
                                     } else {
-                                        this.load_file_history(cx);
+                                        this.load_history_page(true, cx);
                                     }
                                 })),
                         )
