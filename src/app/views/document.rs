@@ -1010,9 +1010,17 @@ impl XWikiApp {
                                     })
                                     .hover(|s| s.bg(theme.list_hover).text_color(theme.foreground))
                                     .child(tokens::truncate(&entry.text, 64))
-                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                    .on_click(cx.listener(move |this, _, window, cx| {
                                         this.doc_scroll.scroll_to_top_of_item(section);
                                         this.active_outline = Some(index);
+
+                                        // GPUI applies ScrollHandle's active item during
+                                        // prepaint. Keep the window rendering long enough
+                                        // for the item bounds and resulting offset to settle.
+                                        cx.on_next_frame(window, |_, window, cx| {
+                                            cx.on_next_frame(window, |_, _, cx| cx.notify());
+                                            cx.notify();
+                                        });
                                         cx.notify();
                                     }))
                             },
