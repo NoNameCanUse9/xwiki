@@ -917,9 +917,9 @@ export default function DocsViewerPage() {
 				</header>
 
 				<main
-					className={`flex-1 px-6 py-8 sm:ml-64 sm:px-10 ${
-						showHistory && !showHome && !editing ? "sm:mr-80" : ""
-					}`}
+					className={`flex-1 px-6 py-8 sm:px-10 ${
+						!showHome ? "sm:ml-64" : ""
+					} ${showHistory && !showHome && !editing ? "sm:mr-80" : ""}`}
 				>
 					<div
 						className={`mx-auto flex min-h-[calc(100vh-8rem)] w-full flex-col transition-[max-width] duration-200 ${

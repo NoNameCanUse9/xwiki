@@ -149,6 +149,7 @@ describe("DocsViewerPage", () => {
 		expect(
 			readme.compareDocumentPosition(changes) & Node.DOCUMENT_POSITION_FOLLOWING,
 		).toBeTruthy();
+		expect(screen.getByRole("main")).not.toHaveClass("sm:ml-64");
 		expect(docsApi.getHome).not.toHaveBeenCalled();
 	});
 
