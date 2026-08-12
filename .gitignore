@@ -1,6 +1,5 @@
 # Rust (app branch)
 /target
-Cargo.lock
 
 # Local Pi runtime state
 .atl/

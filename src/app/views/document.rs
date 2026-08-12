@@ -420,11 +420,13 @@ impl XWikiApp {
 
     fn render_project_changes(&self, cx: &mut Context<Self>) -> AnyElement {
         const MAX_RENDERED_DIFF_LINES: usize = 400;
+        const VISIBLE_COMMITS: usize = 5;
 
         let theme = cx.theme().clone();
         let mut timeline = div()
-            .mt_8()
-            .mb_6()
+            .flex_none()
+            .h(px(236.0))
+            .mt_4()
             .w_full()
             .rounded(px(tokens::RADIUS))
             .border_1()
@@ -433,23 +435,12 @@ impl XWikiApp {
             .child(
                 div()
                     .px_4()
-                    .py_3()
+                    .py_2()
                     .flex()
-                    .items_start()
+                    .items_center()
                     .justify_between()
                     .bg(theme.sidebar)
-                    .child(
-                        div()
-                            .v_flex()
-                            .gap_1()
-                            .child(mono_label("CHANGES · ROADMAP").text_color(theme.accent))
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(theme.muted_foreground)
-                                    .child("展开提交可查看文档路径、标题位置、行号和实际增删内容"),
-                            ),
-                    )
+                    .child(mono_label("CHANGES · ROADMAP").text_color(theme.accent))
                     .child(
                         mono_label(format!("已加载 {} 次", self.project_commits.len()))
                             .text_color(theme.muted_foreground),
@@ -469,7 +460,7 @@ impl XWikiApp {
                     .border_t_1()
                     .border_color(theme.border)
                     .px_4()
-                    .py_6()
+                    .py_4()
                     .text_sm()
                     .text_color(if self.project_changes_error.is_some() {
                         theme.danger
@@ -490,252 +481,307 @@ impl XWikiApp {
             }
         }
 
-        for commit in &self.project_commits {
-            let sha = commit.sha.clone();
-            let expanded = self.project_change_expanded.as_deref() == Some(sha.as_str());
-            let toggle_sha = sha.clone();
-            let marker = if expanded { "▾" } else { "▸" };
-            timeline = timeline.child(
-                div()
-                    .border_t_1()
-                    .border_color(theme.border)
-                    .child(
-                        div()
-                            .id(format!("project-change-{sha}"))
-                            .px_4()
-                            .py_3()
-                            .flex()
-                            .items_start()
-                            .gap_3()
-                            .cursor_pointer()
-                            .hover(|style| style.bg(theme.list_hover))
-                            .child(
-                                div()
-                                    .w(px(14.0))
-                                    .font_family(tokens::FONT_MONO)
-                                    .text_sm()
-                                    .text_color(theme.muted_foreground)
-                                    .child(marker),
-                            )
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .min_w(px(0.0))
-                                    .v_flex()
-                                    .gap_1()
-                                    .child(
-                                        div()
-                                            .text_sm()
-                                            .font_weight(FontWeight::MEDIUM)
-                                            .text_color(theme.foreground)
-                                            .child(if commit.message.is_empty() {
-                                                "（无提交信息）".to_string()
-                                            } else {
-                                                commit.message.clone()
-                                            }),
-                                    )
-                                    .child(
-                                        div()
-                                            .font_family(tokens::FONT_MONO)
-                                            .text_xs()
-                                            .text_color(theme.muted_foreground)
-                                            .child(format!("{} · {}", commit.author, commit.date)),
-                                    ),
-                            )
-                            .child(
-                                div()
-                                    .font_family(tokens::FONT_MONO)
-                                    .text_xs()
-                                    .text_color(theme.accent)
-                                    .child(sha.chars().take(8).collect::<String>()),
-                            )
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.toggle_project_change(&toggle_sha, cx);
-                            })),
-                    )
-                    .when(expanded, |container| {
-                        let mut detail = div()
-                            .border_t_1()
-                            .border_color(theme.border)
-                            .px_4()
-                            .py_4()
-                            .v_flex()
-                            .gap_4();
-                        if self.project_change_loading {
-                            return container.child(
-                                detail.child(
-                                    mono_label("加载变更详情…")
-                                        .text_color(theme.muted_foreground),
-                                ),
-                            );
-                        }
-                        if let Some(error) = &self.project_change_error {
-                            return container.child(
-                                detail.child(div().text_xs().text_color(theme.danger).child(error.clone())),
-                            );
-                        }
-                        if self.project_change_files.is_empty() {
-                            return container.child(
-                                detail.child(
-                                    div()
-                                        .text_xs()
-                                        .text_color(theme.muted_foreground)
-                                        .child("本次提交没有可显示的文本变更"),
-                                ),
-                            );
-                        }
+        if !self.project_commits.is_empty() {
+            let commits: Vec<_> = self.project_commits.iter().take(VISIBLE_COMMITS).collect();
+            let selected_sha = self.project_change_expanded.as_deref();
+            let mut nodes = div()
+                .flex_none()
+                .w_full()
+                .px_4()
+                .pt_4()
+                .flex()
+                .items_start();
 
-                        let mut rendered_lines = 0usize;
-                        for file in &self.project_change_files {
-                            let file_path = file.path.clone();
-                            let open_path = file_path.clone();
-                            let mut file_panel = div()
-                                .rounded(px(tokens::RADIUS_SMALL))
-                                .border_1()
-                                .border_color(theme.border)
-                                .overflow_hidden()
-                                .child(
-                                    div()
-                                        .id(format!("project-change-file-{file_path}"))
-                                        .px_3()
-                                        .py_2()
-                                        .flex()
-                                        .items_center()
-                                        .gap_2()
-                                        .cursor_pointer()
-                                        .bg(theme.sidebar)
-                                        .hover(|style| style.bg(theme.list_hover))
-                                        .child(
-                                            Icon::new(IconName::File)
-                                                .with_size(px(14.0))
-                                                .text_color(theme.accent),
-                                        )
-                                        .child(
-                                            div()
-                                                .font_family(tokens::FONT_MONO)
-                                                .text_xs()
-                                                .text_color(theme.accent)
-                                                .child(file_path),
-                                        )
-                                        .on_click(cx.listener(move |this, _, _, cx| {
-                                            this.open_doc(&open_path, cx);
-                                        })),
-                                );
+            for (index, commit) in commits.iter().enumerate() {
+                let sha = commit.sha.clone();
+                let selected = selected_sha == Some(sha.as_str());
+                let toggle_sha = sha.clone();
+                let line_color = if index == 0 || selected {
+                    theme.accent.opacity(0.7)
+                } else {
+                    theme.border
+                };
+                let node_color = if selected || index == 0 {
+                    theme.accent
+                } else {
+                    theme.muted_foreground
+                };
+                let message = if commit.message.is_empty() {
+                    "（无提交信息）".to_string()
+                } else {
+                    commit.message.clone()
+                };
 
-                            for hunk in &file.hunks {
-                                if rendered_lines >= MAX_RENDERED_DIFF_LINES {
-                                    break;
-                                }
-                                let location_line = if hunk.new_start > 0 {
-                                    hunk.new_start
+                let mut track = div().w_full().flex().items_center();
+                if index > 0 {
+                    track = track.child(div().flex_1().h(px(1.0)).bg(line_color));
+                }
+                track = track.child(
+                    div()
+                        .size(px(12.0))
+                        .flex_none()
+                        .rounded(px(6.0))
+                        .border_2()
+                        .border_color(node_color)
+                        .bg(if selected { node_color } else { theme.sidebar }),
+                );
+                if index + 1 < commits.len() {
+                    track = track.child(div().flex_1().h(px(1.0)).bg(theme.border));
+                }
+
+                nodes = nodes.child(
+                    div()
+                        .id(format!("project-roadmap-node-{sha}"))
+                        .flex_1()
+                        .min_w(px(0.0))
+                        .v_flex()
+                        .items_center()
+                        .cursor_pointer()
+                        .child(track)
+                        .child(
+                            div()
+                                .w_full()
+                                .mt_2()
+                                .px_1()
+                                .text_center()
+                                .text_xs()
+                                .font_weight(if selected {
+                                    FontWeight::SEMIBOLD
                                 } else {
-                                    hunk.old_start
-                                };
-                                let mut hunk_panel = div()
-                                    .border_t_1()
-                                    .border_color(theme.border)
-                                    .child(
-                                        div()
-                                            .px_3()
-                                            .py_1()
-                                            .flex()
-                                            .items_center()
-                                            .gap_3()
-                                            .bg(theme.accent.opacity(0.08))
-                                            .child(
-                                                div()
-                                                    .font_family(tokens::FONT_MONO)
-                                                    .text_xs()
-                                                    .text_color(theme.accent)
-                                                    .child(format!("{}:L{}", file.path, location_line)),
-                                            )
-                                            .when(!hunk.heading.is_empty(), |row| {
-                                                row.child(
-                                                    div()
-                                                        .text_xs()
-                                                        .text_color(theme.muted_foreground)
-                                                        .child(format!("§ {}", hunk.heading)),
-                                                )
-                                            }),
-                                    );
-                                for line in &hunk.lines {
-                                    if rendered_lines >= MAX_RENDERED_DIFF_LINES {
-                                        break;
-                                    }
-                                    rendered_lines += 1;
-                                    let (marker, number, color, background) = match line.kind {
-                                        PatchLineKind::Add => (
-                                            "+",
-                                            line.new_line,
-                                            theme.success,
-                                            theme.success.opacity(0.1),
-                                        ),
-                                        PatchLineKind::Delete => (
-                                            "−",
-                                            line.old_line,
-                                            theme.danger,
-                                            theme.danger.opacity(0.1),
-                                        ),
-                                        PatchLineKind::Context => (
-                                            " ",
-                                            line.new_line,
-                                            theme.muted_foreground,
-                                            theme.transparent,
-                                        ),
-                                    };
-                                    hunk_panel = hunk_panel.child(
-                                        div()
-                                            .px_3()
-                                            .py_0p5()
-                                            .flex()
-                                            .gap_2()
-                                            .bg(background)
-                                            .font_family(tokens::FONT_MONO)
-                                            .text_xs()
-                                            .text_color(color)
-                                            .child(
-                                                div()
-                                                    .w(px(42.0))
-                                                    .text_right()
-                                                    .child(number.map(|value| value.to_string()).unwrap_or_default()),
-                                            )
-                                            .child(div().w(px(12.0)).child(marker))
-                                            .child(line.content.clone()),
-                                    );
-                                }
-                                file_panel = file_panel.child(hunk_panel);
-                            }
-                            detail = detail.child(file_panel);
-                            if rendered_lines >= MAX_RENDERED_DIFF_LINES {
-                                break;
-                            }
-                        }
-                        if rendered_lines >= MAX_RENDERED_DIFF_LINES {
-                            detail = detail.child(
-                                div()
-                                    .text_xs()
-                                    .text_color(theme.muted_foreground)
-                                    .child("Diff 较大，仅显示前 400 行；可通过 commit SHA 获取完整 patch。"),
-                            );
-                        }
-                        container.child(detail)
-                    }),
+                                    FontWeight::NORMAL
+                                })
+                                .text_color(if selected {
+                                    theme.foreground
+                                } else {
+                                    theme.muted_foreground
+                                })
+                                .whitespace_nowrap()
+                                .overflow_hidden()
+                                .text_ellipsis()
+                                .child(message),
+                        )
+                        .child(
+                            div()
+                                .w_full()
+                                .px_1()
+                                .text_center()
+                                .font_family(tokens::FONT_MONO)
+                                .text_xs()
+                                .text_color(theme.muted_foreground)
+                                .whitespace_nowrap()
+                                .overflow_hidden()
+                                .text_ellipsis()
+                                .child(format!("{} · {}", commit.author, commit.date)),
+                        )
+                        .child(
+                            div()
+                                .mt_1()
+                                .font_family(tokens::FONT_MONO)
+                                .text_xs()
+                                .text_color(if selected {
+                                    theme.accent
+                                } else {
+                                    theme.muted_foreground
+                                })
+                                .child(sha.chars().take(8).collect::<String>()),
+                        )
+                        .hover(|style| style.opacity(0.82))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.toggle_project_change(&toggle_sha, cx);
+                        })),
+                );
+            }
+
+            timeline = timeline.child(nodes).child(
+                div()
+                    .flex_none()
+                    .px_4()
+                    .pt_2()
+                    .text_xs()
+                    .text_color(theme.muted_foreground)
+                    .child("点击节点查看该版本涉及的文档变更"),
             );
         }
 
-        if !self.project_commits.is_empty() {
-            if let Some(error) = &self.project_changes_error {
-                timeline = timeline.child(
+        if self.project_change_expanded.is_some() {
+            let mut detail = div()
+                .flex_1()
+                .min_h(px(0.0))
+                .mt_2()
+                .border_t_1()
+                .border_color(theme.border)
+                .px_4()
+                .py_3()
+                .v_flex()
+                .gap_3()
+                .overflow_y_scrollbar();
+
+            if self.project_change_loading {
+                detail =
+                    detail.child(mono_label("加载变更详情…").text_color(theme.muted_foreground));
+            } else if let Some(error) = &self.project_change_error {
+                detail = detail.child(
                     div()
-                        .border_t_1()
-                        .border_color(theme.border)
-                        .px_4()
-                        .py_3()
                         .text_xs()
                         .text_color(theme.danger)
                         .child(error.clone()),
                 );
+            } else if self.project_change_files.is_empty() {
+                detail = detail.child(
+                    div()
+                        .text_xs()
+                        .text_color(theme.muted_foreground)
+                        .child("本次提交没有可显示的文本变更"),
+                );
+            } else {
+                let mut rendered_lines = 0usize;
+                for file in &self.project_change_files {
+                    let file_path = file.path.clone();
+                    let open_path = file_path.clone();
+                    let mut file_panel = div()
+                        .rounded(px(tokens::RADIUS_SMALL))
+                        .border_1()
+                        .border_color(theme.border)
+                        .overflow_hidden()
+                        .child(
+                            div()
+                                .id(format!("project-change-file-{file_path}"))
+                                .px_3()
+                                .py_2()
+                                .flex()
+                                .items_center()
+                                .gap_2()
+                                .cursor_pointer()
+                                .bg(theme.sidebar)
+                                .hover(|style| style.bg(theme.list_hover))
+                                .child(
+                                    Icon::new(IconName::File)
+                                        .with_size(px(14.0))
+                                        .text_color(theme.accent),
+                                )
+                                .child(
+                                    div()
+                                        .font_family(tokens::FONT_MONO)
+                                        .text_xs()
+                                        .text_color(theme.accent)
+                                        .child(file_path),
+                                )
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.open_doc(&open_path, cx);
+                                })),
+                        );
+
+                    for hunk in &file.hunks {
+                        if rendered_lines >= MAX_RENDERED_DIFF_LINES {
+                            break;
+                        }
+                        let location_line = if hunk.new_start > 0 {
+                            hunk.new_start
+                        } else {
+                            hunk.old_start
+                        };
+                        let mut hunk_panel = div().border_t_1().border_color(theme.border).child(
+                            div()
+                                .px_3()
+                                .py_1()
+                                .flex()
+                                .items_center()
+                                .gap_3()
+                                .bg(theme.accent.opacity(0.08))
+                                .child(
+                                    div()
+                                        .font_family(tokens::FONT_MONO)
+                                        .text_xs()
+                                        .text_color(theme.accent)
+                                        .child(format!("{}:L{}", file.path, location_line)),
+                                )
+                                .when(!hunk.heading.is_empty(), |row| {
+                                    row.child(
+                                        div()
+                                            .text_xs()
+                                            .text_color(theme.muted_foreground)
+                                            .child(format!("§ {}", hunk.heading)),
+                                    )
+                                }),
+                        );
+                        for line in &hunk.lines {
+                            if rendered_lines >= MAX_RENDERED_DIFF_LINES {
+                                break;
+                            }
+                            rendered_lines += 1;
+                            let (marker, number, color, background) = match line.kind {
+                                PatchLineKind::Add => (
+                                    "+",
+                                    line.new_line,
+                                    theme.success,
+                                    theme.success.opacity(0.1),
+                                ),
+                                PatchLineKind::Delete => {
+                                    ("−", line.old_line, theme.danger, theme.danger.opacity(0.1))
+                                }
+                                PatchLineKind::Context => (
+                                    " ",
+                                    line.new_line,
+                                    theme.muted_foreground,
+                                    theme.transparent,
+                                ),
+                            };
+                            hunk_panel = hunk_panel.child(
+                                div()
+                                    .px_3()
+                                    .py_0p5()
+                                    .flex()
+                                    .gap_2()
+                                    .bg(background)
+                                    .font_family(tokens::FONT_MONO)
+                                    .text_xs()
+                                    .text_color(color)
+                                    .child(div().w(px(42.0)).text_right().child(
+                                        number.map(|value| value.to_string()).unwrap_or_default(),
+                                    ))
+                                    .child(div().w(px(12.0)).child(marker))
+                                    .child(line.content.clone()),
+                            );
+                        }
+                        file_panel = file_panel.child(hunk_panel);
+                    }
+                    detail = detail.child(file_panel);
+                    if rendered_lines >= MAX_RENDERED_DIFF_LINES {
+                        break;
+                    }
+                }
+                if rendered_lines >= MAX_RENDERED_DIFF_LINES {
+                    detail =
+                        detail.child(div().text_xs().text_color(theme.muted_foreground).child(
+                            "Diff 较大，仅显示前 400 行；可通过 commit SHA 获取完整 patch。",
+                        ));
+                }
             }
+            timeline = timeline.child(detail);
+        } else if !self.project_commits.is_empty() {
+            timeline = timeline.child(
+                div()
+                    .flex_1()
+                    .min_h(px(0.0))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .text_xs()
+                    .text_color(theme.muted_foreground)
+                    .child("选择一个节点查看文件变更"),
+            );
+        }
+
+        if let Some(error) = &self.project_changes_error {
+            timeline = timeline.child(
+                div()
+                    .flex_none()
+                    .px_4()
+                    .py_1()
+                    .text_xs()
+                    .text_color(theme.danger)
+                    .child(error.clone()),
+            );
         }
         if self.project_changes_has_more
             || (self.project_changes_loading && !self.project_commits.is_empty())
