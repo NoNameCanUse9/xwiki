@@ -87,9 +87,8 @@ fn main() {
         ]);
 
         cx.spawn(async move |cx| {
-            let start_bounds = cx.update(|cx| {
-                Bounds::centered(None, size(px(1024.0), px(680.0)), cx)
-            });
+            let start_bounds =
+                cx.update(|cx| Bounds::centered(None, size(px(1024.0), px(680.0)), cx));
             cx.open_window(
                 WindowOptions {
                     titlebar: Some(TitlebarOptions {

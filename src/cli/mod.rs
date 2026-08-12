@@ -232,9 +232,7 @@ async fn cmd_login(args: &[String]) -> i32 {
         std::io::stdin().read_line(&mut s).ok();
         s.trim().to_string()
     });
-    let password = password.unwrap_or_else(|| {
-        read_password("password: ")
-    });
+    let password = password.unwrap_or_else(|| read_password("password: "));
     match c.login(&username, &password).await {
         Ok(u) => {
             println!("logged in as {} (admin: {})", u.username, u.is_admin);
@@ -373,9 +371,7 @@ async fn cmd_project(args: &[String]) -> i32 {
                 std::io::stdin().read_line(&mut s).ok();
                 s.trim().to_string()
             };
-            let password = {
-                read_password("confirm password: ")
-            };
+            let password = { read_password("confirm password: ") };
             if username.is_empty() || password.is_empty() {
                 eprintln!("aborted: empty credentials");
                 return 2;
