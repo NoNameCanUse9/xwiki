@@ -196,6 +196,10 @@ func BackupRestore(input, dataDir string) error {
 		return err
 	}
 	if _, err := os.Stat(dataDir); err == nil {
+		if lock != nil {
+			_ = lock.Close()
+			lock = nil
+		}
 		if err := os.Remove(dataDir); err != nil {
 			return fmt.Errorf("remove empty restore target: %w", err)
 		}
