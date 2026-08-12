@@ -4127,6 +4127,8 @@ impl XWikiApp {
             let folder_name = name.clone();
             let folder_description = description.clone();
             let folder_path = folder.clone();
+            let folder_picker_state = folder.clone();
+            let folder_picker_handle = handle.clone();
             let folder_handle = handle.clone();
             let folder_button = Button::new("import-folder")
                 .primary()
@@ -4205,7 +4207,16 @@ impl XWikiApp {
                                 .text_color(theme.muted_foreground)
                                 .child("文件夹路径"),
                         )
-                        .child(Input::new(&folder))
+                        .child(
+                            h_flex()
+                                .gap_2()
+                                .w_full()
+                                .child(Input::new(&folder).flex_1())
+                                .child(import_folder_picker_button(
+                                    folder_picker_state.clone(),
+                                    folder_picker_handle.clone(),
+                                )),
+                        )
                         .child(
                             div()
                                 .mt_2()
@@ -5217,6 +5228,68 @@ fn collect_import_files(root: &std::path::Path) -> Result<Vec<dto::UploadFile>, 
     }
     files.sort_by(|left, right| left.path.cmp(&right.path));
     Ok(files)
+}
+
+fn folder_path_prompt_options() -> PathPromptOptions {
+    PathPromptOptions {
+        files: false,
+        directories: true,
+        multiple: false,
+        prompt: Some("选择要导入的文件夹".into()),
+    }
+}
+
+fn import_folder_picker_button(
+    folder: Entity<InputState>,
+    handle: Entity<XWikiApp>,
+) -> Button {
+    Button::new("choose-import-folder")
+        .secondary()
+        .outline()
+        .rounded(px(tokens::RADIUS))
+        .icon(IconName::FolderOpen)
+        .label("选择文件夹")
+        .on_click(move |_, window, cx| {
+            let selected = cx.prompt_for_paths(folder_path_prompt_options());
+            let window_handle = window.window_handle();
+            let folder = folder.clone();
+            let handle = handle.clone();
+            cx.spawn(async move |cx| match selected.await {
+                Ok(Ok(Some(paths))) => {
+                    if let Some(path) = paths.into_iter().next() {
+                        let value = path.to_string_lossy().to_string();
+                        let _ = cx.update_window(window_handle, |_, window, cx| {
+                            folder.update(cx, |state, cx| {
+                                state.set_value(value, window, cx);
+                            });
+                        });
+                    }
+                }
+                Ok(Err(error)) => {
+                    let _ = handle.update(cx, |app, cx| {
+                        app.status_msg = Some(format!("打开文件夹选择器失败: {error}"));
+                        cx.notify();
+                    });
+                }
+                Ok(Ok(None)) | Err(_) => {}
+            })
+            .detach();
+        })
+}
+
+#[cfg(test)]
+mod import_path_prompt_tests {
+    use super::folder_path_prompt_options;
+
+    #[test]
+    fn project_import_picker_selects_one_directory() {
+        let options = folder_path_prompt_options();
+
+        assert!(!options.files);
+        assert!(options.directories);
+        assert!(!options.multiple);
+        assert!(options.prompt.is_some());
+    }
 }
 
 fn is_markdown_import_path(path: &str) -> bool {
