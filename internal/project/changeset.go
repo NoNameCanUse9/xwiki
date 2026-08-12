@@ -75,6 +75,14 @@ func lockFor(projectID string) *sync.Mutex {
 	return &projectLocks[h.Sum32()%uint32(len(projectLocks))]
 }
 
+// LockProjectWrite serializes all operations that can move a project's Git
+// refs. Callers must defer the returned unlock function.
+func LockProjectWrite(projectID string) func() {
+	mu := lockFor(projectID)
+	mu.Lock()
+	return mu.Unlock
+}
+
 // ErrArchived reports writes to an archived project.
 var ErrArchived = errors.New("project is archived")
 

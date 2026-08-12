@@ -17,17 +17,19 @@ import (
 	"xwiki/internal/httpapi/request"
 	"xwiki/internal/httpapi/response"
 	"xwiki/internal/project"
+	"xwiki/internal/search"
 )
 
 // GitHTTPHandler proxies git http-backend for smart HTTP clone/pull/push.
 type GitHTTPHandler struct {
-	svc      *project.Service
-	agentSvc *agent.Service
-	log      *slog.Logger
+	svc       *project.Service
+	agentSvc  *agent.Service
+	searchSvc *search.Service
+	log       *slog.Logger
 }
 
-func NewGitHTTPHandler(svc *project.Service, agentSvc *agent.Service, log *slog.Logger) *GitHTTPHandler {
-	return &GitHTTPHandler{svc: svc, agentSvc: agentSvc, log: log}
+func NewGitHTTPHandler(svc *project.Service, agentSvc *agent.Service, searchSvc *search.Service, log *slog.Logger) *GitHTTPHandler {
+	return &GitHTTPHandler{svc: svc, agentSvc: agentSvc, searchSvc: searchSvc, log: log}
 }
 
 // ServeHTTP handles GET/POST /git/{projectID}/{subpath...}.
@@ -80,6 +82,17 @@ func (h *GitHTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if isWrite {
+		unlock := project.LockProjectWrite(projectID)
+		h.proxy(w, r, projectID, sub)
+		unlock()
+		if h.searchSvc != nil {
+			if _, err := h.searchSvc.ReindexProject(r.Context(), projectID); err != nil {
+				h.log.Warn("reindex after git push failed", "error", err, "project_id", projectID)
+			}
+		}
+		return
+	}
 	h.proxy(w, r, projectID, sub)
 }
 

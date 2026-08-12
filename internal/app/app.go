@@ -13,10 +13,11 @@ import (
 	"xwiki/internal/agent"
 	"xwiki/internal/auth"
 	"xwiki/internal/config"
+	"xwiki/internal/ops"
 	"xwiki/internal/platform/clock"
+	"xwiki/internal/platform/id"
 	"xwiki/internal/project"
 	"xwiki/internal/search"
-	"xwiki/internal/platform/id"
 	"xwiki/internal/server"
 	"xwiki/internal/store/sqlite"
 	"xwiki/internal/user"
@@ -24,12 +25,12 @@ import (
 
 // App wires configuration, storage, services and the HTTP handler.
 type App struct {
-	cfg     *config.Config
-	log     *slog.Logger
-	db      *sql.DB
-	clock   clock.Clock
-	users      *user.Store
-	authSvc    *auth.Service
+	cfg         *config.Config
+	log         *slog.Logger
+	db          *sql.DB
+	clock       clock.Clock
+	users       *user.Store
+	authSvc     *auth.Service
 	projectsSvc *project.Service
 	searchSvc   *search.Service
 	handler     http.Handler
@@ -90,6 +91,11 @@ func (a *App) CreateAdmin(ctx context.Context, username, password string) error 
 
 // Run serves HTTP until ctx is cancelled, then shuts down gracefully.
 func (a *App) Run(ctx context.Context) error {
+	dataLock, err := ops.AcquireDataLock(a.cfg.DataDir)
+	if err != nil {
+		return fmt.Errorf("acquire data directory lock: %w", err)
+	}
+	defer dataLock.Close()
 	srv := &http.Server{
 		Addr:              a.cfg.HTTPAddr,
 		Handler:           a.handler,

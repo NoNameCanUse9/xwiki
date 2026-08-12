@@ -12,6 +12,8 @@ import (
 
 	"xwiki/internal/app"
 	"xwiki/internal/config"
+	"xwiki/internal/httpapi"
+	"xwiki/internal/ops"
 )
 
 func main() {
@@ -33,12 +35,73 @@ func run(args []string) error {
 		return admin(args[1:])
 	case "reindex":
 		return reindex(args[1:])
+	case "backup":
+		return backup(args[1:])
+	case "doctor":
+		return doctor(args[1:])
 	case "help", "-h", "--help":
 		fmt.Fprint(os.Stdout, usageText)
 		return nil
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
 	}
+}
+
+func backup(args []string) error {
+	if len(args) == 0 {
+		return errors.New("usage: xwiki backup create -output <file> | xwiki backup restore -input <file> -data-dir <dir>")
+	}
+	switch args[0] {
+	case "create":
+		fs := flag.NewFlagSet("backup create", flag.ContinueOnError)
+		output := fs.String("output", "", "output .tar.gz path")
+		dataDir := fs.String("data-dir", "", "data directory")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if *output == "" {
+			return errors.New("-output is required")
+		}
+		cfg := config.Load()
+		if *dataDir != "" {
+			cfg.DataDir = *dataDir
+		}
+		if err := ops.BackupCreate(cfg.DataDir, *output, httpapi.ServiceVersion); err != nil {
+			return err
+		}
+		fmt.Printf("backup written to %s\n", *output)
+		return nil
+	case "restore":
+		fs := flag.NewFlagSet("backup restore", flag.ContinueOnError)
+		input := fs.String("input", "", "input .tar.gz path")
+		dataDir := fs.String("data-dir", "", "empty target data directory")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if *input == "" || *dataDir == "" {
+			return errors.New("-input and -data-dir are required")
+		}
+		if err := ops.BackupRestore(*input, *dataDir); err != nil {
+			return err
+		}
+		fmt.Printf("backup restored to %s\n", *dataDir)
+		return nil
+	default:
+		return errors.New("usage: xwiki backup create|restore")
+	}
+}
+
+func doctor(args []string) error {
+	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
+	dataDir := fs.String("data-dir", "", "data directory")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	cfg := config.Load()
+	if *dataDir != "" {
+		cfg.DataDir = *dataDir
+	}
+	return ops.Doctor(cfg.DataDir)
 }
 
 // reindex rebuilds the full-text index for all projects (or one with --project).
@@ -141,5 +204,8 @@ const usageText = `XWiki - Git-backed documentation server for humans and AI age
 Usage:
   xwiki serve              start the HTTP server
   xwiki admin create       create the first administrator user
+  xwiki backup create      create an offline data backup
+  xwiki backup restore     restore into an empty data directory
+  xwiki doctor             check data directory health
   xwiki help               show this help
 `

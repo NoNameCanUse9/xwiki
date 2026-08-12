@@ -184,6 +184,17 @@ func (r *Repo) Revision(ctx context.Context) (string, error) {
 	return out, nil
 }
 
+// ResolveRevision returns the full commit SHA for a branch, tag or commit
+// expression. It is used by document reads so content and its optimistic
+// concurrency base are always tied to the same Git object.
+func (r *Repo) ResolveRevision(ctx context.Context, rev string) (string, error) {
+	out, err := gitOutput(ctx, r.Dir, "rev-parse", rev+"^{commit}")
+	if err != nil {
+		return "", fmt.Errorf("resolve revision: %w", err)
+	}
+	return strings.TrimSpace(out), nil
+}
+
 // DefaultBranch resolves the repository's current branch name.
 func (r *Repo) DefaultBranch(ctx context.Context) (string, error) {
 	out, err := gitOutput(ctx, r.Dir, "rev-parse", "--abbrev-ref", "HEAD")

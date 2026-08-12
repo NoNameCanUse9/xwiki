@@ -140,6 +140,8 @@ func (s *Service) Rename(ctx context.Context, projectID string, input RenameInpu
 	if p.Name == input.Name {
 		return p, nil
 	}
+	unlock := LockProjectWrite(projectID)
+	defer unlock()
 	now := s.clock.Now().UTC()
 	if err := s.store.Rename(ctx, projectID, input.Name, now); err != nil {
 		return nil, err
@@ -156,17 +158,36 @@ func (s *Service) Rename(ctx context.Context, projectID string, input RenameInpu
 // Delete removes a project completely: metadata row and the on-disk bare
 // repository (git history included). It is destructive and irreversible.
 func (s *Service) Delete(ctx context.Context, projectID string) error {
+	unlock := LockProjectWrite(projectID)
+	defer unlock()
 	p, err := s.store.GetByID(ctx, projectID)
 	if err != nil {
 		return err
 	}
+	repoDir := filepath.Join(s.reposRoot, p.ID)
+	trashRoot := filepath.Join(s.reposRoot, ".trash")
+	if err := os.MkdirAll(trashRoot, 0o750); err != nil {
+		return fmt.Errorf("create repository trash: %w", err)
+	}
+	trashDir := filepath.Join(trashRoot, fmt.Sprintf("%s-%d", p.ID, s.clock.Now().UnixNano()))
+	moved := false
+	if err := os.Rename(repoDir, trashDir); err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("move repository to trash: %w", err)
+		}
+	} else {
+		moved = true
+	}
 	if err := s.store.Delete(ctx, projectID); err != nil {
+		if moved {
+			_ = os.Rename(trashDir, repoDir)
+		}
 		return err
 	}
-	// Remove the repository directory; tolerate a missing repo dir.
-	repoDir := filepath.Join(s.reposRoot, p.ID)
-	if err := os.RemoveAll(repoDir); err != nil {
-		return fmt.Errorf("remove repository: %w", err)
+	if moved {
+		if err := os.RemoveAll(trashDir); err != nil {
+			return fmt.Errorf("remove repository trash: %w", err)
+		}
 	}
 	return nil
 }
@@ -174,6 +195,8 @@ func (s *Service) Delete(ctx context.Context, projectID string) error {
 // Purge rewrites the project's git history to remove the given paths
 // completely (hard delete, irreversible). It requires an existing project.
 func (s *Service) Purge(ctx context.Context, projectID string, paths []string, message string) error {
+	unlock := LockProjectWrite(projectID)
+	defer unlock()
 	p, err := s.store.GetByID(ctx, projectID)
 	if err != nil {
 		return err
