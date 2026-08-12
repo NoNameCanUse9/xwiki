@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"strings"
 
-	"agentdocs/internal/agent"
-	"agentdocs/internal/httpapi/response"
+	"xwiki/internal/agent"
+	"xwiki/internal/httpapi/response"
 )
 
 type agentCtxKey int
@@ -59,16 +59,16 @@ func CommitAuthorIdentity(r *http.Request) (name, email string) {
 		if n == "" {
 			n = tokenID
 		}
-		return n, "token-" + tokenID + "@agentdocs.local"
+		return n, "token-" + tokenID + "@xwiki.local"
 	}
 	if u := UserFrom(r); u != nil {
 		n := u.DisplayName
 		if n == "" {
 			n = u.Username
 		}
-		return n, u.Username + "@agentdocs.local"
+		return n, u.Username + "@xwiki.local"
 	}
-	return "anonymous", "anonymous@agentdocs.local"
+	return "anonymous", "anonymous@xwiki.local"
 }
 
 // AgentTokenID returns the authenticated agent token id, or "" for session users.

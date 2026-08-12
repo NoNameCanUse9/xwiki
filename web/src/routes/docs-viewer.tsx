@@ -135,7 +135,7 @@ function MarkdownArticle({
 	return (
 		<article
 			ref={ref}
-			className="prose-agentdocs"
+			className="prose-xwiki"
 			dangerouslySetInnerHTML={{ __html: html }}
 			onClick={(e) => {
 				const anchor = (e.target as HTMLElement).closest("a");
@@ -521,7 +521,7 @@ export default function DocsViewerPage() {
 	};
 
 	const draftKey = (projectId: string, path: string) =>
-		`agentdocs:draft:${projectId}:${path}`;
+		`xwiki:draft:${projectId}:${path}`;
 
 	const startEditing = async () => {
 		if (lockState === "opening") return;

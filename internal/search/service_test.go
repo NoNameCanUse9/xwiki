@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"agentdocs/internal/project"
-	"agentdocs/internal/store/sqlite"
+	"xwiki/internal/project"
+	"xwiki/internal/store/sqlite"
 )
 
 func newService(t *testing.T) (*Service, *project.Service) {
@@ -143,7 +143,7 @@ func TestReindexProjectIncremental(t *testing.T) {
 			{Op: "create", Path: "docs/findme.md", Content: "# Findme\n\nunique keyword zanzibar\n"},
 			{Op: "create", Path: "docs/other.md", Content: "# Other\n\nplain\n"},
 		},
-	}, project.CommitAuthor{Name: "Test Author", Email: "test@agentdocs.local"}); err != nil {
+	}, project.CommitAuthor{Name: "Test Author", Email: "test@xwiki.local"}); err != nil {
 		t.Fatal(err)
 	}
 	stats, err = svc.ReindexProject(context.Background(), p.ID)
@@ -163,7 +163,7 @@ func TestReindexProjectIncremental(t *testing.T) {
 		BaseRevision: base,
 		Message:      "remove findme",
 		Changes:      []project.Change{{Op: "delete", Path: "docs/findme.md"}},
-	}, project.CommitAuthor{Name: "Test Author", Email: "test@agentdocs.local"}); err != nil {
+	}, project.CommitAuthor{Name: "Test Author", Email: "test@xwiki.local"}); err != nil {
 		t.Fatal(err)
 	}
 	stats, err = svc.ReindexProject(context.Background(), p.ID)

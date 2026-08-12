@@ -3,7 +3,7 @@ package middleware
 import (
 	"net/http"
 
-	"agentdocs/internal/httpapi/response"
+	"xwiki/internal/httpapi/response"
 )
 
 // AdminOnly rejects non-admin session users.

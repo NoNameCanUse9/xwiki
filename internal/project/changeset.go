@@ -80,7 +80,7 @@ func (s *Service) ApplyChangeset(ctx context.Context, projectID string, input Ch
 		author.Name = "anonymous"
 	}
 	if author.Email == "" {
-		author.Email = "anonymous@agentdocs.local"
+		author.Email = "anonymous@xwiki.local"
 	}
 	if strings.TrimSpace(input.Message) == "" {
 		input.Message = defaultMessage(s.clock.Now(), author, input.Changes)
@@ -111,7 +111,7 @@ func (s *Service) ApplyChangeset(ctx context.Context, projectID string, input Ch
 	}
 
 	// Temporary worktree on a detached HEAD.
-	wtDir, err := os.MkdirTemp("", "agentdocs-wt-*")
+	wtDir, err := os.MkdirTemp("", "xwiki-wt-*")
 	if err != nil {
 		return nil, fmt.Errorf("create worktree dir: %w", err)
 	}

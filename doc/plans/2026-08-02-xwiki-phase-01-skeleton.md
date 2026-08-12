@@ -1,8 +1,8 @@
-# AgentDocs 阶段一：项目骨架 Implementation Plan
+# XWiki 阶段一：项目骨架 Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 搭建 AgentDocs 的可运行骨架：Go 服务 + React 前端 + SQLite，支持创建管理员、登录、会话在服务重启后保持有效，前端构建产物嵌入 Go 二进制。
+**Goal:** 搭建 XWiki 的可运行骨架：Go 服务 + React 前端 + SQLite，支持创建管理员、登录、会话在服务重启后保持有效，前端构建产物嵌入 Go 二进制。
 
 **Architecture:** 单体 Go 服务（chi 路由 + SQLite 存储 + 领域服务层 + HTTP 层），前端为 Vite+React SPA，构建产物经 `go:embed` 打进二进制；网页会话用 HttpOnly Cookie + 服务端 `sessions` 表（只存哈希）；CLI 与 HTTP 共用同一套 app 装配，杜绝两套逻辑。
 
@@ -14,7 +14,7 @@
 
 **做：**
 
-- Go 服务骨架（`cmd/agentdocs`：`serve`、`admin create`）
+- Go 服务骨架（`cmd/xwiki`：`serve`、`admin create`）
 - 配置（环境变量 + 子命令 flag）
 - SQLite + goose 迁移（`users`、`sessions`、`schema_migrations`）
 - 认证：Argon2id 密码哈希、HttpOnly Session Cookie
@@ -39,7 +39,7 @@ xwiki/
 ├── .gitignore                        （修改：忽略 data/、二进制）
 ├── README.md                         （Task 18）
 ├── go.mod / go.sum                   （Task 2）
-├── cmd/agentdocs/main.go             （CLI：serve / admin create）
+├── cmd/xwiki/main.go             （CLI：serve / admin create）
 ├── internal/
 │   ├── app/app.go                    （装配 + CreateAdmin + Run）
 │   ├── config/config.go              （环境变量配置）
@@ -95,9 +95,9 @@ Expected: `Initialized empty Git repository in /home/choken/code/xwiki/.git/`，
 # Local Pi runtime state
 .atl/
 
-# AgentDocs runtime
+# XWiki runtime
 /data/
-/agentdocs
+/xwiki
 *.log
 ```
 
@@ -105,7 +105,7 @@ Expected: `Initialized empty Git repository in /home/choken/code/xwiki/.git/`，
 
 ```bash
 git add .gitignore doc/
-git commit -m "chore: initialize agentdocs repository"
+git commit -m "chore: initialize xwiki repository"
 ```
 
 Expected: 提交包含 `doc/spec.md`、`doc/plans/README.md`、本计划文件。
@@ -118,10 +118,10 @@ Expected: 提交包含 `doc/spec.md`、`doc/plans/README.md`、本计划文件�
 - [ ] **Step 1: 初始化模块**
 
 ```bash
-go mod init agentdocs
+go mod init xwiki
 ```
 
-Expected: 生成 `go.mod`，module 为 `agentdocs`。注：模块路径暂用 `agentdocs`；将来托管 GitHub 时整体机械替换即可。
+Expected: 生成 `go.mod`，module 为 `xwiki`。注：模块路径暂用 `xwiki`；将来托管 GitHub 时整体机械替换即可。
 
 - [ ] **Step 2: 安装依赖**
 
@@ -159,19 +159,19 @@ package config
 import "testing"
 
 func TestEnvOr(t *testing.T) {
-	t.Setenv("AGENTDOCS_TEST_X", "value")
-	if got := envOr("AGENTDOCS_TEST_X", "default"); got != "value" {
+	t.Setenv("XWIKI_TEST_X", "value")
+	if got := envOr("XWIKI_TEST_X", "default"); got != "value" {
 		t.Fatalf("envOr = %q, want %q", got, "value")
 	}
-	t.Setenv("AGENTDOCS_TEST_X", "")
-	if got := envOr("AGENTDOCS_TEST_X", "default"); got != "default" {
+	t.Setenv("XWIKI_TEST_X", "")
+	if got := envOr("XWIKI_TEST_X", "default"); got != "default" {
 		t.Fatalf("envOr = %q, want %q", got, "default")
 	}
 }
 
 func TestLoadDefaults(t *testing.T) {
-	t.Setenv("AGENTDOCS_DATA_DIR", "")
-	t.Setenv("AGENTDOCS_HTTP_ADDR", "")
+	t.Setenv("XWIKI_DATA_DIR", "")
+	t.Setenv("XWIKI_HTTP_ADDR", "")
 	cfg := Load()
 	if cfg.DataDir != "data" || cfg.HTTPAddr != ":8080" {
 		t.Fatalf("unexpected defaults: %+v", cfg)
@@ -182,8 +182,8 @@ func TestLoadDefaults(t *testing.T) {
 }
 
 func TestLoadFromEnv(t *testing.T) {
-	t.Setenv("AGENTDOCS_HTTP_ADDR", ":9090")
-	t.Setenv("AGENTDOCS_SESSION_TTL", "1h")
+	t.Setenv("XWIKI_HTTP_ADDR", ":9090")
+	t.Setenv("XWIKI_SESSION_TTL", "1h")
 	cfg := Load()
 	if cfg.HTTPAddr != ":9090" {
 		t.Fatalf("HTTPAddr = %q", cfg.HTTPAddr)
@@ -224,16 +224,16 @@ type Config struct {
 	SecureCookies bool
 }
 
-// Load reads configuration from AGENTDOCS_* environment variables,
+// Load reads configuration from XWIKI_* environment variables,
 // falling back to development-friendly defaults.
 func Load() *Config {
 	return &Config{
-		DataDir:       envOr("AGENTDOCS_DATA_DIR", "data"),
-		HTTPAddr:      envOr("AGENTDOCS_HTTP_ADDR", ":8080"),
-		WebOrigin:     envOr("AGENTDOCS_WEB_ORIGIN", "http://localhost:5173"),
-		SessionTTL:    envDuration("AGENTDOCS_SESSION_TTL", 30*24*time.Hour),
-		MaxBodyBytes:  envInt64("AGENTDOCS_MAX_BODY_BYTES", 1<<20),
-		SecureCookies: envBool("AGENTDOCS_COOKIE_SECURE", false),
+		DataDir:       envOr("XWIKI_DATA_DIR", "data"),
+		HTTPAddr:      envOr("XWIKI_HTTP_ADDR", ":8080"),
+		WebOrigin:     envOr("XWIKI_WEB_ORIGIN", "http://localhost:5173"),
+		SessionTTL:    envDuration("XWIKI_SESSION_TTL", 30*24*time.Hour),
+		MaxBodyBytes:  envInt64("XWIKI_MAX_BODY_BYTES", 1<<20),
+		SecureCookies: envBool("XWIKI_COOKIE_SECURE", false),
 	}
 }
 
@@ -278,7 +278,7 @@ func envBool(key string, def bool) bool {
 go test ./internal/config/
 ```
 
-Expected: `ok  agentdocs/internal/config`。
+Expected: `ok  xwiki/internal/config`。
 
 - [ ] **Step 5: 格式检查 + 提交**
 
@@ -368,7 +368,7 @@ func (Real) Now() time.Time { return time.Now() }
 go test ./internal/platform/...
 ```
 
-Expected: `ok  agentdocs/internal/platform/id`。
+Expected: `ok  xwiki/internal/platform/id`。
 
 - [ ] **Step 5: 提交**
 
@@ -499,7 +499,7 @@ func Open(dataDir string) (*sql.DB, error) {
 	if err := os.MkdirAll(dataDir, 0o755); err != nil {
 		return nil, fmt.Errorf("create data dir: %w", err)
 	}
-	db, err := sql.Open("sqlite", filepath.Join(dataDir, "agentdocs.db"))
+	db, err := sql.Open("sqlite", filepath.Join(dataDir, "xwiki.db"))
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
 	}
@@ -533,7 +533,7 @@ func Open(dataDir string) (*sql.DB, error) {
 go test ./internal/store/sqlite/
 ```
 
-Expected: `ok  agentdocs/internal/store/sqlite`。
+Expected: `ok  xwiki/internal/store/sqlite`。
 
 - [ ] **Step 6: 提交**
 
@@ -562,7 +562,7 @@ import (
 	"testing"
 	"time"
 
-	"agentdocs/internal/store/sqlite"
+	"xwiki/internal/store/sqlite"
 )
 
 func newStore(t *testing.T) *Store {
@@ -733,7 +733,7 @@ func scanUser(row *sql.Row) (*User, error) {
 go test ./internal/user/
 ```
 
-Expected: `ok  agentdocs/internal/user`。
+Expected: `ok  xwiki/internal/user`。
 
 - [ ] **Step 5: 提交**
 
@@ -896,7 +896,7 @@ func parseParams(s string) (uint32, uint32, uint8, error) {
 go test ./internal/auth/
 ```
 
-Expected: `ok  agentdocs/internal/auth`。
+Expected: `ok  xwiki/internal/auth`。
 
 - [ ] **Step 5: 提交**
 
@@ -924,9 +924,9 @@ import (
 	"testing"
 	"time"
 
-	"agentdocs/internal/platform/clock"
-	"agentdocs/internal/store/sqlite"
-	"agentdocs/internal/user"
+	"xwiki/internal/platform/clock"
+	"xwiki/internal/store/sqlite"
+	"xwiki/internal/user"
 )
 
 type fakeClock struct{ now time.Time }
@@ -1053,9 +1053,9 @@ import (
 	"errors"
 	"time"
 
-	"agentdocs/internal/platform/clock"
-	"agentdocs/internal/platform/id"
-	"agentdocs/internal/user"
+	"xwiki/internal/platform/clock"
+	"xwiki/internal/platform/id"
+	"xwiki/internal/user"
 )
 
 var (
@@ -1178,7 +1178,7 @@ func (s *Service) DeleteSessionByToken(ctx context.Context, token string) error 
 go test ./internal/auth/
 ```
 
-Expected: `ok  agentdocs/internal/auth`。
+Expected: `ok  xwiki/internal/auth`。
 
 - [ ] **Step 5: 提交**
 
@@ -1266,7 +1266,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"agentdocs/internal/httpapi/request"
+	"xwiki/internal/httpapi/request"
 )
 
 func TestWriteErrorEnvelope(t *testing.T) {
@@ -1356,7 +1356,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"agentdocs/internal/httpapi/request"
+	"xwiki/internal/httpapi/request"
 )
 
 // ErrorBody is the unified error envelope (spec §20).
@@ -1393,7 +1393,7 @@ func WriteError(w http.ResponseWriter, r *http.Request, status int, code, messag
 go test ./internal/httpapi/...
 ```
 
-Expected: `ok  agentdocs/internal/httpapi/request`、`ok  agentdocs/internal/httpapi/response`。
+Expected: `ok  xwiki/internal/httpapi/request`、`ok  xwiki/internal/httpapi/response`。
 
 - [ ] **Step 6: 提交**
 
@@ -1426,11 +1426,11 @@ import (
 	"testing"
 	"time"
 
-	"agentdocs/internal/auth"
-	"agentdocs/internal/httpapi/request"
-	"agentdocs/internal/platform/clock"
-	"agentdocs/internal/store/sqlite"
-	"agentdocs/internal/user"
+	"xwiki/internal/auth"
+	"xwiki/internal/httpapi/request"
+	"xwiki/internal/platform/clock"
+	"xwiki/internal/store/sqlite"
+	"xwiki/internal/user"
 )
 
 func newAuthService(t *testing.T) *auth.Service {
@@ -1476,7 +1476,7 @@ func TestSessionAuthRejectsMissingOrInvalidCookie(t *testing.T) {
 
 	rec = httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.AddCookie(&http.Cookie{Name: "agentdocs_session", Value: "garbage"})
+	req.AddCookie(&http.Cookie{Name: "xwiki_session", Value: "garbage"})
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("bad cookie: status = %d, want 401", rec.Code)
@@ -1524,7 +1524,7 @@ func TestSessionAuthAcceptsValidSession(t *testing.T) {
 	}))
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.AddCookie(&http.Cookie{Name: "agentdocs_session", Value: token})
+	req.AddCookie(&http.Cookie{Name: "xwiki_session", Value: token})
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
@@ -1565,8 +1565,8 @@ import (
 
 	"github.com/oklog/ulid/v2"
 
-	"agentdocs/internal/httpapi/request"
-	"agentdocs/internal/httpapi/response"
+	"xwiki/internal/httpapi/request"
+	"xwiki/internal/httpapi/response"
 )
 
 // RequestID ensures every request has an ID and echoes it in the response.
@@ -1636,9 +1636,9 @@ import (
 	"context"
 	"net/http"
 
-	"agentdocs/internal/auth"
-	"agentdocs/internal/httpapi/response"
-	"agentdocs/internal/user"
+	"xwiki/internal/auth"
+	"xwiki/internal/httpapi/response"
+	"xwiki/internal/user"
 )
 
 type ctxKey int
@@ -1649,7 +1649,7 @@ const userKey ctxKey = 0
 func SessionAuth(svc *auth.Service) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			cookie, err := r.Cookie("agentdocs_session")
+			cookie, err := r.Cookie("xwiki_session")
 			if err != nil {
 				response.WriteError(w, r, http.StatusUnauthorized, "authentication_required", "login required")
 				return
@@ -1678,7 +1678,7 @@ func UserFrom(r *http.Request) *user.User {
 go test ./internal/httpapi/middleware/
 ```
 
-Expected: `ok  agentdocs/internal/httpapi/middleware`。
+Expected: `ok  xwiki/internal/httpapi/middleware`。
 
 - [ ] **Step 6: 提交**
 
@@ -1704,10 +1704,10 @@ git commit -m "feat: add http middleware (request id, logging, recovery, session
 <html lang="zh-CN">
   <head>
     <meta charset="utf-8" />
-    <title>AgentDocs</title>
+    <title>XWiki</title>
   </head>
   <body>
-    <p>AgentDocs placeholder — run `npm run build` in web/ to generate the real bundle.</p>
+    <p>XWiki placeholder — run `npm run build` in web/ to generate the real bundle.</p>
   </body>
 </html>
 ```
@@ -1745,11 +1745,11 @@ import (
 	"testing"
 	"time"
 
-	"agentdocs/internal/auth"
-	"agentdocs/internal/config"
-	"agentdocs/internal/platform/clock"
-	"agentdocs/internal/store/sqlite"
-	"agentdocs/internal/user"
+	"xwiki/internal/auth"
+	"xwiki/internal/config"
+	"xwiki/internal/platform/clock"
+	"xwiki/internal/store/sqlite"
+	"xwiki/internal/user"
 )
 
 func newTestRouter(t *testing.T) http.Handler {
@@ -1802,12 +1802,12 @@ func TestSPAServesPlaceholderAndFallsBack(t *testing.T) {
 	h := newTestRouter(t)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "AgentDocs placeholder") {
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "XWiki placeholder") {
 		t.Fatalf("root: status=%d body=%q", rec.Code, rec.Body.String())
 	}
 	rec = httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/login", nil))
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "AgentDocs placeholder") {
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "XWiki placeholder") {
 		t.Fatalf("spa fallback: status=%d body=%q", rec.Code, rec.Body.String())
 	}
 }
@@ -1832,12 +1832,12 @@ import (
 	"log/slog"
 	"net/http"
 
-	"agentdocs/internal/auth"
-	"agentdocs/internal/config"
-	"agentdocs/internal/httpapi/middleware"
-	"agentdocs/internal/httpapi/request"
-	"agentdocs/internal/httpapi/response"
-	"agentdocs/internal/user"
+	"xwiki/internal/auth"
+	"xwiki/internal/config"
+	"xwiki/internal/httpapi/middleware"
+	"xwiki/internal/httpapi/request"
+	"xwiki/internal/httpapi/response"
+	"xwiki/internal/user"
 )
 
 type AuthHandler struct {
@@ -1868,7 +1868,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.SetCookie(w, &http.Cookie{
-		Name:     "agentdocs_session",
+		Name:     "xwiki_session",
 		Value:    token,
 		Path:     "/",
 		HttpOnly: true,
@@ -1880,11 +1880,11 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
-	if cookie, err := r.Cookie("agentdocs_session"); err == nil {
+	if cookie, err := r.Cookie("xwiki_session"); err == nil {
 		_ = h.svc.DeleteSessionByToken(r.Context(), cookie.Value)
 	}
 	http.SetCookie(w, &http.Cookie{
-		Name:     "agentdocs_session",
+		Name:     "xwiki_session",
 		Value:    "",
 		Path:     "/",
 		HttpOnly: true,
@@ -1967,13 +1967,13 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/cors"
 
-	"agentdocs/internal/auth"
-	"agentdocs/internal/config"
-	"agentdocs/internal/httpapi/handlers"
-	"agentdocs/internal/httpapi/middleware"
-	"agentdocs/internal/httpapi/response"
-	"agentdocs/internal/user"
-	"agentdocs/web"
+	"xwiki/internal/auth"
+	"xwiki/internal/config"
+	"xwiki/internal/httpapi/handlers"
+	"xwiki/internal/httpapi/middleware"
+	"xwiki/internal/httpapi/response"
+	"xwiki/internal/user"
+	"xwiki/web"
 )
 
 func NewRouter(cfg *config.Config, log *slog.Logger, db *sql.DB, users *user.Store, authSvc *auth.Service) http.Handler {
@@ -2050,7 +2050,7 @@ func spaHandler() http.Handler {
 go test ./internal/server/
 ```
 
-Expected: `ok  agentdocs/internal/server`。
+Expected: `ok  xwiki/internal/server`。
 
 - [ ] **Step 7: 提交**
 
@@ -2081,7 +2081,7 @@ import (
 	"strings"
 	"testing"
 
-	"agentdocs/internal/config"
+	"xwiki/internal/config"
 )
 
 func newTestApp(t *testing.T) *App {
@@ -2149,7 +2149,7 @@ func TestLoginSuccessAndMe(t *testing.T) {
 		t.Fatal("no session cookie")
 	}
 	for _, c := range cookies {
-		if c.Name == "agentdocs_session" {
+		if c.Name == "xwiki_session" {
 			if !c.HttpOnly {
 				t.Fatal("session cookie not HttpOnly")
 			}
@@ -2302,13 +2302,13 @@ import (
 	"strings"
 	"time"
 
-	"agentdocs/internal/auth"
-	"agentdocs/internal/config"
-	"agentdocs/internal/platform/clock"
-	"agentdocs/internal/platform/id"
-	"agentdocs/internal/server"
-	"agentdocs/internal/store/sqlite"
-	"agentdocs/internal/user"
+	"xwiki/internal/auth"
+	"xwiki/internal/config"
+	"xwiki/internal/platform/clock"
+	"xwiki/internal/platform/id"
+	"xwiki/internal/server"
+	"xwiki/internal/store/sqlite"
+	"xwiki/internal/user"
 )
 
 // App wires configuration, storage, services and the HTTP handler.
@@ -2409,11 +2409,11 @@ git commit -m "feat: wire application and admin creation"
 ### Task 13: CLI（serve / admin create）
 
 **Files:**
-- Create: `cmd/agentdocs/main.go`
+- Create: `cmd/xwiki/main.go`
 
 - [ ] **Step 1: 实现 CLI**
 
-`cmd/agentdocs/main.go`：
+`cmd/xwiki/main.go`：
 
 ```go
 package main
@@ -2428,8 +2428,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	"agentdocs/internal/app"
-	"agentdocs/internal/config"
+	"xwiki/internal/app"
+	"xwiki/internal/config"
 )
 
 func main() {
@@ -2459,8 +2459,8 @@ func run(args []string) error {
 
 func serve(args []string) error {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
-	dataDir := fs.String("data-dir", "", "data directory (default: $AGENTDOCS_DATA_DIR or data)")
-	httpAddr := fs.String("http-addr", "", "HTTP listen address (default: $AGENTDOCS_HTTP_ADDR or :8080)")
+	dataDir := fs.String("data-dir", "", "data directory (default: $XWIKI_DATA_DIR or data)")
+	httpAddr := fs.String("http-addr", "", "HTTP listen address (default: $XWIKI_HTTP_ADDR or :8080)")
 	_ = fs.Parse(args)
 
 	cfg := config.Load()
@@ -2484,21 +2484,21 @@ func serve(args []string) error {
 
 func admin(args []string) error {
 	if len(args) == 0 || args[0] != "create" {
-		return errors.New("usage: agentdocs admin create -username <name> [-password <pw>]")
+		return errors.New("usage: xwiki admin create -username <name> [-password <pw>]")
 	}
 	fs := flag.NewFlagSet("admin create", flag.ExitOnError)
 	username := fs.String("username", "", "admin username")
-	password := fs.String("password", "", "admin password (fallback: $AGENTDOCS_ADMIN_PASSWORD)")
+	password := fs.String("password", "", "admin password (fallback: $XWIKI_ADMIN_PASSWORD)")
 	_ = fs.Parse(args[1:])
 	if *username == "" {
 		return errors.New("username is required")
 	}
 	pw := *password
 	if pw == "" {
-		pw = os.Getenv("AGENTDOCS_ADMIN_PASSWORD")
+		pw = os.Getenv("XWIKI_ADMIN_PASSWORD")
 	}
 	if pw == "" {
-		return errors.New("password is required (flag -password or env AGENTDOCS_ADMIN_PASSWORD)")
+		return errors.New("password is required (flag -password or env XWIKI_ADMIN_PASSWORD)")
 	}
 	a, err := app.New(config.Load())
 	if err != nil {
@@ -2513,34 +2513,34 @@ func usageError() error {
 	return errors.New("missing command")
 }
 
-const usageText = `AgentDocs - Git-backed documentation server for humans and AI agents
+const usageText = `XWiki - Git-backed documentation server for humans and AI agents
 
 Usage:
-  agentdocs serve              start the HTTP server
-  agentdocs admin create       create the first administrator user
-  agentdocs help               show this help
+  xwiki serve              start the HTTP server
+  xwiki admin create       create the first administrator user
+  xwiki help               show this help
 `
 ```
 
 - [ ] **Step 2: 编译**
 
 ```bash
-go build -o agentdocs ./cmd/agentdocs
+go build -o xwiki ./cmd/xwiki
 ```
 
-Expected: 成功生成 `agentdocs` 二进制（`agentdocs` 已被 .gitignore 忽略）。
+Expected: 成功生成 `xwiki` 二进制（`xwiki` 已被 .gitignore 忽略）。
 
 - [ ] **Step 3: CLI 冒烟测试**
 
 ```bash
-./agentdocs help
-./agentdocs admin create -username admin -password secret123
+./xwiki help
+./xwiki admin create -username admin -password secret123
 ```
 
 Expected: 第一条输出 usage；第二条无输出（成功）。再执行一次第二条：
 
 ```bash
-./agentdocs admin create -username admin -password secret123
+./xwiki admin create -username admin -password secret123
 ```
 
 Expected: 报错 `user "admin" already exists`，退出码非 0。
@@ -2548,7 +2548,7 @@ Expected: 报错 `user "admin" already exists`，退出码非 0。
 - [ ] **Step 4: 服务冒烟测试（含重启验证）**
 
 ```bash
-./agentdocs serve > /tmp/agentdocs.log 2>&1 &
+./xwiki serve > /tmp/xwiki.log 2>&1 &
 sleep 1
 curl -s http://127.0.0.1:8080/healthz
 curl -s http://127.0.0.1:8080/readyz
@@ -2560,7 +2560,7 @@ curl -s http://127.0.0.1:8080/api/v1/auth/me
 
 Expected:
 - healthz/readyz 返回 `{"status":"ok"}` / `{"status":"ready"}`
-- login 返回 200 并携带 `Set-Cookie: agentdocs_session=...; HttpOnly`
+- login 返回 200 并携带 `Set-Cookie: xwiki_session=...; HttpOnly`
 - 带 cookie 的 me 返回 `{"user":{"id":"usr_...","username":"admin","is_admin":true,...}}`
 - 不带 cookie 的 me 返回 401 错误信封
 
@@ -2569,7 +2569,7 @@ Expected:
 ```bash
 kill %1
 sleep 1
-./agentdocs serve > /tmp/agentdocs.log 2>&1 &
+./xwiki serve > /tmp/xwiki.log 2>&1 &
 sleep 1
 curl -s -b /tmp/ad-cookies.txt http://127.0.0.1:8080/api/v1/auth/me
 kill %1
@@ -2582,7 +2582,7 @@ Expected: 重启后同一 cookie 仍然返回 200 —— Session 在 SQLite 中�
 ```bash
 gofmt -l .
 git add cmd/
-git commit -m "feat: add agentdocs cli (serve, admin create)"
+git commit -m "feat: add xwiki cli (serve, admin create)"
 ```
 
 ### Task 14: 前端脚手架（Vite + Tailwind + shadcn/ui + Vitest）
@@ -3150,7 +3150,7 @@ export default function LoginPage() {
     <div className="flex min-h-screen items-center justify-center bg-muted/40 p-4">
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <CardTitle>AgentDocs</CardTitle>
+          <CardTitle>XWiki</CardTitle>
           <CardDescription>登录以继续</CardDescription>
         </CardHeader>
         <CardContent>
@@ -3241,7 +3241,7 @@ export default function HomePage() {
   const logout = useAuthStore((s) => s.logout);
   return (
     <div className="flex min-h-screen flex-col items-center justify-center gap-4">
-      <h1 className="text-2xl font-semibold">AgentDocs</h1>
+      <h1 className="text-2xl font-semibold">XWiki</h1>
       <p>已登录：{user?.username}</p>
       <Button variant="outline" onClick={() => void logout()}>
         退出登录
@@ -3330,7 +3330,7 @@ git commit -m "feat: add login page, routing and protected layout"
 cd web
 npm run build
 cd ..
-go build -o agentdocs ./cmd/agentdocs
+go build -o xwiki ./cmd/xwiki
 ```
 
 Expected: `web/dist` 生成真实 bundle；二进制构建成功（已嵌入真实前端）。
@@ -3338,7 +3338,7 @@ Expected: `web/dist` 生成真实 bundle；二进制构建成功（已嵌入真�
 - [ ] **Step 2: 一体冒烟**
 
 ```bash
-./agentdocs serve > /tmp/agentdocs.log 2>&1 &
+./xwiki serve > /tmp/xwiki.log 2>&1 &
 sleep 1
 curl -s http://127.0.0.1:8080/ | head -5
 curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8080/login
@@ -3363,7 +3363,7 @@ Expected: `web/dist/index.html` 恢复为占位符版本（仓库中始终只跟
 
 - [ ] **Step 4: 浏览器人工验证（可选）**
 
-若环境允许：启动 `./agentdocs serve`，浏览器打开 `http://localhost:8080`，用 admin 登录，确认跳转到首页并显示「已登录：admin」；刷新页面确认会话保持（验收点 2）。
+若环境允许：启动 `./xwiki serve`，浏览器打开 `http://localhost:8080`，用 admin 登录，确认跳转到首页并显示「已登录：admin」；刷新页面确认会话保持（验收点 2）。
 
 ### Task 18: 项目文档
 
@@ -3375,7 +3375,7 @@ Expected: `web/dist/index.html` 恢复为占位符版本（仓库中始终只跟
 `README.md`（仓库根）：
 
 ```markdown
-# AgentDocs
+# XWiki
 
 面向人类与 AI Agent 的轻量 Git 文档管理系统。
 
@@ -3389,7 +3389,7 @@ Expected: `web/dist/index.html` 恢复为占位符版本（仓库中始终只跟
 
 ```bash
 # 后端
-./agentdocs serve   # 或 go run ./cmd/agentdocs serve
+./xwiki serve   # 或 go run ./cmd/xwiki serve
 # 前端（开发服务器，/api 代理到 :8080）
 cd web && npm run dev
 ```
@@ -3397,7 +3397,7 @@ cd web && npm run dev
 ### 首次使用
 
 ```bash
-./agentdocs admin create -username admin -password secret123
+./xwiki admin create -username admin -password secret123
 ```
 
 浏览器打开 http://localhost:8080 登录。
@@ -3406,7 +3406,7 @@ cd web && npm run dev
 
 ```bash
 cd web && npm install && npm run build && cd ..
-go build -o agentdocs ./cmd/agentdocs
+go build -o xwiki ./cmd/xwiki
 go test ./...
 cd web && npm run test
 ```
@@ -3421,12 +3421,12 @@ docker compose up -d --build
 
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
-| `AGENTDOCS_DATA_DIR` | `data` | 数据目录（SQLite + 仓库） |
-| `AGENTDOCS_HTTP_ADDR` | `:8080` | HTTP 监听地址 |
-| `AGENTDOCS_WEB_ORIGIN` | `http://localhost:5173` | 允许的 CORS 来源 |
-| `AGENTDOCS_SESSION_TTL` | `720h` | 会话有效期 |
-| `AGENTDOCS_MAX_BODY_BYTES` | `1048576` | 请求体上限 |
-| `AGENTDOCS_COOKIE_SECURE` | `false` | 生产环境设为 true |
+| `XWIKI_DATA_DIR` | `data` | 数据目录（SQLite + 仓库） |
+| `XWIKI_HTTP_ADDR` | `:8080` | HTTP 监听地址 |
+| `XWIKI_WEB_ORIGIN` | `http://localhost:5173` | 允许的 CORS 来源 |
+| `XWIKI_SESSION_TTL` | `720h` | 会话有效期 |
+| `XWIKI_MAX_BODY_BYTES` | `1048576` | 请求体上限 |
+| `XWIKI_COOKIE_SECURE` | `false` | 生产环境设为 true |
 
 ## 目录结构
 
@@ -3460,7 +3460,7 @@ HTTP 层（internal/httpapi）→ 服务层（internal/auth、internal/app）→
 
 ## 数据存储
 
-- SQLite：data/agentdocs.db（WAL、外键、busy_timeout）
+- SQLite：data/xwiki.db（WAL、外键、busy_timeout）
 - 迁移：goose，SQL 文件内嵌于二进制（internal/store/sqlite/migrations）
 - 表：users、sessions、schema_migrations
 
@@ -3498,7 +3498,7 @@ HTTP 层（internal/httpapi）→ 服务层（internal/auth、internal/app）→
 
 请求：{"username":"...","password":"..."}
 
-- 200 {"user":{...}}，Set-Cookie: agentdocs_session（HttpOnly）
+- 200 {"user":{...}}，Set-Cookie: xwiki_session（HttpOnly）
 - 401 invalid_credentials
 
 ### POST /auth/logout
@@ -3544,7 +3544,7 @@ Go 1.26+、Node 26+、Git（运行时也需要 Git，阶段二起使用）。
 - 后端测试：go test ./...
 - 前端测试：cd web && npm run test
 - 前端构建：cd web && npm run build（必须先于 go build，产物被 go:embed）
-- 编译：go build -o agentdocs ./cmd/agentdocs
+- 编译：go build -o xwiki ./cmd/xwiki
 
 ## 新增迁移
 
@@ -3596,15 +3596,15 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 COPY --from=web /app/dist ./web/dist
-RUN CGO_ENABLED=0 go build -o /out/agentdocs ./cmd/agentdocs
+RUN CGO_ENABLED=0 go build -o /out/xwiki ./cmd/xwiki
 
 # ---- Runtime ----
 FROM alpine:3.22
 RUN apk add --no-cache git ca-certificates
-COPY --from=build /out/agentdocs /usr/local/bin/agentdocs
-ENV AGENTDOCS_DATA_DIR=/data
+COPY --from=build /out/xwiki /usr/local/bin/xwiki
+ENV XWIKI_DATA_DIR=/data
 EXPOSE 8080
-ENTRYPOINT ["agentdocs"]
+ENTRYPOINT ["xwiki"]
 CMD ["serve"]
 ```
 
@@ -3618,7 +3618,7 @@ CMD ["serve"]
 .git
 .atl
 data
-agentdocs
+xwiki
 web/node_modules
 web/dist
 ```
@@ -3629,17 +3629,17 @@ web/dist
 
 ```yaml
 services:
-  agentdocs:
+  xwiki:
     build: .
     ports:
       - "8080:8080"
     environment:
-      AGENTDOCS_HTTP_ADDR: ":8080"
+      XWIKI_HTTP_ADDR: ":8080"
     volumes:
-      - agentdocs-data:/data
+      - xwiki-data:/data
 
 volumes:
-  agentdocs-data:
+  xwiki-data:
 ```
 
 - [ ] **Step 4: 构建并验证**
@@ -3649,7 +3649,7 @@ docker compose up -d --build
 sleep 3
 curl -s http://127.0.0.1:8080/healthz
 curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8080/
-docker compose exec agentdocs agentdocs admin create -username admin -password secret123
+docker compose exec xwiki xwiki admin create -username admin -password secret123
 curl -s -c /tmp/ad-cookies.txt -X POST http://127.0.0.1:8080/api/v1/auth/login \
   -H 'Content-Type: application/json' -d '{"username":"admin","password":"secret123"}'
 curl -s -b /tmp/ad-cookies.txt http://127.0.0.1:8080/api/v1/auth/me
@@ -3685,7 +3685,7 @@ Expected: vet 无告警；Go 测试全绿（含会话重启持久化）；前端
 ```bash
 cd web && npm run build && cd ..
 git restore web/dist/index.html
-go build -o agentdocs ./cmd/agentdocs
+go build -o xwiki ./cmd/xwiki
 ```
 
 - [ ] **Step 3: 对照 spec 勾选验收项**

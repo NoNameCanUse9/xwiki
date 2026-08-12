@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 /* ============================================================
-   AgentDocs · Hallmark Cobalt theme (modern-minimal genre)
+   XWiki · Hallmark Cobalt theme (modern-minimal genre)
    genre: modern-minimal · theme: cobalt · nav: N3 side-rail
    paper: cool engineered near-white / graphite dark · accent: electric cobalt
    ============================================================ */
@@ -198,13 +198,13 @@ body {
 }
 
 /* ---------- Markdown prose (rendered docs) ---------- */
-.prose-agentdocs {
+.prose-xwiki {
   color: var(--color-ink-2);
   font-size: 0.9375rem;
   line-height: 1.75;
 }
-.prose-agentdocs > *:first-child { margin-top: 0; }
-.prose-agentdocs h1, .prose-agentdocs h2, .prose-agentdocs h3, .prose-agentdocs h4 {
+.prose-xwiki > *:first-child { margin-top: 0; }
+.prose-xwiki h1, .prose-xwiki h2, .prose-xwiki h3, .prose-xwiki h4 {
   font-family: var(--font-display);
   letter-spacing: -0.02em;
   color: var(--color-ink);
@@ -212,16 +212,16 @@ body {
   line-height: 1.25;
   margin: 1.75em 0 0.6em;
 }
-.prose-agentdocs h1 { font-size: 1.75rem; padding-bottom: 0.35em; border-bottom: 1px solid var(--color-rule); }
-.prose-agentdocs h2 { font-size: 1.375rem; padding-bottom: 0.3em; border-bottom: 1px solid var(--color-rule); }
-.prose-agentdocs h3 { font-size: 1.125rem; }
-.prose-agentdocs p { margin: 0.9em 0; }
-.prose-agentdocs a { color: var(--color-accent); text-decoration: underline; text-underline-offset: 2px; }
-.prose-agentdocs ul, .prose-agentdocs ol { margin: 0.9em 0; padding-left: 1.5em; }
-.prose-agentdocs ul { list-style: disc; }
-.prose-agentdocs ol { list-style: decimal; }
-.prose-agentdocs li { margin: 0.3em 0; }
-.prose-agentdocs code {
+.prose-xwiki h1 { font-size: 1.75rem; padding-bottom: 0.35em; border-bottom: 1px solid var(--color-rule); }
+.prose-xwiki h2 { font-size: 1.375rem; padding-bottom: 0.3em; border-bottom: 1px solid var(--color-rule); }
+.prose-xwiki h3 { font-size: 1.125rem; }
+.prose-xwiki p { margin: 0.9em 0; }
+.prose-xwiki a { color: var(--color-accent); text-decoration: underline; text-underline-offset: 2px; }
+.prose-xwiki ul, .prose-xwiki ol { margin: 0.9em 0; padding-left: 1.5em; }
+.prose-xwiki ul { list-style: disc; }
+.prose-xwiki ol { list-style: decimal; }
+.prose-xwiki li { margin: 0.3em 0; }
+.prose-xwiki code {
   font-family: var(--font-mono);
   font-size: 0.85em;
   background: var(--color-paper-2);
@@ -229,7 +229,7 @@ body {
   border-radius: 4px;
   padding: 0.1em 0.35em;
 }
-.prose-agentdocs pre {
+.prose-xwiki pre {
   background: var(--color-graphite);
   color: oklch(88% 0.01 250);
   border-radius: 10px;
@@ -237,20 +237,20 @@ body {
   overflow-x: auto;
   margin: 1.1em 0;
 }
-.prose-agentdocs pre code { background: none; border: none; padding: 0; color: inherit; }
-.prose-agentdocs blockquote {
+.prose-xwiki pre code { background: none; border: none; padding: 0; color: inherit; }
+.prose-xwiki blockquote {
   border-left: 3px solid var(--color-accent);
   padding-left: 1em;
   margin: 1em 0;
   color: var(--color-ink-3);
 }
-.prose-agentdocs table { width: 100%; border-collapse: collapse; margin: 1em 0; font-size: 0.875rem; }
-.prose-agentdocs th, .prose-agentdocs td { border: 1px solid var(--color-rule); padding: 0.45em 0.7em; text-align: left; }
-.prose-agentdocs th { background: var(--color-paper-2); color: var(--color-ink); font-weight: 500; }
-.prose-agentdocs img { max-width: 100%; border-radius: 8px; }
-.prose-agentdocs hr { border: none; border-top: 1px solid var(--color-rule); margin: 1.5em 0; }
+.prose-xwiki table { width: 100%; border-collapse: collapse; margin: 1em 0; font-size: 0.875rem; }
+.prose-xwiki th, .prose-xwiki td { border: 1px solid var(--color-rule); padding: 0.45em 0.7em; text-align: left; }
+.prose-xwiki th { background: var(--color-paper-2); color: var(--color-ink); font-weight: 500; }
+.prose-xwiki img { max-width: 100%; border-radius: 8px; }
+.prose-xwiki hr { border: none; border-top: 1px solid var(--color-rule); margin: 1.5em 0; }
 
-.prose-agentdocs p.is-editor-empty:first-child::before {
+.prose-xwiki p.is-editor-empty:first-child::before {
   content: attr(data-placeholder);
   color: var(--color-ink-3);
   pointer-events: none;
@@ -259,7 +259,7 @@ body {
 }
 
 /* ---------- Admonition blocks (:::info/warning/danger/details) ---------- */
-.prose-agentdocs .admonition {
+.prose-xwiki .admonition {
   border: 1px solid var(--color-rule);
   border-left: 3px solid var(--color-accent);
   border-radius: var(--radius);
@@ -267,13 +267,13 @@ body {
   margin: 1em 0;
   background: var(--color-paper-2);
 }
-.prose-agentdocs .admonition.warning {
+.prose-xwiki .admonition.warning {
   border-left-color: oklch(75% 0.15 80);
 }
-.prose-agentdocs .admonition.danger {
+.prose-xwiki .admonition.danger {
   border-left-color: var(--color-destructive);
 }
-.prose-agentdocs .admonition-title {
+.prose-xwiki .admonition-title {
   font-family: var(--font-mono);
   font-size: 0.75rem;
   font-weight: 600;
@@ -282,14 +282,14 @@ body {
   color: var(--color-ink-3);
   margin: 0 0 0.4em;
 }
-.prose-agentdocs details {
+.prose-xwiki details {
   border: 1px solid var(--color-rule);
   border-radius: var(--radius);
   margin: 1em 0;
   padding: 0.5rem 1rem;
   background: var(--color-paper-2);
 }
-.prose-agentdocs details summary {
+.prose-xwiki details summary {
   cursor: pointer;
   font-family: var(--font-display);
   font-weight: 600;
@@ -297,11 +297,11 @@ body {
 }
 
 /* ---------- Task lists (- [x]) ---------- */
-.prose-agentdocs ul:has(> li > input[type="checkbox"]) {
+.prose-xwiki ul:has(> li > input[type="checkbox"]) {
   list-style: none;
   padding-left: 0.25rem;
 }
-.prose-agentdocs li:has(> input[type="checkbox"]) input[type="checkbox"] {
+.prose-xwiki li:has(> input[type="checkbox"]) input[type="checkbox"] {
   margin-right: 0.5rem;
   accent-color: var(--color-accent);
 }

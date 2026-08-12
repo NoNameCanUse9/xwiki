@@ -10,17 +10,17 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/cors"
 
-	"agentdocs/internal/agent"
-	"agentdocs/internal/auth"
-	"agentdocs/internal/config"
-	"agentdocs/internal/httpapi"
-	"agentdocs/internal/httpapi/handlers"
-	"agentdocs/internal/httpapi/middleware"
-	"agentdocs/internal/httpapi/response"
-	"agentdocs/internal/project"
-	"agentdocs/internal/search"
-	"agentdocs/internal/user"
-	"agentdocs/web"
+	"xwiki/internal/agent"
+	"xwiki/internal/auth"
+	"xwiki/internal/config"
+	"xwiki/internal/httpapi"
+	"xwiki/internal/httpapi/handlers"
+	"xwiki/internal/httpapi/middleware"
+	"xwiki/internal/httpapi/response"
+	"xwiki/internal/project"
+	"xwiki/internal/search"
+	"xwiki/internal/user"
+	"xwiki/web"
 )
 
 func NewRouter(cfg *config.Config, log *slog.Logger, db *sql.DB, users *user.Store, authSvc *auth.Service, projectsSvc *project.Service, agentSvc *agent.Service, searchSvc *search.Service) http.Handler {

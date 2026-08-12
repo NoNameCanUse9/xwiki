@@ -17,8 +17,8 @@ import (
 func appendDocToRepo(t *testing.T, repoDir, path, content, branch string) {
 	t.Helper()
 	env := append(os.Environ(),
-		"GIT_AUTHOR_NAME=AgentDocs", "GIT_AUTHOR_EMAIL=agentdocs@local",
-		"GIT_COMMITTER_NAME=AgentDocs", "GIT_COMMITTER_EMAIL=agentdocs@local",
+		"GIT_AUTHOR_NAME=XWiki", "GIT_AUTHOR_EMAIL=xwiki@local",
+		"GIT_COMMITTER_NAME=XWiki", "GIT_COMMITTER_EMAIL=xwiki@local",
 		"GIT_CONFIG_NOSYSTEM=1",
 	)
 	runGit := func(args ...string) string {

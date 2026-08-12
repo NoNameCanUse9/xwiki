@@ -1,4 +1,4 @@
-# AgentDocs 阶段二：项目和 Git 仓库 Implementation Plan
+# XWiki 阶段二：项目和 Git 仓库 Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
@@ -135,4 +135,4 @@ CREATE INDEX idx_projects_archived_at ON projects(archived_at);
 - **名称规范**：`^[a-z0-9]+(-[a-z0-9]+)*$`，与 Git 仓库目录名安全兼容（无空格/斜杠/点）。
 - **归档语义**：软归档（标记），不删除仓库；列表默认含归档（前端分组显示）；阶段二不做取消归档。
 - **JSON 字段**：对外 `archived`（bool），内部 `archived_at`（TEXT/空）。
-- **README 内容**：`# <name>\n\n<description>\n\nAgentDocs 项目 · <UTC 时间>\n`，经 `hash-object -w --stdin` 写入。
+- **README 内容**：`# <name>\n\n<description>\n\nXWiki 项目 · <UTC 时间>\n`，经 `hash-object -w --stdin` 写入。

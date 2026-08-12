@@ -33,7 +33,7 @@ func InitBare(ctx context.Context, root, projectID string) (*Repo, error) {
 // generated from the project metadata. It uses plumbing commands only, so no
 // working tree or checkout is required.
 func (r *Repo) WriteReadme(ctx context.Context, name, description string, now time.Time) error {
-	readme := fmt.Sprintf("# %s\n\n%s\n\n---\n\nAgentDocs 项目 · %s\n",
+	readme := fmt.Sprintf("# %s\n\n%s\n\n---\n\nXWiki 项目 · %s\n",
 		name, description, now.UTC().Format(time.RFC3339))
 
 	tree, err := r.mkTree(ctx, readme)
@@ -58,7 +58,7 @@ func (r *Repo) RewriteReadmeTitle(ctx context.Context, name string) error {
 	if err != nil {
 		return fmt.Errorf("resolve branch: %w", err)
 	}
-	wtDir, err := os.MkdirTemp("", "agentdocs-wt-*")
+	wtDir, err := os.MkdirTemp("", "xwiki-wt-*")
 	if err != nil {
 		return fmt.Errorf("create worktree dir: %w", err)
 	}
@@ -81,7 +81,7 @@ func (r *Repo) RewriteReadmeTitle(ctx context.Context, name string) error {
 		}
 		readme = strings.Join(lines, "\n")
 	} else {
-		readme = fmt.Sprintf("# %s\n\n---\n\nAgentDocs 项目\n", name)
+		readme = fmt.Sprintf("# %s\n\n---\n\nXWiki 项目\n", name)
 	}
 	if err := os.WriteFile(readmePath, []byte(readme), 0o644); err != nil {
 		cleanup()
@@ -152,10 +152,10 @@ func gitOutput(ctx context.Context, repoDir string, args ...string) (string, err
 	cmd := exec.CommandContext(ctx, "git", "--git-dir", repoDir)
 	cmd.Args = append(cmd.Args, args...)
 	cmd.Env = append(os.Environ(),
-		"GIT_AUTHOR_NAME=AgentDocs",
-		"GIT_AUTHOR_EMAIL=agentdocs@local",
-		"GIT_COMMITTER_NAME=AgentDocs",
-		"GIT_COMMITTER_EMAIL=agentdocs@local",
+		"GIT_AUTHOR_NAME=XWiki",
+		"GIT_AUTHOR_EMAIL=xwiki@local",
+		"GIT_COMMITTER_NAME=XWiki",
+		"GIT_COMMITTER_EMAIL=xwiki@local",
 		"GIT_CONFIG_NOSYSTEM=1",
 	)
 	var out, errBuf bytes.Buffer
@@ -396,10 +396,10 @@ func gitOutputIn(ctx context.Context, dir string, args ...string) (string, error
 	cmd := exec.CommandContext(ctx, "git", "-C", dir)
 	cmd.Args = append(cmd.Args, args...)
 	cmd.Env = append(os.Environ(),
-		"GIT_AUTHOR_NAME=AgentDocs",
-		"GIT_AUTHOR_EMAIL=agentdocs@local",
-		"GIT_COMMITTER_NAME=AgentDocs",
-		"GIT_COMMITTER_EMAIL=agentdocs@local",
+		"GIT_AUTHOR_NAME=XWiki",
+		"GIT_AUTHOR_EMAIL=xwiki@local",
+		"GIT_COMMITTER_NAME=XWiki",
+		"GIT_COMMITTER_EMAIL=xwiki@local",
 		"GIT_CONFIG_NOSYSTEM=1",
 	)
 	var out, errBuf bytes.Buffer

@@ -1,7 +1,7 @@
 # 全功能验收测试结果（2026-08-09）
 
 执行：`docs/superpowers/plans/2026-08-09-full-verification.md`，Inline 模式
-环境：dev server（agentdocs :9090 + Vite :5173，WSL）、临时新代码实例（:19090，已销毁）
+环境：dev server（xwiki :9090 + Vite :5173，WSL）、临时新代码实例（:19090，已销毁）
 
 ## 总览
 

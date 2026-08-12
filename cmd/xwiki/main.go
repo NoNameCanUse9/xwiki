@@ -10,8 +10,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	"agentdocs/internal/app"
-	"agentdocs/internal/config"
+	"xwiki/internal/app"
+	"xwiki/internal/config"
 )
 
 func main() {
@@ -44,7 +44,7 @@ func run(args []string) error {
 // reindex rebuilds the full-text index for all projects (or one with --project).
 func reindex(args []string) error {
 	fs := flag.NewFlagSet("reindex", flag.ExitOnError)
-	dataDir := fs.String("data-dir", "", "data directory (default: $AGENTDOCS_DATA_DIR or data)")
+	dataDir := fs.String("data-dir", "", "data directory (default: $XWIKI_DATA_DIR or data)")
 	projectID := fs.String("project", "", "reindex only this project id")
 	_ = fs.Parse(args)
 
@@ -82,8 +82,8 @@ func reindex(args []string) error {
 
 func serve(args []string) error {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
-	dataDir := fs.String("data-dir", "", "data directory (default: $AGENTDOCS_DATA_DIR or data)")
-	httpAddr := fs.String("http-addr", "", "HTTP listen address (default: $AGENTDOCS_HTTP_ADDR or :8080)")
+	dataDir := fs.String("data-dir", "", "data directory (default: $XWIKI_DATA_DIR or data)")
+	httpAddr := fs.String("http-addr", "", "HTTP listen address (default: $XWIKI_HTTP_ADDR or :8080)")
 	_ = fs.Parse(args)
 
 	cfg := config.Load()
@@ -107,21 +107,21 @@ func serve(args []string) error {
 
 func admin(args []string) error {
 	if len(args) == 0 || args[0] != "create" {
-		return errors.New("usage: agentdocs admin create -username <name> [-password <pw>]")
+		return errors.New("usage: xwiki admin create -username <name> [-password <pw>]")
 	}
 	fs := flag.NewFlagSet("admin create", flag.ExitOnError)
 	username := fs.String("username", "", "admin username")
-	password := fs.String("password", "", "admin password (fallback: $AGENTDOCS_ADMIN_PASSWORD)")
+	password := fs.String("password", "", "admin password (fallback: $XWIKI_ADMIN_PASSWORD)")
 	_ = fs.Parse(args[1:])
 	if *username == "" {
 		return errors.New("username is required")
 	}
 	pw := *password
 	if pw == "" {
-		pw = os.Getenv("AGENTDOCS_ADMIN_PASSWORD")
+		pw = os.Getenv("XWIKI_ADMIN_PASSWORD")
 	}
 	if pw == "" {
-		return errors.New("password is required (flag -password or env AGENTDOCS_ADMIN_PASSWORD)")
+		return errors.New("password is required (flag -password or env XWIKI_ADMIN_PASSWORD)")
 	}
 	a, err := app.New(config.Load())
 	if err != nil {
@@ -136,10 +136,10 @@ func usageError() error {
 	return errors.New("missing command")
 }
 
-const usageText = `AgentDocs - Git-backed documentation server for humans and AI agents
+const usageText = `XWiki - Git-backed documentation server for humans and AI agents
 
 Usage:
-  agentdocs serve              start the HTTP server
-  agentdocs admin create       create the first administrator user
-  agentdocs help               show this help
+  xwiki serve              start the HTTP server
+  xwiki admin create       create the first administrator user
+  xwiki help               show this help
 `

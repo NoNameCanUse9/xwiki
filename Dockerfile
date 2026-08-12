@@ -13,13 +13,13 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 COPY --from=web /app/dist ./web/dist
-RUN CGO_ENABLED=0 go build -o /out/agentdocs ./cmd/agentdocs
+RUN CGO_ENABLED=0 go build -o /out/xwiki ./cmd/xwiki
 
 # ---- Runtime ----
 FROM alpine:3.22
 RUN apk add --no-cache git ca-certificates
-COPY --from=build /out/agentdocs /usr/local/bin/agentdocs
-ENV AGENTDOCS_DATA_DIR=/data
+COPY --from=build /out/xwiki /usr/local/bin/xwiki
+ENV XWIKI_DATA_DIR=/data
 EXPOSE 8080
-ENTRYPOINT ["agentdocs"]
+ENTRYPOINT ["xwiki"]
 CMD ["serve"]

@@ -129,7 +129,7 @@ export default function RichEditor({ initialMarkdown, onChange, readOnly }: Prop
     ],
     content: initialMarkdown, // tiptap-markdown 解析 md
     editable: !readOnly,
-    editorProps: { attributes: { class: "prose-agentdocs focus:outline-none min-h-[30rem]" } },
+    editorProps: { attributes: { class: "prose-xwiki focus:outline-none min-h-[30rem]" } },
     onUpdate: ({ editor }) => onChange(editor.storage.markdown.getMarkdown()),
   });
   return <EditorContent editor={editor} />;
@@ -527,7 +527,7 @@ import (
 - [x] **Step 2: 确认失败** → **Step 3: 实现**
   - 后端：goldmark AST 后处理（ast.Walk 找 Link 节点，text 为 `[[path]]` 或 `[[path|label]]` 模式 → 改写 href 为项目内相对路径 `/projects/{id}/docs/{path}` 并在链接上加 `data-wiki-link`）；纯文本 `[[...]]`（非链接上下文）转 Link 节点
   - 前端：docs-viewer 对 `data-wiki-link` 的 `<a>` 点击拦截（preventDefault → navigate），支持相对路径解析（`./x.md` → 当前目录）
-  - CSS：`.prose-agentdocs ul:has(> li > input[type=checkbox])` 去列表符号 + checkbox 样式
+  - CSS：`.prose-xwiki ul:has(> li > input[type=checkbox])` 去列表符号 + checkbox 样式
 - [x] **Step 4: 确认通过** → **Step 5: 提交**（`feat(wikilinks): internal page links and task list styles`）
 
 ### Task 7c: 图片粘贴（内联 base64）
@@ -561,7 +561,7 @@ it("pastes an image as inline base64", async () => {
 ```bash
 cd web && npx vitest run        # 全部前端测试
 cd .. && go test ./... -count=1 && go vet ./...
-npm run build && go build -o agentdocs ./cmd/agentdocs && git restore web/dist/index.html
+npm run build && go build -o xwiki ./cmd/xwiki && git restore web/dist/index.html
 ```
 
 - [x] **Step 3: 手工验收**（浏览器）：

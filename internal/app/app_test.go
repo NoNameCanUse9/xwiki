@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"agentdocs/internal/config"
+	"xwiki/internal/config"
 )
 
 func newTestApp(t *testing.T) *App {
@@ -76,7 +76,7 @@ func TestLoginSuccessAndMe(t *testing.T) {
 		t.Fatal("no session cookie")
 	}
 	for _, c := range cookies {
-		if c.Name == "agentdocs_session" {
+		if c.Name == "xwiki_session" {
 			if !c.HttpOnly {
 				t.Fatal("session cookie not HttpOnly")
 			}

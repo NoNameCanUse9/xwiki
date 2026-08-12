@@ -9,9 +9,9 @@ import (
 	"errors"
 	"time"
 
-	"agentdocs/internal/platform/clock"
-	"agentdocs/internal/platform/id"
-	"agentdocs/internal/user"
+	"xwiki/internal/platform/clock"
+	"xwiki/internal/platform/id"
+	"xwiki/internal/user"
 )
 
 var (

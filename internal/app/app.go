@@ -10,16 +10,16 @@ import (
 	"strings"
 	"time"
 
-	"agentdocs/internal/agent"
-	"agentdocs/internal/auth"
-	"agentdocs/internal/config"
-	"agentdocs/internal/platform/clock"
-	"agentdocs/internal/project"
-	"agentdocs/internal/search"
-	"agentdocs/internal/platform/id"
-	"agentdocs/internal/server"
-	"agentdocs/internal/store/sqlite"
-	"agentdocs/internal/user"
+	"xwiki/internal/agent"
+	"xwiki/internal/auth"
+	"xwiki/internal/config"
+	"xwiki/internal/platform/clock"
+	"xwiki/internal/project"
+	"xwiki/internal/search"
+	"xwiki/internal/platform/id"
+	"xwiki/internal/server"
+	"xwiki/internal/store/sqlite"
+	"xwiki/internal/user"
 )
 
 // App wires configuration, storage, services and the HTTP handler.

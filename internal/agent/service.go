@@ -9,8 +9,8 @@ import (
 	"errors"
 	"strings"
 
-	"agentdocs/internal/platform/clock"
-	"agentdocs/internal/platform/id"
+	"xwiki/internal/platform/clock"
+	"xwiki/internal/platform/id"
 )
 
 // Service applies token authorization rules and idempotency.

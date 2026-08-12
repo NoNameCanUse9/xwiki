@@ -186,7 +186,7 @@ export default function ProjectDetailPage() {
                 )}
                 {homeHtml ? (
                   <div
-                    className="prose-agentdocs hairline-panel max-h-72 overflow-y-auto p-5"
+                    className="prose-xwiki hairline-panel max-h-72 overflow-y-auto p-5"
                     dangerouslySetInnerHTML={{ __html: homeHtml }}
                   />
                 ) : (

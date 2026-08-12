@@ -8,8 +8,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"agentdocs/internal/platform/clock"
-	"agentdocs/internal/platform/id"
+	"xwiki/internal/platform/clock"
+	"xwiki/internal/platform/id"
 )
 
 // Service coordinates project metadata (Store) with on-disk bare Git

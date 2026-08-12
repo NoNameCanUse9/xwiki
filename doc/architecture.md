@@ -20,7 +20,7 @@ HTTP 层（internal/httpapi）→ 服务层（internal/auth、internal/app）→
 
 ## 数据存储
 
-- SQLite：data/agentdocs.db（WAL、外键、busy_timeout）
+- SQLite：data/xwiki.db（WAL、外键、busy_timeout）
 - 迁移：goose，SQL 文件内嵌于二进制（internal/store/sqlite/migrations）
 - 表：users、sessions、schema_migrations
 
@@ -81,7 +81,7 @@ HTTP 层（internal/httpapi）→ 服务层（internal/auth、internal/app）→
 - FTS5 虚拟表 + 外挂内容表 doc_index_state（project_id, path, blob_sha, content）+ 触发器同步
 - 增量索引：写入/回滚后遍历 Git 树，按 blob sha 对比 upsert/delete；二进制与超大文件跳过
 - 查询：unicode61 分词 + 前缀 AND；snippet() 输出转义高亮标记
-- CLI：agentdocs reindex（全量重建）
+- CLI：xwiki reindex（全量重建）
 
 
 ## OpenAPI 与导入导出（阶段八）

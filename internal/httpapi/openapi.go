@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"sync"
 
-	"agentdocs/internal/httpapi/response"
-	"agentdocs/internal/project"
+	"xwiki/internal/httpapi/response"
+	"xwiki/internal/project"
 	"gopkg.in/yaml.v3"
 )
 
@@ -37,7 +37,7 @@ func openapiJSON() []byte {
 	return openapiJSONCache
 }
 
-// ServiceVersion is the AgentDocs release version reported by /api/v1/meta.
+// ServiceVersion is the XWiki release version reported by /api/v1/meta.
 const ServiceVersion = "0.8.0"
 
 // API capabilities reported by /api/v1/meta. Keep in sync with the endpoint

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"agentdocs/internal/store/sqlite"
+	"xwiki/internal/store/sqlite"
 )
 
 func newStore(t *testing.T) *Store {

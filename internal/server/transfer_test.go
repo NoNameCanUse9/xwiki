@@ -131,7 +131,7 @@ func TestBundleExportImport(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost,
 		"/api/v1/import/bundle?name=bundle-in", &body)
 	req.Header.Set("Content-Type", mw.FormDataContentType())
-	req.AddCookie(&http.Cookie{Name: "agentdocs_session", Value: cookie})
+	req.AddCookie(&http.Cookie{Name: "xwiki_session", Value: cookie})
 	rec2 := httptest.NewRecorder()
 	h.ServeHTTP(rec2, req)
 	if rec2.Code != http.StatusCreated {

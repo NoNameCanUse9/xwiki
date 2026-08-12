@@ -24,7 +24,7 @@
 
 ```bash
 # 后端
-./agentdocs serve   # 或 go run ./cmd/agentdocs serve
+./xwiki serve   # 或 go run ./cmd/xwiki serve
 # 前端（开发服务器，/api 代理到 :8080）
 cd web && npm run dev
 ```
@@ -32,7 +32,7 @@ cd web && npm run dev
 ### 首次使用
 
 ```bash
-./agentdocs admin create -username admin -password secret123
+./xwiki admin create -username admin -password secret123
 ```
 
 浏览器打开 <http://localhost:8080> 登录。
@@ -41,7 +41,7 @@ cd web && npm run dev
 
 ```bash
 cd web && npm install && npm run build && cd ..
-go build -o agentdocs ./cmd/agentdocs
+go build -o xwiki ./cmd/xwiki
 go test ./...
 cd web && npm run test
 ```
@@ -56,12 +56,12 @@ docker compose up -d --build
 
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
-| `AGENTDOCS_DATA_DIR` | `data` | 数据目录（SQLite + 仓库） |
-| `AGENTDOCS_HTTP_ADDR` | `:8080` | HTTP 监听地址 |
-| `AGENTDOCS_WEB_ORIGIN` | `http://localhost:5173` | 允许的 CORS 来源 |
-| `AGENTDOCS_SESSION_TTL` | `720h` | 会话有效期 |
-| `AGENTDOCS_MAX_BODY_BYTES` | `1048576` | 请求体上限 |
-| `AGENTDOCS_COOKIE_SECURE` | `false` | 生产环境设为 true |
+| `XWIKI_DATA_DIR` | `data` | 数据目录（SQLite + 仓库） |
+| `XWIKI_HTTP_ADDR` | `:8080` | HTTP 监听地址 |
+| `XWIKI_WEB_ORIGIN` | `http://localhost:5173` | 允许的 CORS 来源 |
+| `XWIKI_SESSION_TTL` | `720h` | 会话有效期 |
+| `XWIKI_MAX_BODY_BYTES` | `1048576` | 请求体上限 |
+| `XWIKI_COOKIE_SECURE` | `false` | 生产环境设为 true |
 
 ## 目录结构
 

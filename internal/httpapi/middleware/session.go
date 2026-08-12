@@ -4,9 +4,9 @@ import (
 	"context"
 	"net/http"
 
-	"agentdocs/internal/auth"
-	"agentdocs/internal/httpapi/response"
-	"agentdocs/internal/user"
+	"xwiki/internal/auth"
+	"xwiki/internal/httpapi/response"
+	"xwiki/internal/user"
 )
 
 type ctxKey int
@@ -22,7 +22,7 @@ func SessionAuth(svc *auth.Service) func(http.Handler) http.Handler {
 				next.ServeHTTP(w, r)
 				return
 			}
-			cookie, err := r.Cookie("agentdocs_session")
+			cookie, err := r.Cookie("xwiki_session")
 			if err != nil {
 				response.WriteError(w, r, http.StatusUnauthorized, "authentication_required", "login required")
 				return

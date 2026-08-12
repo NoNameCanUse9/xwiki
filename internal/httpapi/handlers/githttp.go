@@ -12,11 +12,11 @@ import (
 	"strconv"
 	"strings"
 
-	"agentdocs/internal/agent"
-	"agentdocs/internal/httpapi/middleware"
-	"agentdocs/internal/httpapi/request"
-	"agentdocs/internal/httpapi/response"
-	"agentdocs/internal/project"
+	"xwiki/internal/agent"
+	"xwiki/internal/httpapi/middleware"
+	"xwiki/internal/httpapi/request"
+	"xwiki/internal/httpapi/response"
+	"xwiki/internal/project"
 )
 
 // GitHTTPHandler proxies git http-backend for smart HTTP clone/pull/push.
@@ -62,7 +62,7 @@ func (h *GitHTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		secret = basicToken(r)
 	}
 	if secret == "" && middleware.UserFrom(r) == nil {
-		w.Header().Set("WWW-Authenticate", `Basic realm="agentdocs"`)
+		w.Header().Set("WWW-Authenticate", `Basic realm="xwiki"`)
 		response.WriteError(w, r, http.StatusUnauthorized, "authentication_required", "token or login required")
 		return
 	}
@@ -94,7 +94,7 @@ func (h *GitHTTPHandler) proxy(w http.ResponseWriter, r *http.Request, projectID
 		"QUERY_STRING="+r.URL.RawQuery,
 		"CONTENT_TYPE="+r.Header.Get("Content-Type"),
 		"CONTENT_LENGTH="+strconv.FormatInt(r.ContentLength, 10),
-		"REMOTE_USER=agentdocs",
+		"REMOTE_USER=xwiki",
 		"GIT_PROJECT_ROOT="+h.svc.ReposRoot()+string(os.PathSeparator)+projectID,
 		"GIT_HTTP_EXPORT_ALL=1",
 		"GIT_CONFIG_NOSYSTEM=1",

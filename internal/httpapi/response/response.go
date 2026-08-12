@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"agentdocs/internal/httpapi/request"
+	"xwiki/internal/httpapi/request"
 )
 
 // ErrorBody is the unified error envelope (spec §20).

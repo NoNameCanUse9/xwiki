@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"agentdocs/internal/store/sqlite"
+	"xwiki/internal/store/sqlite"
 )
 
 type fakeClock struct{ now time.Time }

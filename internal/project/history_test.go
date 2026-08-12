@@ -15,7 +15,7 @@ func seedHistory(t *testing.T) (*Service, string) {
 		BaseRevision: mustHead(t, svc, pid),
 		Message:      "add a",
 		Changes:      []Change{{Op: "create", Path: "docs/a.md", Content: "# A\n"}},
-	}, CommitAuthor{Name: "Test Author", Email: "test@agentdocs.local"}); err != nil {
+	}, CommitAuthor{Name: "Test Author", Email: "test@xwiki.local"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := svc.ApplyChangeset(context.Background(), pid, ChangesetInput{
@@ -25,7 +25,7 @@ func seedHistory(t *testing.T) (*Service, string) {
 			{Op: "update", Path: "docs/a.md", Content: "# A updated\n"},
 			{Op: "create", Path: "docs/b.md", Content: "# B\n"},
 		},
-	}, CommitAuthor{Name: "Test Author", Email: "test@agentdocs.local"}); err != nil {
+	}, CommitAuthor{Name: "Test Author", Email: "test@xwiki.local"}); err != nil {
 		t.Fatal(err)
 	}
 	return svc, pid
@@ -143,7 +143,7 @@ func TestRevertCreatesNewCommit(t *testing.T) {
 	svc, pid := seedHistory(t)
 	head := mustHead(t, svc, pid)
 
-	reverted, err := svc.RevertCommit(context.Background(), pid, head, "", CommitAuthor{Name: "Test Author", Email: "test@agentdocs.local"})
+	reverted, err := svc.RevertCommit(context.Background(), pid, head, "", CommitAuthor{Name: "Test Author", Email: "test@xwiki.local"})
 	if err != nil {
 		t.Fatalf("revert: %v", err)
 	}
@@ -184,7 +184,7 @@ func TestRevertCreatesNewCommit(t *testing.T) {
 		t.Fatal("b.md still exists after revert")
 	}
 	// Unknown sha -> ErrNotFound.
-	if _, err := svc.RevertCommit(context.Background(), pid, "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef", "", CommitAuthor{Name: "Test Author", Email: "test@agentdocs.local"}); !errors.Is(err, ErrNotFound) {
+	if _, err := svc.RevertCommit(context.Background(), pid, "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef", "", CommitAuthor{Name: "Test Author", Email: "test@xwiki.local"}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("unknown sha: want ErrNotFound, got %v", err)
 	}
 }

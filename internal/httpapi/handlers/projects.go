@@ -6,11 +6,11 @@ import (
 	"log/slog"
 	"net/http"
 
-	"agentdocs/internal/config"
-	"agentdocs/internal/httpapi/request"
-	"agentdocs/internal/httpapi/response"
-	"agentdocs/internal/project"
-	"agentdocs/internal/search"
+	"xwiki/internal/config"
+	"xwiki/internal/httpapi/request"
+	"xwiki/internal/httpapi/response"
+	"xwiki/internal/project"
+	"xwiki/internal/search"
 )
 
 // ProjectHandler serves the /api/v1/projects endpoints.

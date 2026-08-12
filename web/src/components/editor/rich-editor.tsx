@@ -377,7 +377,7 @@ export default function RichEditor({
 		editable: !readOnly,
 		editorProps: {
 			attributes: {
-				class: "prose-agentdocs focus:outline-none min-h-[70vh]",
+				class: "prose-xwiki focus:outline-none min-h-[70vh]",
 				role: "textbox",
 			},
 			handleKeyDown: (view, event) => {

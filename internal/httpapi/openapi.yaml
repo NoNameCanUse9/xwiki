@@ -1,6 +1,6 @@
 openapi: 3.0.3
 info:
-  title: AgentDocs API
+  title: XWiki API
   version: 0.8.0
   description: |
     面向人类与 AI Agent 的 Git-backed 文档管理系统。
@@ -827,7 +827,7 @@ components:
     sessionCookie:
       type: apiKey
       in: cookie
-      name: agentdocs_session
+      name: xwiki_session
     bearerAuth:
       type: http
       scheme: bearer

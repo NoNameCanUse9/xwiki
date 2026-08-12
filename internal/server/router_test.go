@@ -10,14 +10,14 @@ import (
 	"testing"
 	"time"
 
-	"agentdocs/internal/agent"
-	"agentdocs/internal/auth"
-	"agentdocs/internal/config"
-	"agentdocs/internal/platform/clock"
-	"agentdocs/internal/project"
-	"agentdocs/internal/search"
-	"agentdocs/internal/store/sqlite"
-	"agentdocs/internal/user"
+	"xwiki/internal/agent"
+	"xwiki/internal/auth"
+	"xwiki/internal/config"
+	"xwiki/internal/platform/clock"
+	"xwiki/internal/project"
+	"xwiki/internal/search"
+	"xwiki/internal/store/sqlite"
+	"xwiki/internal/user"
 )
 
 func newTestRouter(t *testing.T) http.Handler {

@@ -15,16 +15,16 @@ type Config struct {
 	SecureCookies bool
 }
 
-// Load reads configuration from AGENTDOCS_* environment variables,
+// Load reads configuration from XWIKI_* environment variables,
 // falling back to development-friendly defaults.
 func Load() *Config {
 	return &Config{
-		DataDir:       envOr("AGENTDOCS_DATA_DIR", "data"),
-		HTTPAddr:      envOr("AGENTDOCS_HTTP_ADDR", ":8080"),
-		WebOrigin:     envOr("AGENTDOCS_WEB_ORIGIN", "http://localhost:5173"),
-		SessionTTL:    envDuration("AGENTDOCS_SESSION_TTL", 30*24*time.Hour),
-		MaxBodyBytes:  envInt64("AGENTDOCS_MAX_BODY_BYTES", 1<<20),
-		SecureCookies: envBool("AGENTDOCS_COOKIE_SECURE", false),
+		DataDir:       envOr("XWIKI_DATA_DIR", "data"),
+		HTTPAddr:      envOr("XWIKI_HTTP_ADDR", ":8080"),
+		WebOrigin:     envOr("XWIKI_WEB_ORIGIN", "http://localhost:5173"),
+		SessionTTL:    envDuration("XWIKI_SESSION_TTL", 30*24*time.Hour),
+		MaxBodyBytes:  envInt64("XWIKI_MAX_BODY_BYTES", 1<<20),
+		SecureCookies: envBool("XWIKI_COOKIE_SECURE", false),
 	}
 }
 

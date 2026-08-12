@@ -199,7 +199,7 @@ func (s *Service) RevertCommit(ctx context.Context, projectID, sha, message stri
 		author.Name = "anonymous"
 	}
 	if author.Email == "" {
-		author.Email = "anonymous@agentdocs.local"
+		author.Email = "anonymous@xwiki.local"
 	}
 	p, err := s.store.GetByID(ctx, projectID)
 	if err != nil {
@@ -226,7 +226,7 @@ func (s *Service) RevertCommit(ctx context.Context, projectID, sha, message stri
 		return nil, ErrNotFound
 	}
 
-	wtDir, err := os.MkdirTemp("", "agentdocs-wt-*")
+	wtDir, err := os.MkdirTemp("", "xwiki-wt-*")
 	if err != nil {
 		return nil, err
 	}
@@ -247,7 +247,7 @@ func (s *Service) RevertCommit(ctx context.Context, projectID, sha, message stri
 		return nil, ErrNotFound
 	}
 	// The patch file lives OUTSIDE the worktree so `git add -A` never commits it.
-	patchDir, err := os.MkdirTemp("", "agentdocs-patch-*")
+	patchDir, err := os.MkdirTemp("", "xwiki-patch-*")
 	if err != nil {
 		cleanup()
 		return nil, err

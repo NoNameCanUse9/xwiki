@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"agentdocs/internal/httpapi/middleware"
-	"agentdocs/internal/httpapi/request"
-	"agentdocs/internal/httpapi/response"
+	"xwiki/internal/httpapi/middleware"
+	"xwiki/internal/httpapi/request"
+	"xwiki/internal/httpapi/response"
 )
 
 // Exclusive per-page edit lock: only one user may hold the lock on a given

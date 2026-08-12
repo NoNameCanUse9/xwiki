@@ -96,7 +96,7 @@ func loginAndGetCookieWith(t *testing.T, h http.Handler, username, password stri
 	}
 	cookie := ""
 	for _, c := range rec.Result().Cookies() {
-		if c.Name == "agentdocs_session" {
+		if c.Name == "xwiki_session" {
 			cookie = c.Value
 		}
 	}

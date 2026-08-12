@@ -53,8 +53,8 @@ jobs:
 
       - name: Build linux/amd64 binary
         run: |
-          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o agentdocs-linux-amd64 ./cmd/agentdocs
-          tar -czf agentdocs-linux-amd64.tar.gz agentdocs-linux-amd64
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o xwiki-linux-amd64 ./cmd/xwiki
+          tar -czf xwiki-linux-amd64.tar.gz xwiki-linux-amd64
 
       - name: Extract version from tag
         id: version
@@ -67,7 +67,7 @@ jobs:
         with:
           name: ${{ steps.version.outputs.name }}
           generate_release_notes: true # 自动生成基于上一 tag 的 changelog
-          files: agentdocs-linux-amd64.tar.gz
+          files: xwiki-linux-amd64.tar.gz
 
   docker:
     name: Build & push Docker image (GHCR)
