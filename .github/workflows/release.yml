@@ -17,8 +17,28 @@ permissions:
   packages: write   # 推送 GHCR Docker 镜像
 
 jobs:
+  test:
+    name: Complete test gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version-file: go.mod }
+      - run: go test ./...
+      - run: go vet ./...
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - uses: pnpm/action-setup@v4
+        with: { version: 10 }
+      - run: pnpm install --frozen-lockfile
+        working-directory: web
+      - run: pnpm test -- --run
+        working-directory: web
+      - run: pnpm build
+        working-directory: web
   build-and-release:
     name: Build linux/amd64 binary & create release
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
