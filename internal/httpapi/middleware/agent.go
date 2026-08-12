@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/go-chi/chi/v5"
+
 	"agentdocs/internal/agent"
 	"agentdocs/internal/httpapi/response"
 )
@@ -15,6 +17,7 @@ const (
 	agentTokenKey agentCtxKey = iota
 	agentNameKey
 	agentSecretKey
+	agentProjectIDsKey
 )
 
 // AgentAuth authenticates Bearer agent tokens. Requests without a Bearer
@@ -34,16 +37,17 @@ func AgentAuth(svc *agent.Service) func(http.Handler) http.Handler {
 				response.WriteError(w, r, http.StatusUnauthorized, "invalid_token", "invalid or revoked agent token")
 				return
 			}
-			ctx := contextWithAgent(r.Context(), t.ID, t.Name, secret)
+			ctx := contextWithAgent(r.Context(), t.ID, t.Name, secret, t.ProjectIDs)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
 }
 
-func contextWithAgent(ctx context.Context, tokenID, tokenName, secret string) context.Context {
+func contextWithAgent(ctx context.Context, tokenID, tokenName, secret string, projectIDs []string) context.Context {
 	ctx = context.WithValue(ctx, agentTokenKey, tokenID)
 	ctx = context.WithValue(ctx, agentNameKey, tokenName)
-	return context.WithValue(ctx, agentSecretKey, secret)
+	ctx = context.WithValue(ctx, agentSecretKey, secret)
+	return context.WithValue(ctx, agentProjectIDsKey, append([]string(nil), projectIDs...))
 }
 
 // AgentTokenName returns the authenticated token's display name.
@@ -82,6 +86,47 @@ func AgentTokenID(r *http.Request) string {
 func AgentSecret(r *http.Request) string {
 	s, _ := r.Context().Value(agentSecretKey).(string)
 	return s
+}
+
+// AgentProjectIDs returns the projects explicitly bound to the authenticated
+// token. Session requests return nil.
+func AgentProjectIDs(r *http.Request) []string {
+	ids, _ := r.Context().Value(agentProjectIDsKey).([]string)
+	return ids
+}
+
+// AgentProjectAccess rejects a token that is not bound to the project in the
+// current {id} route. Session users pass through unchanged.
+func AgentProjectAccess(svc *agent.Service) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			secret := AgentSecret(r)
+			if secret == "" {
+				next.ServeHTTP(w, r)
+				return
+			}
+			projectID := r.PathValue("id")
+			if projectID == "" {
+				projectID = chi.URLParam(r, "id")
+			}
+			if _, err := svc.Authorize(r.Context(), secret, projectID, false); err != nil {
+				response.WriteError(w, r, http.StatusForbidden, "agent_forbidden", "token is not authorized for this project")
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// HumanOnly keeps administrative project operations behind a user session.
+func HumanOnly(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if AgentTokenID(r) != "" {
+			response.WriteError(w, r, http.StatusForbidden, "session_required", "this operation requires a user session")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // ActorID returns the authenticated actor id (session user or agent token).

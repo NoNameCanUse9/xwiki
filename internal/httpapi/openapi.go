@@ -46,6 +46,7 @@ var metaCapabilities = []string{
 	"meta", "changesets", "revision", "locks", "shares", "backlinks",
 	"search", "attachments", "import_bundle", "import_repo", "import_folder",
 	"tokens", "users", "audit", "openapi", "export", "revert", "file_history",
+	"commit_search", "project_trash", "document_revision",
 }
 
 // MetaHandler serves GET /api/v1/meta — service info and capability probe

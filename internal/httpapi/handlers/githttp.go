@@ -17,17 +17,19 @@ import (
 	"agentdocs/internal/httpapi/request"
 	"agentdocs/internal/httpapi/response"
 	"agentdocs/internal/project"
+	"agentdocs/internal/search"
 )
 
 // GitHTTPHandler proxies git http-backend for smart HTTP clone/pull/push.
 type GitHTTPHandler struct {
-	svc      *project.Service
-	agentSvc *agent.Service
-	log      *slog.Logger
+	svc       *project.Service
+	agentSvc  *agent.Service
+	searchSvc *search.Service
+	log       *slog.Logger
 }
 
-func NewGitHTTPHandler(svc *project.Service, agentSvc *agent.Service, log *slog.Logger) *GitHTTPHandler {
-	return &GitHTTPHandler{svc: svc, agentSvc: agentSvc, log: log}
+func NewGitHTTPHandler(svc *project.Service, agentSvc *agent.Service, searchSvc *search.Service, log *slog.Logger) *GitHTTPHandler {
+	return &GitHTTPHandler{svc: svc, agentSvc: agentSvc, searchSvc: searchSvc, log: log}
 }
 
 // ServeHTTP handles GET/POST /git/{projectID}/{subpath...}.
@@ -80,11 +82,11 @@ func (h *GitHTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	h.proxy(w, r, projectID, sub)
+	h.proxy(w, r, projectID, sub, isWrite)
 }
 
 // proxy runs git http-backend with CGI environment and streams the response.
-func (h *GitHTTPHandler) proxy(w http.ResponseWriter, r *http.Request, projectID, sub string) {
+func (h *GitHTTPHandler) proxy(w http.ResponseWriter, r *http.Request, projectID, sub string, isWrite bool) {
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 
@@ -198,7 +200,12 @@ func (h *GitHTTPHandler) proxy(w http.ResponseWriter, r *http.Request, projectID
 		_, _ = w.Write(rest)
 	}
 	_, _ = io.Copy(w, stdout)
-	_ = cmd.Wait()
+	cmdErr := cmd.Wait()
+	if isWrite && cmdErr == nil {
+		if _, err := h.searchSvc.ReindexProject(context.Background(), projectID); err != nil {
+			h.log.Warn("reindex after git push failed", "error", err, "project_id", projectID)
+		}
+	}
 	if ctx.Err() != nil {
 		h.log.Debug("git http request cancelled", "project_id", projectID)
 	}

@@ -31,12 +31,14 @@ func (h *HistoryHandler) Commits(w http.ResponseWriter, r *http.Request) {
 	projectID := request.PathParam(r, "id")
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
-	commits, err := h.svc.ListCommits(r.Context(), projectID, limit, offset)
+	page, err := h.svc.SearchCommits(r.Context(), projectID, project.CommitQuery{
+		Query: r.URL.Query().Get("q"), Limit: limit, Offset: offset,
+	})
 	if err != nil {
 		h.writeRepoError(w, r, err)
 		return
 	}
-	response.WriteJSON(w, http.StatusOK, map[string]any{"commits": commits})
+	response.WriteJSON(w, http.StatusOK, page)
 }
 
 // Commit handles GET /api/v1/projects/{id}/commits/{sha}.

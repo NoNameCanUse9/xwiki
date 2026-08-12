@@ -36,6 +36,41 @@ type StateEntry struct {
 	Content   string
 }
 
+// ProjectIndexState records whether a project's searchable snapshot is in
+// sync with a specific immutable Git revision.
+type ProjectIndexState struct {
+	ProjectID string `json:"project_id"`
+	Revision  string `json:"revision"`
+	Status    string `json:"status"`
+	UpdatedAt string `json:"updated_at"`
+	LastError string `json:"last_error,omitempty"`
+}
+
+func (s *Store) SetProjectState(ctx context.Context, state ProjectIndexState) error {
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO project_index_state (project_id, revision, status, updated_at, last_error)
+		VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(project_id) DO UPDATE SET
+			revision = excluded.revision,
+			status = excluded.status,
+			updated_at = excluded.updated_at,
+			last_error = excluded.last_error`,
+		state.ProjectID, state.Revision, state.Status, state.UpdatedAt, state.LastError)
+	return err
+}
+
+func (s *Store) ProjectState(ctx context.Context, projectID string) (*ProjectIndexState, error) {
+	var state ProjectIndexState
+	err := s.db.QueryRowContext(ctx, `
+		SELECT project_id, revision, status, updated_at, last_error
+		FROM project_index_state WHERE project_id = ?`, projectID).
+		Scan(&state.ProjectID, &state.Revision, &state.Status, &state.UpdatedAt, &state.LastError)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return &state, err
+}
+
 // Upsert indexes one document; unchanged blobs are skipped.
 func (s *Store) Upsert(ctx context.Context, e *StateEntry) (bool, error) {
 	var existing string
@@ -74,9 +109,21 @@ func (s *Store) Delete(ctx context.Context, projectID, path string) error {
 
 // DeleteProject removes every entry of a project.
 func (s *Store) DeleteProject(ctx context.Context, projectID string) error {
-	_, err := s.db.ExecContext(ctx,
-		`DELETE FROM doc_index_state WHERE project_id = ?`, projectID)
-	return err
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, query := range []string{
+		`DELETE FROM page_links WHERE project_id = ?`,
+		`DELETE FROM doc_index_state WHERE project_id = ?`,
+		`DELETE FROM project_index_state WHERE project_id = ?`,
+	} {
+		if _, err := tx.ExecContext(ctx, query, projectID); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // ReplaceLinks rebuilds the wiki-link index for one project (called during reindex).

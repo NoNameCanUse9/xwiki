@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 
 	"agentdocs/internal/app"
 	"agentdocs/internal/config"
+	"agentdocs/internal/maintenance"
 )
 
 func main() {
@@ -33,12 +35,79 @@ func run(args []string) error {
 		return admin(args[1:])
 	case "reindex":
 		return reindex(args[1:])
+	case "backup":
+		return backup(args[1:])
+	case "restore":
+		return restore(args[1:])
+	case "doctor":
+		return doctor(args[1:])
 	case "help", "-h", "--help":
 		fmt.Fprint(os.Stdout, usageText)
 		return nil
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
 	}
+}
+
+func backup(args []string) error {
+	fs := flag.NewFlagSet("backup", flag.ContinueOnError)
+	dataDir := fs.String("data-dir", "", "data directory")
+	output := fs.String("output", "", "backup output path")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	cfg := config.Load()
+	if *dataDir != "" {
+		cfg.DataDir = *dataDir
+	}
+	if *output == "" {
+		return errors.New("backup --output is required")
+	}
+	return maintenance.Backup(context.Background(), cfg.DataDir, *output)
+}
+
+func restore(args []string) error {
+	fs := flag.NewFlagSet("restore", flag.ContinueOnError)
+	dataDir := fs.String("data-dir", "", "data directory")
+	replace := fs.Bool("replace", false, "replace an existing data directory")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return errors.New("usage: agentdocs restore [--data-dir DIR] [--replace] <backup.tar.gz>")
+	}
+	cfg := config.Load()
+	if *dataDir != "" {
+		cfg.DataDir = *dataDir
+	}
+	return maintenance.Restore(context.Background(), fs.Arg(0), cfg.DataDir, *replace)
+}
+
+func doctor(args []string) error {
+	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
+	dataDir := fs.String("data-dir", "", "data directory")
+	jsonOutput := fs.Bool("json", false, "print JSON report")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	cfg := config.Load()
+	if *dataDir != "" {
+		cfg.DataDir = *dataDir
+	}
+	report, err := maintenance.Doctor(context.Background(), cfg.DataDir)
+	if err != nil {
+		return err
+	}
+	if *jsonOutput {
+		return json.NewEncoder(os.Stdout).Encode(report)
+	}
+	for _, check := range report.Checks {
+		fmt.Printf("%-16s %-7s %s\n", check.Name, check.Status, check.Detail)
+	}
+	if !report.Healthy {
+		return errors.New("doctor found unhealthy checks")
+	}
+	return nil
 }
 
 // reindex rebuilds the full-text index for all projects (or one with --project).
@@ -141,5 +210,9 @@ const usageText = `AgentDocs - Git-backed documentation server for humans and AI
 Usage:
   agentdocs serve              start the HTTP server
   agentdocs admin create       create the first administrator user
+  agentdocs backup --output F  create an offline data backup
+  agentdocs restore FILE       restore an offline data backup
+  agentdocs doctor             diagnose the data directory
+  agentdocs reindex            rebuild the search index
   agentdocs help               show this help
 `

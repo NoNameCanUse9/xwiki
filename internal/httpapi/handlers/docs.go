@@ -61,8 +61,6 @@ func NewDocsHandler(cfg *config.Config, svc *project.Service, agentSvc *agent.Se
 	}
 }
 
-
-
 // validateDocPath rejects traversal, absolute and empty paths.
 func validateDocPath(p string) bool {
 	if p == "" || strings.HasPrefix(p, "/") || strings.Contains(p, "\\") {
@@ -152,17 +150,18 @@ func (h *DocsHandler) Page(w http.ResponseWriter, r *http.Request) {
 		response.WriteError(w, r, http.StatusInternalServerError, "internal_error", "could not read repository")
 		return
 	}
-	branch, err := repo.DefaultBranch(r.Context())
+	// Historical version: ?at=<commit sha> reads the file as of that commit.
+	revision := r.URL.Query().Get("at")
+	if revision == "" {
+		revision, err = repo.Revision(r.Context())
+	} else {
+		revision, err = repo.ResolveRevision(r.Context(), revision)
+	}
 	if err != nil {
-		response.WriteError(w, r, http.StatusInternalServerError, "internal_error", "could not resolve branch")
+		response.WriteError(w, r, http.StatusNotFound, "revision_not_found", "document revision not found")
 		return
 	}
-	// Historical version: ?at=<commit sha> reads the file as of that commit.
-	rev := branch
-	if at := r.URL.Query().Get("at"); at != "" {
-		rev = at
-	}
-	content, err := repo.ReadBlobAt(r.Context(), rev, filePath)
+	content, err := repo.ReadBlobAt(r.Context(), revision, filePath)
 	if err != nil {
 		response.WriteError(w, r, http.StatusNotFound, "doc_not_found", "document not found")
 		return
@@ -171,7 +170,7 @@ func (h *DocsHandler) Page(w http.ResponseWriter, r *http.Request) {
 		response.WriteError(w, r, http.StatusRequestEntityTooLarge, "doc_too_large", "document exceeds size limit")
 		return
 	}
-	resp := map[string]any{"path": filePath, "format": format}
+	resp := map[string]any{"path": filePath, "format": format, "revision": revision}
 	if format == "base64" {
 		resp["encoding"] = "base64"
 		resp["content"] = base64.StdEncoding.EncodeToString(content)

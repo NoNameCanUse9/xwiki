@@ -153,11 +153,15 @@ func (s *Service) ImportRepo(ctx context.Context, name, url string) (*BundleImpo
 	}
 	projectID := id.New("prj")
 	now := s.clock.Now().UTC()
-	repoDir := filepath.Join(s.reposRoot, projectID, "repo.git")
-	if err := os.MkdirAll(filepath.Dir(repoDir), 0o755); err != nil {
+	stagingParent := filepath.Join(s.reposRoot, ".staging-"+projectID)
+	repoDir := filepath.Join(stagingParent, "repo.git")
+	finalParent := filepath.Join(s.reposRoot, projectID)
+	finalRepoDir := filepath.Join(finalParent, "repo.git")
+	if err := os.MkdirAll(s.reposRoot, 0o755); err != nil {
 		return nil, err
 	}
-	cleanup := func() { _ = os.RemoveAll(filepath.Dir(repoDir)) }
+	cleanup := func() { _ = os.RemoveAll(stagingParent) }
+	defer cleanup()
 	cmd := exec.CommandContext(ctx, "git", "clone", "--bare", "--", url, repoDir)
 	cmd.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1")
 	if out, err := cmd.CombinedOutput(); err != nil {
@@ -178,17 +182,26 @@ func (s *Service) ImportRepo(ctx context.Context, name, url string) (*BundleImpo
 			return nil, err
 		}
 	}
+	if _, err := gitOutput(ctx, repoDir, "fsck", "--full", "--no-dangling"); err != nil {
+		return nil, fmt.Errorf("verify cloned repository: %w", err)
+	}
+	if _, err := gitOutput(ctx, repoDir, "symbolic-ref", "HEAD", "refs/heads/main"); err != nil {
+		return nil, fmt.Errorf("set default branch: %w", err)
+	}
+	if err := os.Rename(stagingParent, finalParent); err != nil {
+		return nil, fmt.Errorf("activate imported repository: %w", err)
+	}
 	p := &Project{
 		ID: projectID, Name: name,
 		RepoDir:   filepath.ToSlash(filepath.Join("repos", projectID, "repo.git")),
 		CreatedAt: now, UpdatedAt: now,
 	}
 	if err := s.store.Create(ctx, p); err != nil {
-		cleanup()
+		_ = os.RemoveAll(finalParent)
 		return nil, err
 	}
 	commits := 0
-	if out, err := gitOutput(ctx, repoDir, "rev-list", "--count", "HEAD"); err == nil {
+	if out, err := gitOutput(ctx, finalRepoDir, "rev-list", "--count", "HEAD"); err == nil {
 		fmt.Sscanf(out, "%d", &commits)
 	}
 	return &BundleImportResult{Project: p, Commits: commits}, nil
@@ -391,20 +404,23 @@ func (s *Service) ImportBundle(ctx context.Context, input ImportBundleInput) (*B
 	if err := bundleFile.Close(); err != nil {
 		return nil, err
 	}
-	if _, err := gitOutputPlain(context.Background(), "bundle", "verify", bundlePath); err != nil {
-		return nil, ErrInvalid // not a valid bundle
-	}
-
 	projectID := id.New("prj")
 	now := s.clock.Now().UTC()
-	repoDir := filepath.Join(s.reposRoot, projectID, "repo.git")
-	if err := os.MkdirAll(filepath.Dir(repoDir), 0o755); err != nil {
+	stagingParent := filepath.Join(s.reposRoot, ".staging-"+projectID)
+	repoDir := filepath.Join(stagingParent, "repo.git")
+	finalParent := filepath.Join(s.reposRoot, projectID)
+	finalRepoDir := filepath.Join(finalParent, "repo.git")
+	if err := os.MkdirAll(s.reposRoot, 0o755); err != nil {
 		return nil, err
 	}
 	if _, err := gitOutput(ctx, repoDir, "init", "--bare", "--initial-branch=main", repoDir); err != nil {
 		return nil, fmt.Errorf("init: %w", err)
 	}
-	cleanup := func() { _ = os.RemoveAll(filepath.Dir(repoDir)) }
+	cleanup := func() { _ = os.RemoveAll(stagingParent) }
+	defer cleanup()
+	if _, err := gitOutput(ctx, repoDir, "bundle", "verify", bundlePath); err != nil {
+		return nil, ErrInvalid
+	}
 	// fetch creates refs (unbundle alone only writes objects).
 	if _, err := gitOutput(ctx, repoDir, "fetch", bundlePath, "refs/heads/*:refs/heads/*"); err != nil {
 		cleanup()
@@ -426,17 +442,26 @@ func (s *Service) ImportBundle(ctx context.Context, input ImportBundleInput) (*B
 		}
 	}
 	_ = head
+	if _, err := gitOutput(ctx, repoDir, "fsck", "--full", "--no-dangling"); err != nil {
+		return nil, fmt.Errorf("verify imported repository: %w", err)
+	}
+	if _, err := gitOutput(ctx, repoDir, "symbolic-ref", "HEAD", "refs/heads/main"); err != nil {
+		return nil, fmt.Errorf("set default branch: %w", err)
+	}
+	if err := os.Rename(stagingParent, finalParent); err != nil {
+		return nil, fmt.Errorf("activate imported bundle: %w", err)
+	}
 	p := &Project{
 		ID: projectID, Name: input.Name,
 		RepoDir:   filepath.ToSlash(filepath.Join("repos", projectID, "repo.git")),
 		CreatedAt: now, UpdatedAt: now,
 	}
 	if err := s.store.Create(ctx, p); err != nil {
-		cleanup()
+		_ = os.RemoveAll(finalParent)
 		return nil, err
 	}
 	commits := 0
-	if out, err := gitOutput(ctx, repoDir, "rev-list", "--count", "HEAD"); err == nil {
+	if out, err := gitOutput(ctx, finalRepoDir, "rev-list", "--count", "HEAD"); err == nil {
 		fmt.Sscanf(out, "%d", &commits)
 	}
 	return &BundleImportResult{Project: p, Commits: commits}, nil

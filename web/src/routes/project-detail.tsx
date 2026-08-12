@@ -1,8 +1,10 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ArrowLeft, BookOpen, FolderGit2, History, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { getProject } from "@/lib/api/projects";
 import { getHome } from "@/lib/api/docs";
 import {
@@ -82,6 +84,8 @@ function CommitRow({ projectId, commit }: { projectId: string; commit: CommitSum
 
 export default function ProjectDetailPage() {
   const { id = "" } = useParams();
+	const [commitSearch, setCommitSearch] = useState("");
+	const [commitQuery, setCommitQuery] = useState("");
   const { data, isLoading, isError } = useQuery({
     queryKey: ["projects", id],
     queryFn: () => getProject(id),
@@ -96,11 +100,20 @@ export default function ProjectDetailPage() {
   });
   const homeHtml = homeQuery.data?.content ?? "";
 
-  const commitsQuery = useQuery({
-    queryKey: ["commits", id],
-    queryFn: () => listCommits(id, 5),
-    enabled: id.length > 0,
-  });
+	const commitsQuery = useInfiniteQuery({
+		queryKey: ["commits", id, commitQuery],
+		queryFn: ({ pageParam }) => listCommits(id, 5, pageParam, commitQuery),
+		initialPageParam: 0,
+		getNextPageParam: (lastPage, pages) =>
+			lastPage.has_more
+				? pages.reduce((count, page) => count + page.commits.length, 0)
+				: undefined,
+		enabled: id.length > 0,
+	});
+	const commits = useMemo(
+		() => commitsQuery.data?.pages.flatMap((page) => page.commits) ?? [],
+		[commitsQuery.data],
+	);
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -170,7 +183,7 @@ export default function ProjectDetailPage() {
               </div>
 
               <section className="space-y-4">
-                <div className="flex items-center justify-between">
+				<div className="flex items-center justify-between">
                   <p className="mono-label text-[var(--color-ink-3)]">
                     readme
                   </p>
@@ -180,7 +193,22 @@ export default function ProjectDetailPage() {
                       阅读文档
                     </Button>
                   </Link>
-                </div>
+				</div>
+				<form
+					className="flex gap-2"
+					onSubmit={(event) => {
+						event.preventDefault();
+						setCommitQuery(commitSearch.trim());
+					}}
+				>
+					<Input
+						aria-label="搜索提交历史"
+						value={commitSearch}
+						onChange={(event) => setCommitSearch(event.target.value)}
+						placeholder="消息、作者或 SHA"
+					/>
+					<Button type="submit" variant="outline">搜索提交</Button>
+				</form>
                 {homeQuery.isLoading && (
                   <p className="mono-label text-[var(--color-ink-3)]">loading…</p>
                 )}
@@ -210,17 +238,28 @@ export default function ProjectDetailPage() {
                 {commitsQuery.isLoading && (
                   <p className="mono-label text-[var(--color-ink-3)]">loading…</p>
                 )}
-                {commitsQuery.data && (
-                  <div className="hairline-panel px-5">
-                    {commitsQuery.data.commits.length === 0 && (
+				{commitsQuery.data && (
+					<div className="hairline-panel px-5">
+						{commits.length === 0 && (
                       <p className="py-6 text-center text-sm text-[var(--color-ink-2)]">
                         还没有提交
                       </p>
                     )}
-                    {commitsQuery.data.commits.map((c) => (
-                      <CommitRow key={c.sha} projectId={project.id} commit={c} />
-                    ))}
-                  </div>
+						{commits.map((c) => (
+							<CommitRow key={c.sha} projectId={project.id} commit={c} />
+						))}
+						{commitsQuery.hasNextPage && (
+							<div className="border-t border-[var(--color-rule)] py-3 text-center">
+								<Button
+									variant="ghost"
+									disabled={commitsQuery.isFetchingNextPage}
+									onClick={() => void commitsQuery.fetchNextPage()}
+								>
+									{commitsQuery.isFetchingNextPage ? "加载中…" : "加载更多"}
+								</Button>
+							</div>
+						)}
+					</div>
                 )}
               </section>
             </>

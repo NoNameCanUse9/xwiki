@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
 	"agentdocs/internal/platform/clock"
 	"agentdocs/internal/project"
@@ -67,23 +68,44 @@ func (s *Service) DeleteProject(ctx context.Context, projectID string) error {
 	return s.store.DeleteProject(ctx, projectID)
 }
 
+// MarkDirty records that a project requires a complete reindex.
+func (s *Service) MarkDirty(ctx context.Context, projectID string) error {
+	return s.store.SetProjectState(ctx, ProjectIndexState{
+		ProjectID: projectID, Status: "dirty", UpdatedAt: s.clock.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+// IndexState returns the persisted health of a project's search snapshot.
+func (s *Service) IndexState(ctx context.Context, projectID string) (*ProjectIndexState, error) {
+	return s.store.ProjectState(ctx, projectID)
+}
+
 // ReindexProject incrementally syncs the index with the project's current
 // Git tree: changed blobs are upserted, vanished paths are removed.
-func (s *Service) ReindexProject(ctx context.Context, projectID string) (*ReindexStats, error) {
+func (s *Service) ReindexProject(ctx context.Context, projectID string) (stats *ReindexStats, retErr error) {
+	_ = s.MarkDirty(ctx, projectID)
+	defer func() {
+		if retErr != nil {
+			_ = s.store.SetProjectState(context.Background(), ProjectIndexState{
+				ProjectID: projectID, Status: "error", LastError: retErr.Error(),
+				UpdatedAt: s.clock.Now().UTC().Format(time.RFC3339),
+			})
+		}
+	}()
 	repo, err := s.projects.OpenRepo(ctx, projectID)
 	if err != nil {
 		return nil, err
 	}
-	branch, err := repo.DefaultBranch(ctx)
+	revision, err := repo.Revision(ctx)
 	if err != nil {
 		return nil, err
 	}
-	stats := &ReindexStats{}
+	stats = &ReindexStats{}
 	seen := map[string]bool{}
 
 	var walk func(dir string) error
 	walk = func(dir string) error {
-		entries, err := repo.ListTree(ctx, branch, dir)
+		entries, err := repo.ListTree(ctx, revision, dir)
 		if err != nil {
 			return err
 		}
@@ -106,7 +128,7 @@ func (s *Service) ReindexProject(ctx context.Context, projectID string) (*Reinde
 					continue
 				}
 			}
-			blob, err := repo.ReadBlob(ctx, branch, e.Path)
+			blob, err := repo.ReadBlob(ctx, revision, e.Path)
 			if err != nil {
 				continue // unreadable blobs are skipped
 			}
@@ -131,7 +153,7 @@ func (s *Service) ReindexProject(ctx context.Context, projectID string) (*Reinde
 		return nil, err
 	}
 	// Rebuild the wiki-link index (backlinks) from every indexed markdown file.
-	if err := s.rebuildLinks(ctx, repo, branch, projectID); err != nil {
+	if err := s.rebuildLinks(ctx, repo, revision, projectID); err != nil {
 		return nil, err
 	}
 	// Remove indexed paths that no longer exist in the tree.
@@ -146,6 +168,12 @@ func (s *Service) ReindexProject(ctx context.Context, projectID string) (*Reinde
 			}
 			stats.Removed++
 		}
+	}
+	if err := s.store.SetProjectState(ctx, ProjectIndexState{
+		ProjectID: projectID, Revision: revision, Status: "clean",
+		UpdatedAt: s.clock.Now().UTC().Format(time.RFC3339),
+	}); err != nil {
+		return nil, err
 	}
 	return stats, nil
 }

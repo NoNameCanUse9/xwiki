@@ -6,7 +6,9 @@ import (
 	"log/slog"
 	"net/http"
 
+	"agentdocs/internal/agent"
 	"agentdocs/internal/config"
+	"agentdocs/internal/httpapi/middleware"
 	"agentdocs/internal/httpapi/request"
 	"agentdocs/internal/httpapi/response"
 	"agentdocs/internal/project"
@@ -18,11 +20,12 @@ type ProjectHandler struct {
 	cfg       *config.Config
 	svc       *project.Service
 	searchSvc *search.Service
+	agentSvc  *agent.Service
 	log       *slog.Logger
 }
 
-func NewProjectHandler(cfg *config.Config, svc *project.Service, searchSvc *search.Service, log *slog.Logger) *ProjectHandler {
-	return &ProjectHandler{cfg: cfg, svc: svc, searchSvc: searchSvc, log: log}
+func NewProjectHandler(cfg *config.Config, svc *project.Service, agentSvc *agent.Service, searchSvc *search.Service, log *slog.Logger) *ProjectHandler {
+	return &ProjectHandler{cfg: cfg, svc: svc, agentSvc: agentSvc, searchSvc: searchSvc, log: log}
 }
 
 type createProjectRequest struct {
@@ -55,16 +58,47 @@ func (h *ProjectHandler) Create(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	if _, err := h.searchSvc.ReindexProject(r.Context(), p.ID); err != nil {
+		h.log.Warn("reindex after create failed", "error", err, "project_id", p.ID)
+	}
 	response.WriteJSON(w, http.StatusCreated, map[string]any{"project": p})
 }
 
 // List handles GET /api/v1/projects.
 func (h *ProjectHandler) List(w http.ResponseWriter, r *http.Request) {
-	projects, err := h.svc.List(r.Context())
+	status := r.URL.Query().Get("status")
+	var projects []*project.Project
+	var err error
+	switch status {
+	case "":
+		projects, err = h.svc.List(r.Context())
+	case "deleted":
+		if middleware.AgentTokenID(r) != "" {
+			response.WriteError(w, r, http.StatusForbidden, "session_required", "deleted projects require a user session")
+			return
+		}
+		projects, err = h.svc.ListDeleted(r.Context())
+	default:
+		response.WriteError(w, r, http.StatusBadRequest, "validation_failed", "status must be deleted")
+		return
+	}
 	if err != nil {
 		h.log.Error("list projects failed", "error", err, "request_id", request.RequestID(r))
 		response.WriteError(w, r, http.StatusInternalServerError, "internal_error", "could not list projects")
 		return
+	}
+	if allowed := middleware.AgentProjectIDs(r); allowed != nil {
+		bound := make(map[string]struct{}, len(allowed))
+		for _, id := range allowed {
+			bound[id] = struct{}{}
+		}
+		filtered := projects[:0]
+		for _, p := range projects {
+			if _, ok := bound[p.ID]; ok {
+				filtered = append(filtered, p)
+			}
+		}
+		projects = filtered
 	}
 	response.WriteJSON(w, http.StatusOK, map[string]any{"projects": projects})
 }
@@ -219,11 +253,14 @@ func (h *ProjectHandler) Rename(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	if _, err := h.searchSvc.ReindexProject(r.Context(), projectID); err != nil {
+		h.log.Warn("reindex after rename failed", "error", err, "project_id", projectID)
+	}
 	response.WriteJSON(w, http.StatusOK, map[string]any{"project": p})
 }
 
-// Delete handles DELETE /api/v1/projects/{id}. The default removes the
-// project completely (metadata + repository).
+// Delete handles DELETE /api/v1/projects/{id}. It moves the project to the
+// recoverable deleted-project view while keeping its repository intact.
 func (h *ProjectHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	projectID := request.PathParam(r, "id")
 	if err := h.svc.Delete(r.Context(), projectID); err != nil {
@@ -240,6 +277,47 @@ func (h *ProjectHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		h.log.Warn("delete project index failed", "error", err, "project_id", projectID)
 	}
 	response.WriteJSON(w, http.StatusOK, map[string]any{"deleted": true})
+}
+
+// RestoreDeleted handles POST /api/v1/projects/{id}/restore.
+func (h *ProjectHandler) RestoreDeleted(w http.ResponseWriter, r *http.Request) {
+	projectID := request.PathParam(r, "id")
+	p, err := h.svc.RestoreDeleted(r.Context(), projectID)
+	if err != nil {
+		if errors.Is(err, project.ErrNotFound) {
+			response.WriteError(w, r, http.StatusNotFound, "project_not_found", "deleted project not found")
+			return
+		}
+		h.log.Error("restore deleted project failed", "error", err, "request_id", request.RequestID(r))
+		response.WriteError(w, r, http.StatusInternalServerError, "internal_error", "could not restore project")
+		return
+	}
+	if _, err := h.searchSvc.ReindexProject(r.Context(), projectID); err != nil {
+		h.log.Warn("reindex after restore failed", "error", err, "project_id", projectID)
+	}
+	response.WriteJSON(w, http.StatusOK, map[string]any{"project": p})
+}
+
+// PurgeDeleted handles DELETE /api/v1/projects/{id}/purge.
+func (h *ProjectHandler) PurgeDeleted(w http.ResponseWriter, r *http.Request) {
+	projectID := request.PathParam(r, "id")
+	err := h.svc.PurgeDeleted(r.Context(), projectID)
+	if err != nil {
+		switch {
+		case errors.Is(err, project.ErrNotDeleted):
+			response.WriteError(w, r, http.StatusConflict, "project_not_deleted", "project must be deleted before purge")
+		case errors.Is(err, project.ErrNotFound):
+			response.WriteError(w, r, http.StatusNotFound, "project_not_found", "project not found")
+		default:
+			h.log.Error("purge deleted project failed", "error", err, "request_id", request.RequestID(r))
+			response.WriteError(w, r, http.StatusInternalServerError, "internal_error", "could not purge project")
+		}
+		return
+	}
+	if err := h.searchSvc.DeleteProject(r.Context(), projectID); err != nil {
+		h.log.Warn("purge project index failed", "error", err, "project_id", projectID)
+	}
+	response.WriteJSON(w, http.StatusOK, map[string]any{"purged": true})
 }
 
 type purgePathsRequest struct {

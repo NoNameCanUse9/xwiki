@@ -32,7 +32,7 @@ import {
 	releaseLock,
 	type EditLock,
 } from "@/lib/api/locks";
-import { getPage, getTree, type TreeEntry } from "@/lib/api/docs";
+import { getPage, getTree, type PageResponse, type TreeEntry } from "@/lib/api/docs";
 import CommandPalette from "@/components/editor/command-palette";
 import ProjectSearch from "@/components/editor/project-search";
 import RichEditor from "@/components/editor/rich-editor";
@@ -70,6 +70,44 @@ function sanitizeHtml(html: string): string {
 					: `${attr}=${val}`;
 			},
 		);
+}
+
+interface LocalDraft {
+	version: 1;
+	project_id: string;
+	path: string;
+	content: string;
+	base_revision: string;
+	updated_at: string;
+}
+
+function parseLocalDraft(raw: string | null, projectId: string, path: string): LocalDraft | null {
+	if (!raw) return null;
+	try {
+		const parsed = JSON.parse(raw) as Partial<LocalDraft>;
+		if (
+			parsed.version === 1 &&
+			parsed.project_id === projectId &&
+			parsed.path === path &&
+			typeof parsed.content === "string" &&
+			typeof parsed.base_revision === "string" &&
+			typeof parsed.updated_at === "string"
+		) {
+			return parsed as LocalDraft;
+		}
+	} catch {
+		// Legacy drafts were plain strings. Keep them recoverable, but require
+		// the same explicit stale-draft choice as an unknown base revision.
+		return {
+			version: 1,
+			project_id: projectId,
+			path,
+			content: raw,
+			base_revision: "",
+			updated_at: new Date(0).toISOString(),
+		};
+	}
+	return null;
 }
 
 function Breadcrumbs({
@@ -401,8 +439,12 @@ export default function DocsViewerPage() {
 	// `seed` is the initial content the editor mounts with (a restored
 	// local draft, or the server raw content).
 	const draftRef = useRef("");
+	const baseRevisionRef = useRef("");
 	const dirtyRef = useRef(false);
 	const [seed, setSeed] = useState<string | null>(null);
+	const [rawPage, setRawPage] = useState<PageResponse | null>(null);
+	const [savedDraft, setSavedDraft] = useState<LocalDraft | null>(null);
+	const [draftConflict, setDraftConflict] = useState(false);
 	const [saving, setSaving] = useState(false);
 	// Lock state machine: idle (locked/read-only) -> opening (acquiring) ->
 	// held (editing) | blocked (another user holds the page).
@@ -496,13 +538,6 @@ export default function DocsViewerPage() {
 		}
 	};
 
-	// Edit flow: load raw content, submit an update changeset on save.
-	const rawQuery = useQuery({
-		queryKey: ["docs", "raw", id, filePath],
-		queryFn: () => getPage(id, filePath, "raw"),
-		enabled: editing && !showHome,
-	});
-
 	// --- Exclusive edit lock: unlock to edit, lock to commit & finish. ---
 
 	// Keyed per keystroke: updates a ref only (no re-render). The first edit
@@ -522,19 +557,57 @@ export default function DocsViewerPage() {
 
 	const draftKey = (projectId: string, path: string) =>
 		`agentdocs:draft:${projectId}:${path}`;
+	const persistDraft = () => {
+		const draft: LocalDraft = {
+			version: 1,
+			project_id: id,
+			path: filePath,
+			content: draftRef.current,
+			base_revision: baseRevisionRef.current,
+			updated_at: new Date().toISOString(),
+		};
+		try {
+			localStorage.setItem(draftKey(id, filePath), JSON.stringify(draft));
+		} catch {
+			// The in-memory draft remains available when storage quota is full.
+		}
+	};
 
 	const startEditing = async () => {
 		if (lockState === "opening") return;
 		setLockState("opening");
-		const saved = localStorage.getItem(draftKey(id, filePath));
+		const saved = parseLocalDraft(localStorage.getItem(draftKey(id, filePath)), id, filePath);
+		let acquired = false;
 		try {
 			await acquireLock(id, filePath);
-			setSeed(saved ?? null);
+			acquired = true;
+			const raw = await queryClient.fetchQuery({
+				queryKey: ["docs", "raw", id, filePath],
+				queryFn: () => getPage(id, filePath, "raw"),
+			});
+			const revision = raw.revision ?? "";
+			baseRevisionRef.current = revision;
+			setRawPage(raw);
+			setSavedDraft(saved);
+			const staleDraft = saved !== null && saved.base_revision !== revision;
+			setDraftConflict(staleDraft);
+			if (staleDraft) {
+				setSeed(null);
+			} else {
+				const initial = saved?.content ?? raw.content;
+				draftRef.current = initial;
+				setSeed(initial);
+			}
 			markClean();
+			if (saved && !staleDraft) {
+				dirtyRef.current = true;
+				setDirty(true);
+			}
 			setLockHolder(null);
 			setLockState("held");
 			setEditing(true);
 		} catch (err) {
+			if (acquired) await releaseLock(id, filePath).catch(() => {});
 			const holder = lockFromError(err);
 			if (holder) {
 				setLockHolder(holder);
@@ -547,20 +620,40 @@ export default function DocsViewerPage() {
 		}
 	};
 
+	const resolveDraftConflict = (restoreLocal: boolean) => {
+		if (!rawPage) return;
+		baseRevisionRef.current = rawPage.revision ?? "";
+		const initial = restoreLocal && savedDraft ? savedDraft.content : rawPage.content;
+		draftRef.current = initial;
+		setSeed(initial);
+		setDraftConflict(false);
+		if (restoreLocal) {
+			dirtyRef.current = true;
+			setDirty(true);
+			persistDraft();
+		} else {
+			localStorage.removeItem(draftKey(id, filePath));
+			markClean();
+		}
+	};
+
 	// Commit the current draft as one changeset (Cmd/Ctrl+S). One edit = one
 	// commit; message stays empty so the backend stamps 时间 + 用户名.
-	const commitDraft = async () => {
-		if (!editing || saving) return;
+	const commitDraft = async (): Promise<boolean> => {
+		if (!editing || saving) return false;
 		setSaving(true);
 		setSaveState("saving");
 		try {
-			const rev = await getRevision(id);
-			await submitChangeset(id, {
-				base_revision: rev.revision,
+			if (!baseRevisionRef.current) {
+				throw new Error("文档响应缺少 revision，请刷新后重试");
+			}
+			const result = await submitChangeset(id, {
+				base_revision: baseRevisionRef.current,
 				// 留空则后端生成默认：时间 + 操作者 修改 <path>
 				message: commitMessage.trim(),
 				changes: [{ op: "update", path: filePath, content: draftRef.current }],
 			});
+			baseRevisionRef.current = result.revision;
 			setSaveState("saved");
 			toast.success("已提交");
 			markClean();
@@ -571,15 +664,16 @@ export default function DocsViewerPage() {
 			// Keep the raw cache in sync so a re-edit of the same file shows
 			// the just-committed content, not the pre-commit snapshot.
 			await queryClient.invalidateQueries({ queryKey: ["docs", "raw"] });
+			return true;
 		} catch (err) {
 			setSaveState("idle");
+			persistDraft();
 			if ((err as { status?: number })?.status === 409) {
 				toast.error("文档已被他人修改，请刷新后重试");
-				setEditing(false);
-				setLockState("idle");
 			} else {
 				toast.error(err instanceof Error ? err.message : "保存失败");
 			}
+			return false;
 		} finally {
 			setSaving(false);
 		}
@@ -589,10 +683,9 @@ export default function DocsViewerPage() {
 	const lockAndCommit = async () => {
 		if (!editing || saving) return;
 		setCommitOpen(false);
-		try {
-			if (dirty) await commitDraft();
-		} catch {
-			return; // commit failed; stay editing so nothing is lost
+		if (dirty) {
+			const committed = await commitDraft();
+			if (!committed) return;
 		}
 		await releaseLock(id, filePath).catch(() => {});
 		setEditing(false);
@@ -626,11 +719,10 @@ export default function DocsViewerPage() {
 		if (!editing || !filePath) return;
 		const beat = () => {
 			heartbeatLock(id, filePath).catch(() => {
+				if (dirtyRef.current) persistDraft();
 				setEditing(false);
 				setLockState("idle");
-				markClean();
-				localStorage.removeItem(draftKey(id, filePath));
-				toast.error("编辑锁已失效，已回到只读模式");
+				toast.error("编辑锁已失效，本地草稿已保留");
 			});
 		};
 		beat();
@@ -644,7 +736,7 @@ export default function DocsViewerPage() {
 		if (!editing || !dirtyRef.current) return;
 		const t = window.setTimeout(() => {
 			try {
-				localStorage.setItem(draftKey(id, filePath), draftRef.current);
+				persistDraft();
 			} catch {
 				// quota exceeded — ignore, the draft lives in memory anyway
 			}
@@ -663,7 +755,6 @@ export default function DocsViewerPage() {
 		setEditing(false);
 		setLockState("idle");
 		markClean();
-		localStorage.removeItem(draftKey(id, filePath));
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [id, filePath]);
 
@@ -699,6 +790,7 @@ export default function DocsViewerPage() {
 	useEffect(() => {
 		if (blocker.state !== "blocked") return;
 		if (window.confirm("有未保存的修改，确定放弃？")) {
+			localStorage.removeItem(draftKey(id, filePath));
 			markClean();
 			blocker.proceed();
 		} else {
@@ -1024,14 +1116,29 @@ export default function DocsViewerPage() {
 							</div>
 						)}
 						{editing && !showHome && !isDirPath && (
-							rawQuery.isLoading || rawQuery.isFetching ? (
-								<p className="mono-label text-[var(--color-ink-3)]">
-									loading…
-								</p>
+							draftConflict ? (
+								<div className="hairline-panel space-y-4 p-5">
+									<div>
+										<p className="font-medium text-[var(--color-ink)]">
+											本地草稿基于旧版本
+										</p>
+										<p className="mt-1 text-sm text-[var(--color-ink-2)]">
+											服务器文档已经更新。请选择恢复本地内容，或丢弃草稿并使用服务器版本。
+										</p>
+									</div>
+									<div className="flex gap-2">
+										<Button onClick={() => resolveDraftConflict(true)}>
+											恢复本地草稿
+										</Button>
+										<Button variant="outline" onClick={() => resolveDraftConflict(false)}>
+											使用服务器版本
+										</Button>
+									</div>
+								</div>
 							) : (
-								<>
+								seed !== null ? <>
 									<RichEditor
-										initialMarkdown={seed ?? rawQuery.data?.content ?? ""}
+										initialMarkdown={seed}
 										onChange={handleEditorChange}
 										onNavigateLink={(href) => {
 											const m = href.match(
@@ -1040,7 +1147,7 @@ export default function DocsViewerPage() {
 											if (m) navigate(`/projects/${id}/docs/${m[1]}`);
 										}}
 									/>
-								</>
+								</> : null
 							)
 						)}
 					</div>

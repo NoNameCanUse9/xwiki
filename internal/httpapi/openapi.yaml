@@ -274,6 +274,12 @@ paths:
           $ref: "#/components/responses/Conflict"
     get:
       summary: 项目列表（含已归档，按创建时间倒序）
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema: { type: string, enum: [deleted] }
+          description: 仅用户会话可用；status=deleted 返回软删除项目
       responses:
         "200":
           description: OK
@@ -322,6 +328,33 @@ paths:
           $ref: "#/components/responses/ProjectResult"
         "404":
           $ref: "#/components/responses/NotFound"
+    patch:
+      summary: 重命名项目并更新 README（仅用户会话）
+      parameters:
+        - $ref: "#/components/parameters/ProjectID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+      responses:
+        "200":
+          $ref: "#/components/responses/ProjectResult"
+        "409":
+          $ref: "#/components/responses/Conflict"
+    delete:
+      summary: 软删除项目（仅用户会话，可恢复）
+      parameters:
+        - $ref: "#/components/parameters/ProjectID"
+      responses:
+        "200":
+          $ref: "#/components/responses/Ok"
+        "404":
+          $ref: "#/components/responses/NotFound"
   /projects/{id}/archive:
     post:
       summary: 归档项目（幂等）
@@ -342,6 +375,45 @@ paths:
           $ref: "#/components/responses/ProjectResult"
         "404":
           $ref: "#/components/responses/NotFound"
+  /projects/{id}/restore:
+    post:
+      summary: 恢复软删除项目（仅用户会话）
+      parameters:
+        - $ref: "#/components/parameters/ProjectID"
+      responses:
+        "200":
+          $ref: "#/components/responses/ProjectResult"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /projects/{id}/purge:
+    post:
+      summary: 从全部 Git 历史清除指定路径（仅用户会话）
+      parameters:
+        - $ref: "#/components/parameters/ProjectID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [paths]
+              properties:
+                paths:
+                  type: array
+                  items: { type: string }
+                message: { type: string }
+      responses:
+        "200":
+          $ref: "#/components/responses/Ok"
+    delete:
+      summary: 永久删除已软删除项目（仅用户会话）
+      parameters:
+        - $ref: "#/components/parameters/ProjectID"
+      responses:
+        "200":
+          $ref: "#/components/responses/Ok"
+        "409":
+          $ref: "#/components/responses/Conflict"
 
   /projects/{id}/docs/tree:
     get:
@@ -700,7 +772,7 @@ paths:
 
   /projects/{id}/commits:
     get:
-      summary: Commit 列表（倒序）
+      summary: 全 refs Commit 搜索与分页（倒序）
       parameters:
         - $ref: "#/components/parameters/ProjectID"
         - name: limit
@@ -711,6 +783,11 @@ paths:
           in: query
           required: false
           schema: { type: integer, default: 0 }
+        - name: q
+          in: query
+          required: false
+          schema: { type: string }
+          description: 匹配提交消息、作者、完整或短 SHA
       responses:
         "200":
           description: OK
@@ -718,12 +795,14 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [commits]
+                required: [commits, has_more]
                 properties:
                   commits:
                     type: array
                     items:
                       $ref: "#/components/schemas/Commit"
+                  has_more:
+                    type: boolean
   /projects/{id}/commits/{sha}:
     get:
       summary: Commit 详情
@@ -1079,7 +1158,7 @@ components:
     Project:
       type: object
       required:
-        [id, name, description, repo_dir, archived, created_at, updated_at]
+        [id, name, description, repo_dir, archived, deleted, created_at, updated_at]
       properties:
         id:
           type: string
@@ -1091,6 +1170,11 @@ components:
           type: string
         archived:
           type: boolean
+        deleted:
+          type: boolean
+        deleted_at:
+          type: string
+          format: date-time
         created_at:
           type: string
           format: date-time
@@ -1121,7 +1205,7 @@ components:
           type: string
     DocPage:
       type: object
-      required: [path, format, content]
+      required: [path, format, content, revision]
       properties:
         path:
           type: string
@@ -1130,6 +1214,9 @@ components:
           enum: [raw, html, base64]
         content:
           type: string
+        revision:
+          type: string
+          description: 实际读取内容的不可变 Git commit id
         encoding:
           type: string
           description: format=base64 时为 "base64"

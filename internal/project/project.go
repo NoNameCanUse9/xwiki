@@ -15,6 +15,8 @@ type Project struct {
 	RepoDir     string     `json:"repo_dir"`
 	Archived    bool       `json:"archived"`
 	ArchivedAt  *time.Time `json:"archived_at,omitempty"`
+	Deleted     bool       `json:"deleted"`
+	DeletedAt   *time.Time `json:"deleted_at,omitempty"`
 	CreatedAt   time.Time  `json:"created_at"`
 	UpdatedAt   time.Time  `json:"updated_at"`
 }
@@ -22,11 +24,15 @@ type Project struct {
 // IsArchived reports whether the project has been archived.
 func (p *Project) IsArchived() bool { return p.ArchivedAt != nil }
 
+// IsDeleted reports whether the project is in the recoverable trash.
+func (p *Project) IsDeleted() bool { return p.DeletedAt != nil }
+
 // Sentinel errors returned by the store and service layers.
 var (
-	ErrNotFound = errors.New("project not found")
-	ErrConflict = errors.New("project name already exists")
-	ErrInvalid  = errors.New("invalid project name")
+	ErrNotFound   = errors.New("project not found")
+	ErrConflict   = errors.New("project name already exists")
+	ErrInvalid    = errors.New("invalid project name")
+	ErrNotDeleted = errors.New("project is not deleted")
 )
 
 // namePattern matches the safe project-name grammar: lowercase letters,

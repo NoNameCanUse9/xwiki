@@ -16,8 +16,13 @@ permissions:
   packages: write   # 推送 GHCR Docker 镜像
 
 jobs:
+  test:
+    name: Test release candidate
+    uses: ./.github/workflows/ci.yml
+
   build-and-release:
     name: Build linux/amd64 binary & create release
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

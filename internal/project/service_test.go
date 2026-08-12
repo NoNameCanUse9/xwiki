@@ -150,3 +150,66 @@ func TestServiceCreateFailsWhenStoreFailsAndCleansRepo(t *testing.T) {
 		t.Fatalf("want 1 repo dir after failed duplicate create, got %d", len(entries))
 	}
 }
+
+func TestServiceDeleteMovesProjectToRecoverableTrash(t *testing.T) {
+	svc, _ := newService(t)
+	p, err := svc.Create(context.Background(), CreateInput{Name: "recoverable"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	repoDir := filepath.Join(svc.reposRoot, p.ID, "repo.git")
+
+	if err := svc.Delete(context.Background(), p.ID); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	if _, err := svc.Get(context.Background(), p.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Get deleted = %v, want ErrNotFound", err)
+	}
+	deleted, err := svc.ListDeleted(context.Background())
+	if err != nil || len(deleted) != 1 || deleted[0].ID != p.ID || !deleted[0].IsDeleted() {
+		t.Fatalf("ListDeleted = %+v, %v", deleted, err)
+	}
+	if _, err := os.Stat(repoDir); err != nil {
+		t.Fatalf("soft delete removed repository: %v", err)
+	}
+
+	restored, err := svc.RestoreDeleted(context.Background(), p.ID)
+	if err != nil || restored.IsDeleted() {
+		t.Fatalf("RestoreDeleted = %+v, %v", restored, err)
+	}
+	if _, err := svc.Get(context.Background(), p.ID); err != nil {
+		t.Fatalf("Get restored: %v", err)
+	}
+}
+
+func TestServicePurgeDeletedPermanentlyRemovesProject(t *testing.T) {
+	svc, _ := newService(t)
+	p, err := svc.Create(context.Background(), CreateInput{Name: "purge-deleted"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectDir := filepath.Join(svc.reposRoot, p.ID)
+	if err := svc.Delete(context.Background(), p.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.PurgeDeleted(context.Background(), p.ID); err != nil {
+		t.Fatalf("PurgeDeleted: %v", err)
+	}
+	if _, err := os.Stat(projectDir); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("purged repository still exists: %v", err)
+	}
+	if _, err := svc.RestoreDeleted(context.Background(), p.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("restore purged = %v, want ErrNotFound", err)
+	}
+}
+
+func TestServicePurgeDeletedRejectsActiveProject(t *testing.T) {
+	svc, _ := newService(t)
+	p, err := svc.Create(context.Background(), CreateInput{Name: "active"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.PurgeDeleted(context.Background(), p.ID); !errors.Is(err, ErrNotDeleted) {
+		t.Fatalf("PurgeDeleted active = %v, want ErrNotDeleted", err)
+	}
+}

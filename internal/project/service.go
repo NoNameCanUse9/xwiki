@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"agentdocs/internal/platform/clock"
 	"agentdocs/internal/platform/id"
@@ -91,6 +92,10 @@ func (s *Service) List(ctx context.Context) ([]*Project, error) {
 	return s.store.List(ctx)
 }
 
+func (s *Service) ListDeleted(ctx context.Context) ([]*Project, error) {
+	return s.store.ListDeleted(ctx)
+}
+
 // Get returns one project by id.
 func (s *Service) Get(ctx context.Context, projectID string) (*Project, error) {
 	return s.store.GetByID(ctx, projectID)
@@ -99,6 +104,8 @@ func (s *Service) Get(ctx context.Context, projectID string) (*Project, error) {
 // Archive marks a project archived. The operation is idempotent: archiving an
 // already archived project succeeds and keeps the original timestamp.
 func (s *Service) Archive(ctx context.Context, projectID string) (*Project, error) {
+	unlock := lockProject(projectID)
+	defer unlock()
 	now := s.clock.Now().UTC()
 	if err := s.store.Archive(ctx, projectID, now); err != nil {
 		return nil, err
@@ -115,6 +122,8 @@ func (s *Service) Archive(ctx context.Context, projectID string) (*Project, erro
 
 // Unarchive restores an archived project (idempotent).
 func (s *Service) Unarchive(ctx context.Context, projectID string) (*Project, error) {
+	unlock := lockProject(projectID)
+	defer unlock()
 	now := s.clock.Now().UTC()
 	if err := s.store.Unarchive(ctx, projectID, now); err != nil {
 		return nil, err
@@ -130,6 +139,8 @@ type RenameInput struct {
 // Rename updates a project's name in metadata and refreshes the README
 // headline in the repository with a new commit, keeping the two in sync.
 func (s *Service) Rename(ctx context.Context, projectID string, input RenameInput) (*Project, error) {
+	unlock := lockProject(projectID)
+	defer unlock()
 	if err := ValidateName(input.Name); err != nil {
 		return nil, ErrInvalid
 	}
@@ -141,14 +152,16 @@ func (s *Service) Rename(ctx context.Context, projectID string, input RenameInpu
 		return p, nil
 	}
 	now := s.clock.Now().UTC()
-	if err := s.store.Rename(ctx, projectID, input.Name, now); err != nil {
-		return nil, err
-	}
-	// Refresh the README headline so the repository matches the new name.
-	// Failures here are non-fatal: metadata already updated.
+	// Write Git first while holding the shared project mutation lock. Metadata
+	// is changed only after Git succeeds, so callers never observe split state.
 	repo := &Repo{Dir: filepath.Join(s.reposRoot, p.ID, "repo.git")}
 	if err := repo.RewriteReadmeTitle(ctx, input.Name); err != nil {
-		return s.store.GetByID(ctx, projectID)
+		return nil, fmt.Errorf("rewrite readme title: %w", err)
+	}
+	if err := s.store.Rename(ctx, projectID, input.Name, now); err != nil {
+		// Best-effort compensation restores the public repository title.
+		_ = repo.RewriteReadmeTitle(context.Background(), p.Name)
+		return nil, err
 	}
 	return s.store.GetByID(ctx, projectID)
 }
@@ -156,24 +169,66 @@ func (s *Service) Rename(ctx context.Context, projectID string, input RenameInpu
 // Delete removes a project completely: metadata row and the on-disk bare
 // repository (git history included). It is destructive and irreversible.
 func (s *Service) Delete(ctx context.Context, projectID string) error {
-	p, err := s.store.GetByID(ctx, projectID)
+	unlock := lockProject(projectID)
+	defer unlock()
+	return s.store.SoftDelete(ctx, projectID, s.clock.Now().UTC())
+}
+
+func (s *Service) RestoreDeleted(ctx context.Context, projectID string) (*Project, error) {
+	unlock := lockProject(projectID)
+	defer unlock()
+	if _, err := s.store.GetDeletedByID(ctx, projectID); err != nil {
+		return nil, err
+	}
+	if err := s.store.RestoreDeleted(ctx, projectID, s.clock.Now().UTC()); err != nil {
+		return nil, err
+	}
+	return s.store.GetByID(ctx, projectID)
+}
+
+func (s *Service) PurgeDeleted(ctx context.Context, projectID string) error {
+	unlock := lockProject(projectID)
+	defer unlock()
+	p, err := s.store.GetDeletedByID(ctx, projectID)
+	if errors.Is(err, ErrNotFound) {
+		if _, activeErr := s.store.GetByID(ctx, projectID); activeErr == nil {
+			return ErrNotDeleted
+		}
+		return ErrNotFound
+	}
 	if err != nil {
 		return err
 	}
-	if err := s.store.Delete(ctx, projectID); err != nil {
+	projectDir := filepath.Join(s.reposRoot, p.ID)
+	trashRoot := filepath.Join(filepath.Dir(s.reposRoot), "trash")
+	if err := os.MkdirAll(trashRoot, 0o755); err != nil {
 		return err
 	}
-	// Remove the repository directory; tolerate a missing repo dir.
-	repoDir := filepath.Join(s.reposRoot, p.ID)
-	if err := os.RemoveAll(repoDir); err != nil {
-		return fmt.Errorf("remove repository: %w", err)
+	staged := filepath.Join(trashRoot, p.ID+"-purging")
+	if err := os.Rename(projectDir, staged); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("stage repository purge: %w", err)
+	}
+	if err := s.store.Delete(ctx, projectID); err != nil {
+		_ = os.Rename(staged, projectDir)
+		return err
+	}
+	if err := os.RemoveAll(staged); err != nil {
+		return fmt.Errorf("remove staged repository: %w", err)
 	}
 	return nil
+}
+
+func lockProject(projectID string) func() {
+	mu, _ := projectLocks.LoadOrStore(projectID, &sync.Mutex{})
+	mu.(*sync.Mutex).Lock()
+	return mu.(*sync.Mutex).Unlock
 }
 
 // Purge rewrites the project's git history to remove the given paths
 // completely (hard delete, irreversible). It requires an existing project.
 func (s *Service) Purge(ctx context.Context, projectID string, paths []string, message string) error {
+	unlock := lockProject(projectID)
+	defer unlock()
 	p, err := s.store.GetByID(ctx, projectID)
 	if err != nil {
 		return err

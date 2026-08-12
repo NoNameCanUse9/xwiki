@@ -13,10 +13,11 @@ import (
 	"agentdocs/internal/agent"
 	"agentdocs/internal/auth"
 	"agentdocs/internal/config"
+	"agentdocs/internal/maintenance"
 	"agentdocs/internal/platform/clock"
+	"agentdocs/internal/platform/id"
 	"agentdocs/internal/project"
 	"agentdocs/internal/search"
-	"agentdocs/internal/platform/id"
 	"agentdocs/internal/server"
 	"agentdocs/internal/store/sqlite"
 	"agentdocs/internal/user"
@@ -24,12 +25,13 @@ import (
 
 // App wires configuration, storage, services and the HTTP handler.
 type App struct {
-	cfg     *config.Config
-	log     *slog.Logger
-	db      *sql.DB
-	clock   clock.Clock
-	users      *user.Store
-	authSvc    *auth.Service
+	cfg         *config.Config
+	log         *slog.Logger
+	db          *sql.DB
+	dataLock    *maintenance.DataLock
+	clock       clock.Clock
+	users       *user.Store
+	authSvc     *auth.Service
 	projectsSvc *project.Service
 	searchSvc   *search.Service
 	handler     http.Handler
@@ -37,8 +39,13 @@ type App struct {
 
 func New(cfg *config.Config) (*App, error) {
 	log := slog.Default()
+	dataLock, err := maintenance.AcquireDataLock(cfg.DataDir)
+	if err != nil {
+		return nil, err
+	}
 	db, err := sqlite.Open(cfg.DataDir)
 	if err != nil {
+		_ = dataLock.Close()
 		return nil, fmt.Errorf("open sqlite: %w", err)
 	}
 	clk := clock.Real{}
@@ -49,7 +56,7 @@ func New(cfg *config.Config) (*App, error) {
 	searchSvc := search.NewService(db, projectsSvc)
 	handler := server.NewRouter(cfg, log, db, users, authSvc, projectsSvc, agentSvc, searchSvc)
 	return &App{
-		cfg: cfg, log: log, db: db, clock: clk,
+		cfg: cfg, log: log, db: db, dataLock: dataLock, clock: clk,
 		users: users, authSvc: authSvc, projectsSvc: projectsSvc, searchSvc: searchSvc, handler: handler,
 	}, nil
 }
@@ -59,7 +66,19 @@ func (a *App) Handler() http.Handler { return a.handler }
 // SearchSvc exposes the search service for CLI commands.
 func (a *App) SearchSvc() *search.Service { return a.searchSvc }
 
-func (a *App) Close() error { return a.db.Close() }
+func (a *App) Close() error {
+	var dbErr error
+	if a.db != nil {
+		dbErr = a.db.Close()
+		a.db = nil
+	}
+	var lockErr error
+	if a.dataLock != nil {
+		lockErr = a.dataLock.Close()
+		a.dataLock = nil
+	}
+	return errors.Join(dbErr, lockErr)
+}
 
 // CreateAdmin creates the first administrator user (idempotency: duplicate
 // username is an error).

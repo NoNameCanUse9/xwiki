@@ -39,6 +39,7 @@ func TestHistoryEndpoints(t *testing.T) {
 			SHA     string `json:"sha"`
 			Message string `json:"message"`
 		} `json:"commits"`
+		HasMore bool `json:"has_more"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &list); err != nil {
 		t.Fatal(err)
@@ -50,6 +51,31 @@ func TestHistoryEndpoints(t *testing.T) {
 		t.Fatalf("commit list wrong: %+v", list.Commits)
 	}
 	headSHA := list.Commits[0].SHA
+
+	// Search applies before pagination and reports whether another page exists.
+	rec = apiRequest(h, http.MethodGet, "/api/v1/projects/"+projectID+"/commits?q=write&limit=1&offset=0", cookie, "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("search commits: %d body=%s", rec.Code, rec.Body.String())
+	}
+	var searched struct {
+		Commits []struct {
+			Message string `json:"message"`
+		} `json:"commits"`
+		HasMore bool `json:"has_more"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &searched); err != nil {
+		t.Fatal(err)
+	}
+	if len(searched.Commits) != 1 || !strings.Contains(searched.Commits[0].Message, "write") || !searched.HasMore {
+		t.Fatalf("search page = %+v", searched)
+	}
+	rec = apiRequest(h, http.MethodGet, "/api/v1/projects/"+projectID+"/commits?q=write&limit=1&offset=1", cookie, "")
+	if err := json.Unmarshal(rec.Body.Bytes(), &searched); err != nil {
+		t.Fatal(err)
+	}
+	if len(searched.Commits) != 1 || searched.HasMore {
+		t.Fatalf("last search page = %+v", searched)
+	}
 
 	// Commit detail with file list.
 	rec = apiRequest(h, http.MethodGet,

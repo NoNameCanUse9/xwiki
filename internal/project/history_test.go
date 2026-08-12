@@ -46,10 +46,11 @@ func mustHead(t *testing.T, svc *Service, pid string) string {
 
 func TestListCommitsIncludesAllWrites(t *testing.T) {
 	svc, pid := seedHistory(t)
-	commits, err := svc.ListCommits(context.Background(), pid, 10, 0)
+	page, err := svc.SearchCommits(context.Background(), pid, CommitQuery{Limit: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
+	commits := page.Commits
 	// root README commit + 2 changesets = 3.
 	if len(commits) != 3 {
 		t.Fatalf("want 3 commits, got %d: %+v", len(commits), commits)
@@ -61,13 +62,59 @@ func TestListCommitsIncludesAllWrites(t *testing.T) {
 		t.Fatalf("bad sha %q", commits[0].SHA)
 	}
 	// Pagination.
-	two, err := svc.ListCommits(context.Background(), pid, 2, 0)
-	if err != nil || len(two) != 2 {
-		t.Fatalf("limit failed: %d %v", len(two), err)
+	two, err := svc.SearchCommits(context.Background(), pid, CommitQuery{Limit: 2})
+	if err != nil || len(two.Commits) != 2 || !two.HasMore {
+		t.Fatalf("limit failed: %+v %v", two, err)
 	}
-	rest, err := svc.ListCommits(context.Background(), pid, 10, 2)
-	if err != nil || len(rest) != 1 {
-		t.Fatalf("offset failed: %d %v", len(rest), err)
+	rest, err := svc.SearchCommits(context.Background(), pid, CommitQuery{Limit: 10, Offset: 2})
+	if err != nil || len(rest.Commits) != 1 || rest.HasMore {
+		t.Fatalf("offset failed: %+v %v", rest, err)
+	}
+}
+
+func TestSearchCommitsMatchesAllRefsAndFields(t *testing.T) {
+	svc, pid := seedHistory(t)
+	repo, err := svc.OpenRepo(context.Background(), pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tree, err := gitOutput(context.Background(), repo.Dir, "show", "-s", "--format=%T", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	orphan, err := gitOutput(context.Background(), repo.Dir, "commit-tree", tree, "-m", "orphan release marker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gitOutput(context.Background(), repo.Dir, "update-ref", "refs/heads/release", orphan); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		name  string
+		query string
+		want  string
+	}{
+		{name: "message on another ref", query: "release marker", want: orphan},
+		{name: "author", query: "test author", want: mustHead(t, svc, pid)},
+		{name: "full sha", query: orphan, want: orphan},
+		{name: "short sha", query: orphan[:8], want: orphan},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			page, err := svc.SearchCommits(context.Background(), pid, CommitQuery{Query: tc.query, Limit: 10})
+			if err != nil {
+				t.Fatal(err)
+			}
+			found := false
+			for _, commit := range page.Commits {
+				if commit.SHA == tc.want {
+					found = true
+				}
+			}
+			if !found {
+				t.Fatalf("query %q did not find %s in %+v", tc.query, tc.want, page.Commits)
+			}
+		})
 	}
 }
 
@@ -151,7 +198,8 @@ func TestRevertCreatesNewCommit(t *testing.T) {
 		t.Fatal("revert returned no sha")
 	}
 	// Count advanced by 1, original commit still present.
-	commits, _ := svc.ListCommits(context.Background(), pid, 10, 0)
+	page, _ := svc.SearchCommits(context.Background(), pid, CommitQuery{Limit: 10})
+	commits := page.Commits
 	if len(commits) != 4 {
 		t.Fatalf("want 4 commits after revert, got %d", len(commits))
 	}

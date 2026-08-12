@@ -129,6 +129,17 @@ func TestReindexProjectIncremental(t *testing.T) {
 	if stats.Indexed != 1 || stats.Removed != 0 {
 		t.Fatalf("initial reindex: %+v", stats)
 	}
+	state, err := svc.IndexState(context.Background(), p.ID)
+	if err != nil || state.Status != "clean" || state.Revision == "" {
+		t.Fatalf("index state after reindex = %+v, %v", state, err)
+	}
+	if err := svc.MarkDirty(context.Background(), p.ID); err != nil {
+		t.Fatal(err)
+	}
+	state, err = svc.IndexState(context.Background(), p.ID)
+	if err != nil || state.Status != "dirty" {
+		t.Fatalf("index state after dirty = %+v, %v", state, err)
+	}
 	// Idempotent second pass.
 	stats, err = svc.ReindexProject(context.Background(), p.ID)
 	if err != nil || stats.Indexed != 0 {

@@ -15,6 +15,7 @@ export interface PageResponse {
   path: string;
   format: "raw" | "html";
   content: string;
+	revision?: string;
 }
 
 export function getTree(projectId: string, dirPath = "") {

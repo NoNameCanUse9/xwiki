@@ -28,11 +28,11 @@ afterEach(() => vi.unstubAllGlobals());
 
 describe("history api client", () => {
   it("lists commits with pagination", async () => {
-    mockFetchOnce(200, { commits: [] });
-    await listCommits("prj_1", 10, 5);
-    expect(lastCall()[0]).toBe(
-      "/api/v1/projects/prj_1/commits?limit=10&offset=5",
-    );
+		mockFetchOnce(200, { commits: [], has_more: false });
+		await listCommits("prj_1", 10, 5, "release sha");
+		expect(lastCall()[0]).toBe(
+			"/api/v1/projects/prj_1/commits?limit=10&offset=5&q=release+sha",
+		);
   });
 
   it("fetches file history with encoded path", async () => {

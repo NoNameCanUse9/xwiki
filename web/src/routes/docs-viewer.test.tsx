@@ -109,6 +109,7 @@ function renderPage(path = "/projects/prj_1/docs") {
 describe("DocsViewerPage", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
+		localStorage.clear();
 		// _sidebar.md 查询默认失败（多数测试不关心侧栏菜单）
 		vi.mocked(docsApi.getPage).mockRejectedValue(new Error("no sidebar"));
 		// 编辑锁默认可获取/可释放/可续期。
@@ -219,11 +220,14 @@ describe("DocsViewerPage", () => {
 	});
 
 	it("edits a file and saves via changeset", async () => {
-		vi.mocked(docsApi.getPage).mockResolvedValue({
-			path: "guide.md",
-			format: "html",
-			content: "<h1>Guide</h1>",
-		});
+		vi.mocked(docsApi.getPage).mockImplementation(
+			async (_id: string, path?: string, format?: string) => {
+				if (path === "guide.md" && format === "raw") {
+					return { path: "guide.md", format: "raw", content: "# Guide\n", revision: "loaded-rev" };
+				}
+				return { path: path ?? "guide.md", format: "html", content: "<h1>Guide</h1>", revision: "loaded-rev" };
+			},
+		);
 		vi.mocked(docsApi.getTree).mockResolvedValue({
 			path: "",
 			tree: [{ name: "guide.md", type: "blob", path: "guide.md" }],
@@ -234,17 +238,6 @@ describe("DocsViewerPage", () => {
 		vi.mocked(changesetsApi.submitChangeset).mockResolvedValue({
 			commit: "c1",
 			revision: "c1",
-		});
-		// Raw content fetch for the editor.
-		vi.mocked(docsApi.getPage).mockResolvedValueOnce({
-			path: "guide.md",
-			format: "html",
-			content: "<h1>Guide</h1>",
-		});
-		vi.mocked(docsApi.getPage).mockResolvedValueOnce({
-			path: "guide.md",
-			format: "raw",
-			content: "# Guide\n",
 		});
 		const user = userEvent.setup();
 		renderPage("/projects/prj_1/docs/guide.md");
@@ -261,17 +254,18 @@ describe("DocsViewerPage", () => {
 		await user.click(screen.getByRole("button", { name: "提交并上锁" }));
 		await vi.waitFor(() =>
 			expect(changesetsApi.submitChangeset).toHaveBeenCalledWith("prj_1", {
-				base_revision: "rev1",
+				base_revision: "loaded-rev",
 				message: "",
 				changes: [
 					{
 						op: "update",
 						path: "guide.md",
-						content: expect.stringContaining("# Updated"),
+						content: expect.stringContaining("Updated"),
 					},
 				],
 			}),
 		);
+		expect(changesetsApi.getRevision).not.toHaveBeenCalled();
 		// Lock released when finishing the edit session.
 		await vi.waitFor(() =>
 			expect(locksApi.releaseLock).toHaveBeenCalledWith("prj_1", "guide.md"),
@@ -308,11 +302,14 @@ describe("DocsViewerPage", () => {
 	});
 
 	it("shows a conflict toast on 409", async () => {
-		vi.mocked(docsApi.getPage).mockResolvedValue({
-			path: "guide.md",
-			format: "html",
-			content: "<h1>Guide</h1>",
-		});
+		vi.mocked(docsApi.getPage).mockImplementation(
+			async (_id: string, path?: string, format?: string) => {
+				if (path === "guide.md" && format === "raw") {
+					return { path: "guide.md", format: "raw", content: "# Guide\n", revision: "rev1" };
+				}
+				return { path: path ?? "guide.md", format: "html", content: "<h1>Guide</h1>", revision: "rev1" };
+			},
+		);
 		vi.mocked(docsApi.getTree).mockResolvedValue({
 			path: "",
 			tree: [{ name: "guide.md", type: "blob", path: "guide.md" }],
@@ -330,16 +327,6 @@ describe("DocsViewerPage", () => {
 				code: "revision_conflict",
 			}),
 		);
-		vi.mocked(docsApi.getPage).mockResolvedValueOnce({
-			path: "guide.md",
-			format: "html",
-			content: "<h1>Guide</h1>",
-		});
-		vi.mocked(docsApi.getPage).mockResolvedValueOnce({
-			path: "guide.md",
-			format: "raw",
-			content: "# Guide\n",
-		});
 		const user = userEvent.setup();
 		renderPage("/projects/prj_1/docs/guide.md");
 		await user.click(await screen.findByRole("button", { name: /解锁编辑/ }));
@@ -355,6 +342,21 @@ describe("DocsViewerPage", () => {
 		await user.click(screen.getByRole("button", { name: "提交并上锁" }));
 		await new Promise((r) => setTimeout(r, 400));
 		expect(screen.queryByText("文档已被他人修改，请刷新后重试")).not.toBeNull();
+		expect(
+			screen
+				.queryAllByRole("textbox")
+				.find((el) => el.tagName !== "INPUT"),
+		).toBeTruthy();
+		expect(locksApi.releaseLock).not.toHaveBeenCalled();
+		const saved = JSON.parse(
+			localStorage.getItem("agentdocs:draft:prj_1:guide.md") ?? "null",
+		);
+		expect(saved).toMatchObject({
+			version: 1,
+			project_id: "prj_1",
+			path: "guide.md",
+			base_revision: "rev1",
+		});
 	});
 });
 
@@ -446,6 +448,7 @@ describe("DocsViewerPage edit sessions", () => {
 						path: "guide.md",
 						format: "raw",
 						content: "# Guide\n",
+						revision: "rev1",
 					};
 				}
 				return { path: "guide.md", format: "html", content: "<h1>Guide</h1>" };
@@ -453,7 +456,31 @@ describe("DocsViewerPage edit sessions", () => {
 		);
 	}
 
+	it("requires an explicit choice for a draft based on an older revision", async () => {
+		mockGuidePage();
+		localStorage.setItem(
+			"agentdocs:draft:prj_1:guide.md",
+			JSON.stringify({
+				version: 1,
+				project_id: "prj_1",
+				path: "guide.md",
+				content: "# Local draft\n",
+				base_revision: "old-rev",
+				updated_at: "2026-08-12T12:00:00Z",
+			}),
+		);
+		const user = userEvent.setup();
+		renderPage("/projects/prj_1/docs/guide.md");
+
+		await user.click(await screen.findByRole("button", { name: /解锁编辑/ }));
+		expect(await screen.findByText(/本地草稿基于旧版本/)).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: "恢复本地草稿" })).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: "使用服务器版本" })).toBeInTheDocument();
+		expect(getEditor()).toBeUndefined();
+	});
+
 	beforeEach(() => {
+		localStorage.clear();
 		vi.mocked(docsApi.getTree).mockResolvedValue({
 			path: "",
 			tree: [{ name: "guide.md", type: "blob", path: "guide.md" }],
@@ -503,6 +530,7 @@ describe("DocsViewerPage edit sessions", () => {
 						path: "guide.md",
 						format: "raw",
 						content: "# Updated\n",
+						revision: "c1",
 					};
 				}
 				return { path: "guide.md", format: "html", content: "<h1>Guide</h1>" };

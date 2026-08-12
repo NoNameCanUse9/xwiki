@@ -184,6 +184,15 @@ func (r *Repo) Revision(ctx context.Context) (string, error) {
 	return out, nil
 }
 
+// ResolveRevision resolves a branch, tag or SHA to one immutable commit id.
+func (r *Repo) ResolveRevision(ctx context.Context, rev string) (string, error) {
+	out, err := gitOutput(ctx, r.Dir, "rev-parse", "--verify", rev+"^{commit}")
+	if err != nil {
+		return "", ErrNotFound
+	}
+	return out, nil
+}
+
 // DefaultBranch resolves the repository's current branch name.
 func (r *Repo) DefaultBranch(ctx context.Context) (string, error) {
 	out, err := gitOutput(ctx, r.Dir, "rev-parse", "--abbrev-ref", "HEAD")

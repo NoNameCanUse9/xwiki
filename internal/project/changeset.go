@@ -93,9 +93,8 @@ func (s *Service) ApplyChangeset(ctx context.Context, projectID string, input Ch
 		return nil, ErrArchived
 	}
 
-	mu, _ := projectLocks.LoadOrStore(p.ID, &sync.Mutex{})
-	mu.(*sync.Mutex).Lock()
-	defer mu.(*sync.Mutex).Unlock()
+	unlock := lockProject(p.ID)
+	defer unlock()
 
 	repo := &Repo{Dir: filepath.Join(s.reposRoot, p.ID, "repo.git")}
 	branch, err := repo.DefaultBranch(ctx)

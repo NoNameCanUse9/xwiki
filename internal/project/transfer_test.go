@@ -119,6 +119,18 @@ func TestBundleExportImportPreservesHistory(t *testing.T) {
 	}
 	origCount := commitCount(t, repo)
 
+	// Import must verify the bundle against its staging bare repository, not
+	// whichever directory happens to be the process working directory.
+	oldWD, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	outsideRepo := t.TempDir()
+	if err := os.Chdir(outsideRepo); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldWD) })
+
 	svc2, _, _ := newServiceWithRepo(t)
 	imported, err := svc2.ImportBundle(context.Background(), ImportBundleInput{
 		Name:   "bundle-project",

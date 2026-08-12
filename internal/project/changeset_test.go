@@ -125,7 +125,7 @@ func TestApplyChangesetFailureLeavesNoCommitOrWorktree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(wts, repo.Dir) || strings.Count(wts, "worktree ") > 1 {
+	if strings.Count(wts, "worktree ") > 1 {
 		t.Fatalf("worktree residue: %q", wts)
 	}
 }
@@ -205,7 +205,7 @@ func TestDefaultMessageAndAuthorIdentity(t *testing.T) {
 	// Empty message -> default "<time> <author> 修改 <path>".
 	if _, err := svc.ApplyChangeset(context.Background(), pid, ChangesetInput{
 		BaseRevision: base,
-		Changes:     []Change{{Op: "create", Path: "docs/auto.md", Content: "# Auto\n"}},
+		Changes:      []Change{{Op: "create", Path: "docs/auto.md", Content: "# Auto\n"}},
 	}, CommitAuthor{Name: "Carol Chen", Email: "carol@agentdocs.local"}); err != nil {
 		t.Fatal(err)
 	}

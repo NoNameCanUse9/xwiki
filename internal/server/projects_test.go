@@ -305,14 +305,45 @@ func TestProjectDelete(t *testing.T) {
 	if _, err := svc.Get(t.Context(), id); err == nil {
 		t.Fatal("project still present after delete")
 	}
-	if _, err := os.Stat(repoDir); !os.IsNotExist(err) {
-		t.Fatalf("repo dir still present after delete: %v", err)
+	if _, err := os.Stat(repoDir); err != nil {
+		t.Fatalf("soft-deleted project repository was removed: %v", err)
 	}
 
-	// Delete missing -> 404.
-	rec = apiRequest(h, http.MethodDelete, "/api/v1/projects/"+id, cookie, "")
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("delete missing: status = %d, want 404", rec.Code)
+	// Deleted projects are visible only through the explicit trash view.
+	rec = apiRequest(h, http.MethodGet, "/api/v1/projects?status=deleted", cookie, "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list deleted: status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	deleted := decodeProjects(t, rec)
+	if len(deleted) != 1 || deleted[0]["id"] != id || deleted[0]["deleted"] != true {
+		t.Fatalf("deleted projects = %#v", deleted)
+	}
+
+	// Restore returns the project to the active list without changing history.
+	headBefore := gitHead(t, id, svc.ReposRoot())
+	rec = apiRequest(h, http.MethodPost, "/api/v1/projects/"+id+"/restore", cookie, "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("restore: status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	if _, err := svc.Get(t.Context(), id); err != nil {
+		t.Fatalf("restored project unavailable: %v", err)
+	}
+	if headAfter := gitHead(t, id, svc.ReposRoot()); headAfter != headBefore {
+		t.Fatalf("restore changed history: %s -> %s", headBefore, headAfter)
+	}
+
+	// Purge is accepted only after another soft delete and physically removes it.
+	if rec = apiRequest(h, http.MethodDelete, "/api/v1/projects/"+id+"/purge", cookie, ""); rec.Code != http.StatusConflict {
+		t.Fatalf("purge active: status = %d body = %s, want 409", rec.Code, rec.Body.String())
+	}
+	if rec = apiRequest(h, http.MethodDelete, "/api/v1/projects/"+id, cookie, ""); rec.Code != http.StatusOK {
+		t.Fatalf("delete again: status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	if rec = apiRequest(h, http.MethodDelete, "/api/v1/projects/"+id+"/purge", cookie, ""); rec.Code != http.StatusOK {
+		t.Fatalf("purge deleted: status = %d body = %s", rec.Code, rec.Body.String())
+	}
+	if _, err := os.Stat(repoDir); !os.IsNotExist(err) {
+		t.Fatalf("purged project repo remains: %v", err)
 	}
 }
 

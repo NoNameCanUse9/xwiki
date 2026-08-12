@@ -73,6 +73,11 @@ func TestGitHTTPCloneAndPush(t *testing.T) {
 	if len(list.Commits) < 2 || list.Commits[0].Message != "push via git client" {
 		t.Fatalf("pushed commit missing from history: %+v", list.Commits)
 	}
+	search := apiRequest(h, http.MethodGet,
+		"/api/v1/projects/"+projectID+"/search?q=pushed%20via%20git%20client", cookie, "")
+	if search.Code != http.StatusOK || !strings.Contains(search.Body.String(), "README.md") {
+		t.Fatalf("pushed content was not reindexed: %d %s", search.Code, search.Body.String())
+	}
 }
 
 func TestGitHTTPAuthMatrix(t *testing.T) {

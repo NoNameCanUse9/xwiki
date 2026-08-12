@@ -151,15 +151,19 @@ func TestDocsTreePagesHome(t *testing.T) {
 		t.Fatalf("page raw: status = %d body = %s", rec.Code, rec.Body.String())
 	}
 	var page struct {
-		Path   string `json:"path"`
-		Format string `json:"format"`
-		Raw    string `json:"content"`
+		Path     string `json:"path"`
+		Format   string `json:"format"`
+		Raw      string `json:"content"`
+		Revision string `json:"revision"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil {
 		t.Fatal(err)
 	}
 	if page.Path != "docs/guide.md" || page.Format != "raw" || !strings.Contains(page.Raw, "# Guide") {
 		t.Fatalf("raw page wrong: %+v", page)
+	}
+	if page.Revision == "" || page.Revision != getRevision(t, h, cookie, projectID) {
+		t.Fatalf("page revision = %q, want current document snapshot", page.Revision)
 	}
 
 	// HTML render.

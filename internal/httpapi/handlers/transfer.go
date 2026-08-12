@@ -11,18 +11,20 @@ import (
 	"agentdocs/internal/httpapi/request"
 	"agentdocs/internal/httpapi/response"
 	"agentdocs/internal/project"
+	"agentdocs/internal/search"
 )
 
 // TransferHandler serves import/export endpoints.
 type TransferHandler struct {
-	cfg      *config.Config
-	svc      *project.Service
-	agentSvc *agent.Service
-	log      *slog.Logger
+	cfg       *config.Config
+	svc       *project.Service
+	agentSvc  *agent.Service
+	searchSvc *search.Service
+	log       *slog.Logger
 }
 
-func NewTransferHandler(cfg *config.Config, svc *project.Service, agentSvc *agent.Service, log *slog.Logger) *TransferHandler {
-	return &TransferHandler{cfg: cfg, svc: svc, agentSvc: agentSvc, log: log}
+func NewTransferHandler(cfg *config.Config, svc *project.Service, agentSvc *agent.Service, searchSvc *search.Service, log *slog.Logger) *TransferHandler {
+	return &TransferHandler{cfg: cfg, svc: svc, agentSvc: agentSvc, searchSvc: searchSvc, log: log}
 }
 
 // ExportZip handles GET /api/v1/projects/{id}/export.zip.
@@ -72,6 +74,7 @@ func (h *TransferHandler) Import(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, r, err)
 		return
 	}
+	h.reindex(r, projectID)
 	_ = h.agentSvc.Audit(r.Context(), middleware.ActorType(r), middleware.ActorID(r),
 		projectID, "import", "", input.Message, request.RequestID(r))
 	response.WriteJSON(w, http.StatusOK, map[string]any{
@@ -92,6 +95,7 @@ func (h *TransferHandler) ImportRepo(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, r, err)
 		return
 	}
+	h.reindex(r, res.Project.ID)
 	_ = h.agentSvc.Audit(r.Context(), "user", middleware.ActorID(r), res.Project.ID,
 		"import.repo", "", url, request.RequestID(r))
 	response.WriteJSON(w, http.StatusCreated, map[string]any{
@@ -130,11 +134,18 @@ func (h *TransferHandler) ImportBundle(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, r, err)
 		return
 	}
+	h.reindex(r, res.Project.ID)
 	_ = h.agentSvc.Audit(r.Context(), "user", middleware.ActorID(r), res.Project.ID,
 		"import.bundle", "", name, request.RequestID(r))
 	response.WriteJSON(w, http.StatusCreated, map[string]any{
 		"project": res.Project, "commits": res.Commits,
 	})
+}
+
+func (h *TransferHandler) reindex(r *http.Request, projectID string) {
+	if _, err := h.searchSvc.ReindexProject(r.Context(), projectID); err != nil {
+		h.log.Warn("reindex after import failed", "error", err, "project_id", projectID)
+	}
 }
 
 func (h *TransferHandler) writeError(w http.ResponseWriter, r *http.Request, err error) {

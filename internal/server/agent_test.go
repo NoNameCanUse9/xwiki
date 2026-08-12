@@ -143,14 +143,25 @@ func TestAgentTokenLifecycle(t *testing.T) {
 	// Revoke kills the token.
 	var list struct {
 		Tokens []struct {
-			ID string `json:"id"`
+			ID   string `json:"id"`
+			Name string `json:"name"`
 		} `json:"tokens"`
 	}
 	rec = apiRequest(h, http.MethodGet, "/api/v1/tokens", cookie, "")
 	if err := json.Unmarshal(rec.Body.Bytes(), &list); err != nil {
 		t.Fatal(err)
 	}
-	rec = apiRequest(h, http.MethodDelete, "/api/v1/tokens/"+list.Tokens[0].ID, cookie, "")
+	var tokenID string
+	for _, token := range list.Tokens {
+		if token.Name == "ci-bot" {
+			tokenID = token.ID
+			break
+		}
+	}
+	if tokenID == "" {
+		t.Fatalf("ci-bot missing from token list: %+v", list.Tokens)
+	}
+	rec = apiRequest(h, http.MethodDelete, "/api/v1/tokens/"+tokenID, cookie, "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("revoke: %d", rec.Code)
 	}
@@ -170,6 +181,63 @@ func TestAgentTokenLifecycle(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("audit missing token change: %+v", entries)
+	}
+}
+
+func TestAgentTokenProjectVisibilityAndManagementBoundary(t *testing.T) {
+	h, _ := newTestRouterWithService(t)
+	cookie := loginAndGetCookie(t, h)
+	allowedID, _ := createProjectViaAPI(t, h, cookie, "agent-visible")
+	hiddenID, _ := createProjectViaAPI(t, h, cookie, "agent-hidden")
+	secret := createAgentToken(t, h, cookie,
+		fmt.Sprintf(`{"name":"reader","scope":"read","project_ids":["%s"]}`, allowedID))
+
+	rec := bearerRequest(h, http.MethodGet, "/api/v1/projects", secret, "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list projects: %d %s", rec.Code, rec.Body.String())
+	}
+	projects := decodeProjects(t, rec)
+	if len(projects) != 1 || projects[0]["id"] != allowedID {
+		t.Fatalf("token project list = %#v, want only %s", projects, allowedID)
+	}
+
+	for _, tc := range []struct {
+		name string
+		path string
+		want int
+	}{
+		{name: "get allowed", path: "/api/v1/projects/" + allowedID, want: http.StatusOK},
+		{name: "get hidden", path: "/api/v1/projects/" + hiddenID, want: http.StatusForbidden},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := bearerRequest(h, http.MethodGet, tc.path, secret, "")
+			if rec.Code != tc.want {
+				t.Fatalf("status = %d body = %s, want %d", rec.Code, rec.Body.String(), tc.want)
+			}
+		})
+	}
+
+	for _, tc := range []struct {
+		name    string
+		method  string
+		path    string
+		payload string
+	}{
+		{name: "create", method: http.MethodPost, path: "/api/v1/projects", payload: `{"name":"forbidden-create"}`},
+		{name: "rename", method: http.MethodPatch, path: "/api/v1/projects/" + allowedID, payload: `{"name":"forbidden-rename"}`},
+		{name: "archive", method: http.MethodPost, path: "/api/v1/projects/" + allowedID + "/archive"},
+		{name: "delete", method: http.MethodDelete, path: "/api/v1/projects/" + allowedID},
+		{name: "restore deleted", method: http.MethodPost, path: "/api/v1/projects/" + allowedID + "/restore"},
+		{name: "purge deleted", method: http.MethodDelete, path: "/api/v1/projects/" + allowedID + "/purge"},
+		{name: "revert", method: http.MethodPost, path: "/api/v1/projects/" + allowedID + "/commits/deadbeef/revert"},
+		{name: "force unlock", method: http.MethodPost, path: "/api/v1/projects/" + allowedID + "/locks/force-release"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := bearerRequest(h, tc.method, tc.path, secret, tc.payload)
+			if rec.Code != http.StatusForbidden {
+				t.Fatalf("status = %d body = %s, want 403", rec.Code, rec.Body.String())
+			}
+		})
 	}
 }
 

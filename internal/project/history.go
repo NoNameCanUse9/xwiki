@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 )
 
 // CommitSummary is one row of the commit log.
@@ -15,6 +14,19 @@ type CommitSummary struct {
 	Message string `json:"message"`
 	Author  string `json:"author"`
 	Date    string `json:"date"`
+}
+
+// CommitQuery defines full-history filtering and offset pagination.
+type CommitQuery struct {
+	Query  string
+	Limit  int
+	Offset int
+}
+
+// CommitPage includes the requested commits and whether another page exists.
+type CommitPage struct {
+	Commits []CommitSummary `json:"commits"`
+	HasMore bool            `json:"has_more"`
 }
 
 // CommitDetail is a commit with its changed file list.
@@ -49,31 +61,56 @@ type CommitDiff struct {
 // MaxDiffBytes caps rendered patch output.
 const MaxDiffBytes = 1 << 20 // 1 MiB
 
-// ListCommits returns commit summaries, newest first.
-func (s *Service) ListCommits(ctx context.Context, projectID string, limit, offset int) ([]CommitSummary, error) {
-	if limit <= 0 {
-		limit = 20
+// SearchCommits searches every reachable ref by message, author, full SHA or
+// short SHA, then applies offset pagination to the matching history.
+func (s *Service) SearchCommits(ctx context.Context, projectID string, query CommitQuery) (*CommitPage, error) {
+	if query.Limit <= 0 {
+		query.Limit = 20
 	}
-	if limit > 100 {
-		limit = 100
+	if query.Limit > 100 {
+		query.Limit = 100
+	}
+	if query.Offset < 0 {
+		query.Offset = 0
 	}
 	repo, err := s.openRepoChecked(ctx, projectID)
 	if err != nil {
 		return nil, err
 	}
-	branch, err := repo.DefaultBranch(ctx)
-	if err != nil {
-		return nil, err
-	}
 	out, err := gitOutput(ctx, repo.Dir, "log",
 		"--format=%H%x1f%s%x1f%an%x1f%aI",
-		"-n", fmt.Sprintf("%d", limit),
-		"--skip", fmt.Sprintf("%d", offset),
-		branch)
+		"--all")
 	if err != nil {
 		return nil, fmt.Errorf("log: %w", err)
 	}
-	return parseCommitSummaries(out), nil
+	needle := strings.ToLower(strings.TrimSpace(query.Query))
+	all := parseCommitSummaries(out)
+	matched := make([]CommitSummary, 0, len(all))
+	for _, commit := range all {
+		if needle == "" || strings.Contains(strings.ToLower(commit.Message), needle) ||
+			strings.Contains(strings.ToLower(commit.Author), needle) ||
+			strings.Contains(strings.ToLower(commit.SHA), needle) {
+			matched = append(matched, commit)
+		}
+	}
+	if query.Offset >= len(matched) {
+		return &CommitPage{Commits: []CommitSummary{}}, nil
+	}
+	matched = matched[query.Offset:]
+	hasMore := len(matched) > query.Limit
+	if hasMore {
+		matched = matched[:query.Limit]
+	}
+	return &CommitPage{Commits: matched, HasMore: hasMore}, nil
+}
+
+// ListCommits preserves the original service API for internal callers.
+func (s *Service) ListCommits(ctx context.Context, projectID string, limit, offset int) ([]CommitSummary, error) {
+	page, err := s.SearchCommits(ctx, projectID, CommitQuery{Limit: limit, Offset: offset})
+	if err != nil {
+		return nil, err
+	}
+	return page.Commits, nil
 }
 
 func parseCommitSummaries(out string) []CommitSummary {
@@ -208,9 +245,8 @@ func (s *Service) RevertCommit(ctx context.Context, projectID, sha, message stri
 	if p.IsArchived() {
 		return nil, ErrArchived
 	}
-	mu, _ := projectLocks.LoadOrStore(p.ID, &sync.Mutex{})
-	mu.(*sync.Mutex).Lock()
-	defer mu.(*sync.Mutex).Unlock()
+	unlock := lockProject(p.ID)
+	defer unlock()
 
 	repo := &Repo{Dir: filepath.Join(s.reposRoot, p.ID, "repo.git")}
 	branch, err := repo.DefaultBranch(ctx)
