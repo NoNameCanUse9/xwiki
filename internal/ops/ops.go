@@ -168,6 +168,12 @@ func BackupRestore(input, dataDir string) error {
 		if readErr != nil {
 			return readErr
 		}
+		for i := range ents {
+			if ents[i].Name() == ".xwiki.lock" {
+				ents = append(ents[:i], ents[i+1:]...)
+				break
+			}
+		}
 		if len(ents) != 0 {
 			return fmt.Errorf("restore target must be empty: %s", dataDir)
 		}
