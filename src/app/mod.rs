@@ -472,7 +472,10 @@ impl XWikiApp {
         // Title and commit-message edits update dirty-state and button labels.
         for state in [&commit_msg, &editor_title_input] {
             subs.push(
-                cx.subscribe_in(state, window, |_, _, _: &InputEvent, _, cx| {
+                cx.subscribe_in(state, window, |app, _, _: &InputEvent, _, cx| {
+                    if app.editing {
+                        app.persist_draft(cx);
+                    }
                     cx.notify();
                 }),
             );
@@ -637,23 +640,31 @@ impl XWikiApp {
         cx.spawn(async move |this, cx| {
             let result = match client.meta().await {
                 Ok(meta) if meta.api_version == "1" => client.me().await,
-                Ok(meta) => Err(crate::api::ApiError { code: "unsupported_api_version".into(), message: format!("服务器 API 版本 {} 不受支持，请升级客户端", meta.api_version), request_id: None, status: 400 }),
+                Ok(meta) => Err(crate::api::ApiError {
+                    code: "unsupported_api_version".into(),
+                    message: format!(
+                        "服务器 API 版本 {} 不受支持，请升级客户端",
+                        meta.api_version
+                    ),
+                    request_id: None,
+                    status: 400,
+                }),
                 Err(error) => Err(error),
             };
             match result {
-            Ok(user) => {
-                let _ = this.update(cx, |app, cx| app.on_login_ok(user, cx));
-            }
-            Err(_) => {
-                config::clear_session();
-                let _ = this.update(cx, |app, cx| {
-                    app.client = None;
-                    app.username.clear();
-                    app.loading = false;
-                    app.login_error = Some("保存的会话已失效，请重新登录。".into());
-                    cx.notify();
-                });
-            }
+                Ok(user) => {
+                    let _ = this.update(cx, |app, cx| app.on_login_ok(user, cx));
+                }
+                Err(_) => {
+                    config::clear_session();
+                    let _ = this.update(cx, |app, cx| {
+                        app.client = None;
+                        app.username.clear();
+                        app.loading = false;
+                        app.login_error = Some("保存的会话已失效，请重新登录。".into());
+                        cx.notify();
+                    });
+                }
             }
         })
         .detach();
@@ -2874,8 +2885,18 @@ impl XWikiApp {
         cx.notify();
         cx.spawn(async move |this, cx| {
             let login_result = match client.meta().await {
-                Ok(meta) if meta.api_version == "1" => client.login_with_session(username.trim(), &password).await,
-                Ok(meta) => Err(crate::api::ApiError { code: "unsupported_api_version".into(), message: format!("服务器 API 版本 {} 不受支持，请升级客户端", meta.api_version), request_id: None, status: 400 }),
+                Ok(meta) if meta.api_version == "1" => {
+                    client.login_with_session(username.trim(), &password).await
+                }
+                Ok(meta) => Err(crate::api::ApiError {
+                    code: "unsupported_api_version".into(),
+                    message: format!(
+                        "服务器 API 版本 {} 不受支持，请升级客户端",
+                        meta.api_version
+                    ),
+                    request_id: None,
+                    status: 400,
+                }),
                 Err(error) => Err(error),
             };
             match login_result {
@@ -3882,13 +3903,14 @@ impl XWikiApp {
                 state.set_value(String::from("read"), window, cx);
                 state
             });
+            let project_state = cx.new(|cx| {
+                let mut state = InputState::new(window, cx).placeholder("项目 ID（逗号分隔）");
+                state.set_value(project_ids.join(","), window, cx);
+                state
+            });
             let content_name = name_state.clone();
             let content_scope = scope_state.clone();
-            let available_projects = project_ids
-                .iter()
-                .map(|id| id.as_str())
-                .collect::<Vec<_>>()
-                .join(", ");
+            let content_projects = project_state.clone();
             let content_builder = move |content: DialogContent, _: &mut Window, cx: &mut App| {
                 let theme = cx.theme();
                 content.child(
@@ -3901,9 +3923,10 @@ impl XWikiApp {
                         .child(mono_label("权限范围").text_color(theme.muted_foreground))
                         .child(Input::new(&content_scope).w_full())
                         .child(
-                            mono_label(format!("项目范围（已选择全部）：{}", available_projects))
+                            mono_label("项目范围（至少一个，逗号分隔）")
                                 .text_color(theme.muted_foreground),
-                        ),
+                        )
+                        .child(Input::new(&content_projects).w_full()),
                 )
             };
             let cancel = Button::new("cancel-create-token")
@@ -3913,8 +3936,8 @@ impl XWikiApp {
                 .on_click(|_, window, cx| window.close_dialog(cx));
             let create_name = name_state.clone();
             let create_scope = scope_state.clone();
+            let create_project_state = project_state.clone();
             let create_client = client.clone();
-            let create_projects = project_ids.clone();
             let create_handle = handle.clone();
             let create = Button::new("confirm-create-token")
                 .primary()
@@ -3931,9 +3954,20 @@ impl XWikiApp {
                         );
                         return;
                     }
+                    let projects: Vec<String> = create_project_state
+                        .read(cx)
+                        .value()
+                        .split(',')
+                        .map(str::trim)
+                        .filter(|id| !id.is_empty())
+                        .map(str::to_string)
+                        .collect();
+                    if projects.is_empty() {
+                        window.push_notification(Notification::error("至少选择一个项目"), cx);
+                        return;
+                    }
                     let c = create_client.clone();
                     let h = create_handle.clone();
-                    let projects = create_projects.clone();
                     h.update(cx, |app, cx| {
                         app.settings_access_loading = true;
                         app.settings_error = None;

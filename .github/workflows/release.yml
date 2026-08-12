@@ -18,8 +18,21 @@ on:
       - "app-v*"
 
 jobs:
+  test:
+    name: Complete test gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Install Linux system deps
+        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libegl1-mesa-dev libfontconfig1-dev
+      - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with: { toolchain: stable, components: rustfmt }
+      - run: cargo fmt --all -- --check
+      - run: cargo test --all-targets
+      - run: cargo check
   build:
     name: Build ${{ matrix.name }}
+    needs: test
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
