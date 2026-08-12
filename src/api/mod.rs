@@ -533,8 +533,10 @@ impl Client {
         limit: u32,
         offset: u32,
     ) -> Result<Vec<dto::Commit>, ApiError> {
-        self.commits_search_page(project_id, "", limit, offset)
-            .await
+        Ok(self
+            .commits_search_page(project_id, "", limit, offset)
+            .await?
+            .commits)
     }
 
     pub async fn commits_search_page(
@@ -543,7 +545,7 @@ impl Client {
         query: &str,
         limit: u32,
         offset: u32,
-    ) -> Result<Vec<dto::Commit>, ApiError> {
+    ) -> Result<dto::CommitListResponse, ApiError> {
         let resp: dto::CommitListResponse = Self::send(
             self.http
                 .get(self.url(&format!("/api/v1/projects/{}/commits", project_id)))
@@ -554,7 +556,7 @@ impl Client {
                 ]),
         )
         .await?;
-        Ok(resp.commits)
+        Ok(resp)
     }
 
     pub async fn commit_detail(
@@ -1282,7 +1284,7 @@ pub mod dto {
         pub released: bool,
     }
 
-    #[derive(Debug, Deserialize)]
+    #[derive(Debug, Deserialize, Serialize)]
     pub struct Commit {
         pub sha: String,
         pub message: String,
@@ -1290,7 +1292,7 @@ pub mod dto {
         pub date: String,
     }
 
-    #[derive(Debug, Deserialize)]
+    #[derive(Debug, Deserialize, Serialize)]
     pub struct CommitListResponse {
         #[serde(default, deserialize_with = "crate::api::de_null_default")]
         pub commits: Vec<Commit>,

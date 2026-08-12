@@ -62,6 +62,10 @@ fn wants_json(args: &[String]) -> bool {
     args.iter().any(|a| a == "--json")
 }
 
+fn history_json(page: &crate::api::dto::CommitListResponse) -> String {
+    serde_json::to_string_pretty(page).expect("history page is serializable")
+}
+
 fn exit_code(err: &ApiError) -> i32 {
     match err.code.as_str() {
         "authentication_required"
@@ -388,7 +392,7 @@ async fn cmd_project(args: &[String]) -> i32 {
                     return 2;
                 }
             }
-            match c.delete_project(id).await {
+            match session_client.delete_project(id).await {
                 Ok(()) => {
                     println!("deleted {id}");
                     0
@@ -544,6 +548,7 @@ async fn cmd_search(args: &[String]) -> i32 {
 async fn cmd_history(args: &[String]) -> i32 {
     let c = client(args);
     let verb = args.first().map(String::as_str).unwrap_or("list");
+    let json = wants_json(args);
     match verb {
         "list" => {
             let Some(project) = args.get(1) else {
@@ -565,10 +570,14 @@ async fn cmd_history(args: &[String]) -> i32 {
                 .and_then(|w| w[1].parse().ok())
                 .unwrap_or(0);
             match c.commits_search_page(project, query, limit, offset).await {
-                Ok(cs) => {
-                    for c in cs {
-                        let short: String = c.sha.chars().take(7).collect();
-                        println!("{short}  {}  {}", c.author, c.message);
+                Ok(page) => {
+                    if json {
+                        println!("{}", history_json(&page));
+                    } else {
+                        for commit in page.commits {
+                            let short: String = commit.sha.chars().take(7).collect();
+                            println!("{short}  {}  {}", commit.author, commit.message);
+                        }
                     }
                     0
                 }

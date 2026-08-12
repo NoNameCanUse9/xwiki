@@ -97,34 +97,23 @@ fn e2e_contracts() {
             .commits_search_page(&pid, "", 1, 0)
             .await
             .expect("commits page");
-        assert_eq!(one.len(), 1);
-        // has_more 是响应契约,客户端方法丢弃了它,直接验证原始 JSON
-        let raw: dto::CommitListResponse = admin
-            .http
-            .get(admin.url(&format!("/api/v1/projects/{pid}/commits")))
-            .query(&[("q", ""), ("limit", "1"), ("offset", "0")])
-            .send()
-            .await
-            .expect("raw commits")
-            .json()
-            .await
-            .expect("commits json");
-        assert!(raw.has_more, "a page below the total must set has_more");
+        assert_eq!(one.commits.len(), 1);
+        assert!(one.has_more, "a page below the total must set has_more");
         let hits = admin
             .commits_search_page(&pid, "edit number", 20, 0)
             .await
             .expect("message search");
-        assert_eq!(hits.len(), 3, "message substring search");
+        assert_eq!(hits.commits.len(), 3, "message substring search");
         let by_sha = admin
             .commits_search_page(&pid, &base[..7], 20, 0)
             .await
             .expect("sha search");
-        assert!(!by_sha.is_empty(), "sha prefix search");
+        assert!(!by_sha.commits.is_empty(), "sha prefix search");
         let none = admin
             .commits_search_page(&pid, "zzz-no-such-commit", 20, 0)
             .await
             .expect("empty search");
-        assert!(none.is_empty());
+        assert!(none.commits.is_empty());
 
         // ---- 锁: 未锁定为 null, 加锁/解锁往返 ----
         assert!(

@@ -60,3 +60,20 @@ fn server_status_network_error_is_6() {
     });
     assert_eq!(code, 6);
 }
+
+#[test]
+fn history_json_keeps_pagination_metadata() {
+    let page = crate::api::dto::CommitListResponse {
+        commits: vec![crate::api::dto::Commit {
+            sha: "abc123".into(),
+            message: "edit guide".into(),
+            author: "admin".into(),
+            date: "2026-08-13T00:00:00Z".into(),
+        }],
+        has_more: true,
+    };
+
+    let value: serde_json::Value = serde_json::from_str(&history_json(&page)).unwrap();
+    assert_eq!(value["commits"][0]["sha"], "abc123");
+    assert_eq!(value["has_more"], true);
+}
