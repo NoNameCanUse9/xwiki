@@ -483,14 +483,9 @@ impl XWikiApp {
                                         "Restore"
                                     })
                                     .loading(self.restoring)
-                                    .tooltip(if self.history_file_path.is_some() {
-                                        "文件历史暂不支持恢复"
-                                    } else {
-                                        "恢复到此版本（生成新提交）"
-                                    })
+                                    .tooltip("恢复到此版本（生成新提交）")
                                     .disabled(
-                                        self.history_file_path.is_some()
-                                            || self.selected_sha.is_none()
+                                        self.selected_sha.is_none()
                                             || self.restoring
                                             || self.history_detail_loading,
                                     )

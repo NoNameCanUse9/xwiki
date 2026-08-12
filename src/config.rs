@@ -103,6 +103,65 @@ pub fn clear_session() {
     let _ = std::fs::remove_file(config_path().join("session.json"));
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct Draft {
+    pub server: String,
+    pub username: String,
+    pub project: String,
+    pub original_path: String,
+    pub target_path: String,
+    pub content: String,
+    pub message: String,
+    pub base_revision: String,
+    pub updated_at: i64,
+}
+
+pub fn load_drafts() -> Vec<Draft> {
+    let now = chrono::Utc::now().timestamp();
+    let mut drafts = std::fs::read_to_string(config_path().join("drafts.json"))
+        .ok()
+        .and_then(|s| serde_json::from_str::<Vec<Draft>>(&s).ok())
+        .unwrap_or_default();
+    drafts.retain(|d| now.saturating_sub(d.updated_at) <= 30 * 24 * 60 * 60);
+    drafts.sort_by_key(|d| std::cmp::Reverse(d.updated_at));
+    drafts.truncate(100);
+    drafts
+}
+
+pub fn save_drafts(drafts: &[Draft]) {
+    let dir = config_path();
+    if std::fs::create_dir_all(&dir).is_err() {
+        return;
+    }
+    if let Ok(json) = serde_json::to_string(drafts) {
+        let _ = write_atomic(&dir.join("drafts.json"), &json, 0o600);
+    }
+}
+
+pub fn upsert_draft(draft: Draft) {
+    let mut drafts = load_drafts();
+    drafts.retain(|d| {
+        !(d.server == draft.server
+            && d.username == draft.username
+            && d.project == draft.project
+            && d.original_path == draft.original_path)
+    });
+    drafts.insert(0, draft);
+    drafts.truncate(100);
+    save_drafts(&drafts);
+}
+
+pub fn remove_draft(server: &str, username: &str, project: &str, path: &str) {
+    let mut drafts = load_drafts();
+    drafts.retain(|d| {
+        !(d.server == server
+            && d.username == username
+            && d.project == project
+            && d.original_path == path)
+    });
+    save_drafts(&drafts);
+}
+
 /// Returns the persisted theme mode, defaulting to System.
 pub fn load_theme() -> ThemeMode {
     match std::fs::read_to_string(config_path().join("theme"))

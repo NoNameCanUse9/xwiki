@@ -250,6 +250,8 @@ pub struct XWikiApp {
     server_url: String,
     /// Current project revision shown in the persistent status area.
     current_revision: Option<String>,
+    /// Revision captured when the current editor session loaded its content.
+    edit_base_revision: Option<String>,
     /// Tree keyboard-navigation cursor (index into visible entries).
     tree_focus: Option<usize>,
     /// Save-time revision conflict (render_main_pane shows the recovery panel).
@@ -445,8 +447,11 @@ impl XWikiApp {
             subs.push(cx.subscribe_in(
                 &editor_input,
                 window,
-                move |_, _, _: &InputEvent, _, cx| {
+                move |app, _, _: &InputEvent, _, cx| {
                     let _ = editor.read(cx);
+                    if app.editing {
+                        app.persist_draft(cx);
+                    }
                     cx.notify();
                 },
             ));
@@ -568,6 +573,7 @@ impl XWikiApp {
             layout: config::load_layout(),
             server_url: config::load_server(),
             current_revision: None,
+            edit_base_revision: None,
             tree_focus: None,
             conflict: None,
             tree_error: None,
@@ -628,7 +634,13 @@ impl XWikiApp {
         self.username = username;
         self.client = Some(client.clone());
         self.loading = true;
-        cx.spawn(async move |this, cx| match client.me().await {
+        cx.spawn(async move |this, cx| {
+            let result = match client.meta().await {
+                Ok(meta) if meta.api_version == "1" => client.me().await,
+                Ok(meta) => Err(crate::api::ApiError { code: "unsupported_api_version".into(), message: format!("服务器 API 版本 {} 不受支持，请升级客户端", meta.api_version), request_id: None, status: 400 }),
+                Err(error) => Err(error),
+            };
+            match result {
             Ok(user) => {
                 let _ = this.update(cx, |app, cx| app.on_login_ok(user, cx));
             }
@@ -642,6 +654,7 @@ impl XWikiApp {
                     cx.notify();
                 });
             }
+            }
         })
         .detach();
     }
@@ -652,6 +665,7 @@ impl XWikiApp {
         self.selected_project = Some(project_id.to_string());
         self.selected_sha = None;
         self.current_revision = None;
+        self.edit_base_revision = None;
         self.tree_path.clear();
         self.doc_path = None;
         self.doc_content.clear();
@@ -895,6 +909,10 @@ impl XWikiApp {
                             return;
                         }
                         app.doc_content = page.content;
+                        app.current_revision = Some(page.revision.clone());
+                        if !app.editing {
+                            app.edit_base_revision = Some(page.revision);
+                        }
                         app.doc_outline = outline::parse_document(&app.doc_content);
                         app.doc_scroll = ScrollHandle::new();
                         app.active_outline = app.doc_outline.entries.first().map(|_| 0);
@@ -1372,19 +1390,41 @@ impl XWikiApp {
     }
 
     fn begin_editing(&mut self, path: &str, cx: &mut Context<Self>) {
-        let content = self.doc_content.clone();
+        let mut content = self.doc_content.clone();
         let editor = self.editor_input.clone();
         let commit = self.commit_msg.clone();
         let title = self.editor_title_input.clone();
-        let filename = path.rsplit('/').next().unwrap_or(path).to_string();
+        let mut filename = path.rsplit('/').next().unwrap_or(path).to_string();
+        let mut message = String::new();
+        if let Some(project) = self.selected_project.as_ref() {
+            if let Some(draft) = config::load_drafts().into_iter().find(|d| {
+                d.server == self.server_url
+                    && d.username == self.username
+                    && d.project == *project
+                    && d.original_path == path
+            }) {
+                content = draft.content;
+                if !draft.target_path.is_empty() {
+                    filename = draft.target_path;
+                }
+                message = draft.message;
+                if !draft.base_revision.is_empty() {
+                    self.edit_base_revision = Some(draft.base_revision);
+                }
+                self.status_msg = Some("已恢复本地草稿".into());
+            }
+        }
         if let Some(handle) = cx.active_window() {
             let _ = cx.update_window(handle, |_view, window, cx| {
                 editor.update(cx, |s, cx| s.set_value(content, window, cx));
-                commit.update(cx, |s, cx| s.set_value(String::new(), window, cx));
+                commit.update(cx, |s, cx| s.set_value(message, window, cx));
                 title.update(cx, |s, cx| s.set_value(filename, window, cx));
             });
         }
         self.edit_path = Some(path.to_string());
+        if self.edit_base_revision.is_none() {
+            self.edit_base_revision = self.current_revision.clone();
+        }
         self.editor_preview = false;
         self.editing = true;
         self.lock_held = true;
@@ -1392,6 +1432,31 @@ impl XWikiApp {
         self.save_error = None;
         self.start_heartbeat(cx);
         cx.notify();
+    }
+
+    fn persist_draft(&self, cx: &Context<Self>) {
+        let (Some(project), Some(path)) = (self.selected_project.as_ref(), self.edit_path.as_ref())
+        else {
+            return;
+        };
+        let content = self.editor_input.read(cx).value().to_string();
+        let title = self.editor_title_input.read(cx).value().trim().to_string();
+        let target = if title.is_empty() {
+            path.clone()
+        } else {
+            title
+        };
+        config::upsert_draft(config::Draft {
+            server: self.server_url.clone(),
+            username: self.username.clone(),
+            project: project.clone(),
+            original_path: path.clone(),
+            target_path: target,
+            content,
+            message: self.commit_msg.read(cx).value().to_string(),
+            base_revision: self.edit_base_revision.clone().unwrap_or_default(),
+            updated_at: chrono::Utc::now().timestamp(),
+        });
     }
 
     fn start_heartbeat(&mut self, cx: &mut Context<Self>) {
@@ -1435,6 +1500,7 @@ impl XWikiApp {
     fn cancel_edit(&mut self, cx: &mut Context<Self>) {
         self.stop_heartbeat();
         self.editing = false;
+        self.edit_base_revision = None;
         self.editor_preview = false;
         self.lock_held = false;
         self.saving = false;
@@ -1445,6 +1511,7 @@ impl XWikiApp {
             self.edit_path.take(),
         );
         if let (Some(client), Some(project), Some(path)) = (client, project, path) {
+            config::remove_draft(&self.server_url, &self.username, &project, &path);
             cx.spawn(async move |_this, _cx| {
                 let _ = client.release_lock(&project, &path).await;
             })
@@ -1575,12 +1642,12 @@ impl XWikiApp {
         self.status_msg = None;
         cx.notify();
         cx.spawn(async move |this, cx| {
-            let base = match client.revision(&project).await {
-                Ok(rev) => rev,
-                Err(e) => {
+            let base = match this.update(cx, |app, _| app.edit_base_revision.clone()) {
+                Ok(Some(rev)) => rev,
+                _ => {
                     let _ = this.update(cx, |app, cx| {
                         app.saving = false;
-                        app.save_error = Some(format!("读取 revision 失败: {e}"));
+                        app.save_error = Some("文档版本尚未加载，请稍后再试".into());
                         cx.notify();
                     });
                     return;
@@ -1621,6 +1688,7 @@ impl XWikiApp {
     fn after_save(&mut self, revision: String, cx: &mut Context<Self>) {
         self.notify("已提交".into(), cx);
         self.current_revision = Some(revision);
+        self.edit_base_revision = self.current_revision.clone();
         self.saving = false;
         self.save_error = None;
         self.stop_heartbeat();
@@ -1633,6 +1701,7 @@ impl XWikiApp {
             self.edit_path.take(),
         );
         if let (Some(client), Some(project), Some(path)) = (client, project, path) {
+            config::remove_draft(&self.server_url, &self.username, &project, &path);
             cx.spawn(async move |_this, _cx| {
                 let _ = client.release_lock(&project, &path).await;
             })
@@ -1823,9 +1892,52 @@ impl XWikiApp {
         };
         self.restoring = true;
         self.history_error = None;
+        let file_path = self.history_file_path.clone();
+        let base_revision = self.current_revision.clone();
+        let username = self.username.clone();
         cx.notify();
         cx.spawn(async move |this, cx| {
-            match client.revert_commit(&project, &sha, "恢复历史版本").await {
+            let result = if let Some(path) = file_path {
+                let base = match base_revision.or_else(|| None) {
+                    Some(rev) => rev,
+                    None => match client.revision(&project).await {
+                        Ok(rev) => rev,
+                        Err(e) => {
+                            let _ = this.update(cx, |app, cx| {
+                                app.restoring = false;
+                                app.history_error = Some(format!("读取 revision 失败: {e}"));
+                                cx.notify();
+                            });
+                            return;
+                        }
+                    },
+                };
+                match client.page_at(&project, &path, &sha).await {
+                    Ok(page) => client
+                        .apply_changeset(
+                            &project,
+                            &base,
+                            "恢复历史版本",
+                            vec![dto::Change {
+                                op: "update".into(),
+                                path,
+                                new_path: None,
+                                content: Some(page.content),
+                            }],
+                        )
+                        .await
+                        .map(|r| dto::Commit {
+                            sha: r.commit,
+                            message: "恢复历史版本".into(),
+                            author: username.clone(),
+                            date: chrono::Utc::now().to_rfc3339(),
+                        }),
+                    Err(e) => Err(e),
+                }
+            } else {
+                client.revert_commit(&project, &sha, "恢复历史版本").await
+            };
+            match result {
                 Ok(c) => {
                     let short: String = c.sha.chars().take(7).collect();
                     let _ = this.update(cx, |app, cx| {
@@ -2761,7 +2873,12 @@ impl XWikiApp {
         self.loading = true;
         cx.notify();
         cx.spawn(async move |this, cx| {
-            match client.login_with_session(username.trim(), &password).await {
+            let login_result = match client.meta().await {
+                Ok(meta) if meta.api_version == "1" => client.login_with_session(username.trim(), &password).await,
+                Ok(meta) => Err(crate::api::ApiError { code: "unsupported_api_version".into(), message: format!("服务器 API 版本 {} 不受支持，请升级客户端", meta.api_version), request_id: None, status: 400 }),
+                Err(error) => Err(error),
+            };
+            match login_result {
                 Ok((user, cookie)) => {
                     let _ = config::save_server(&server);
                     config::save_username(&user.username);
@@ -3691,8 +3808,10 @@ impl XWikiApp {
             Err(error) => {
                 let _ = this.update(cx, |app, cx| {
                     app.audit_loading = false;
-                    app.audit_error =
-                        Some(format!("项目列表加载失败：{}", Self::friendly_api_error(&error)));
+                    app.audit_error = Some(format!(
+                        "项目列表加载失败：{}",
+                        Self::friendly_api_error(&error)
+                    ));
                     cx.notify();
                 });
             }
@@ -3705,7 +3824,8 @@ impl XWikiApp {
     /// silent (no error) instead of surfacing a red error — the web audit
     /// page renders nothing in that case.
     fn load_audit(&mut self, cx: &mut Context<Self>) {
-        let (Some(client), Some(project)) = (self.client.clone(), self.audit_selected_project.clone())
+        let (Some(client), Some(project)) =
+            (self.client.clone(), self.audit_selected_project.clone())
         else {
             self.audit_entries.clear();
             self.audit_loading = false;
@@ -3753,6 +3873,7 @@ impl XWikiApp {
         let Some(client) = self.client.clone() else {
             return;
         };
+        let project_ids: Vec<String> = self.projects.iter().map(|p| p.id.clone()).collect();
         let handle = cx.entity();
         window.open_dialog(cx, move |dialog, window, cx| {
             let name_state = cx.new(|cx| InputState::new(window, cx).placeholder("ci-docs"));
@@ -3763,6 +3884,11 @@ impl XWikiApp {
             });
             let content_name = name_state.clone();
             let content_scope = scope_state.clone();
+            let available_projects = project_ids
+                .iter()
+                .map(|id| id.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
             let content_builder = move |content: DialogContent, _: &mut Window, cx: &mut App| {
                 let theme = cx.theme();
                 content.child(
@@ -3773,7 +3899,11 @@ impl XWikiApp {
                         .child(mono_label("名称").text_color(theme.muted_foreground))
                         .child(Input::new(&content_name).w_full())
                         .child(mono_label("权限范围").text_color(theme.muted_foreground))
-                        .child(Input::new(&content_scope).w_full()),
+                        .child(Input::new(&content_scope).w_full())
+                        .child(
+                            mono_label(format!("项目范围（已选择全部）：{}", available_projects))
+                                .text_color(theme.muted_foreground),
+                        ),
                 )
             };
             let cancel = Button::new("cancel-create-token")
@@ -3784,6 +3914,7 @@ impl XWikiApp {
             let create_name = name_state.clone();
             let create_scope = scope_state.clone();
             let create_client = client.clone();
+            let create_projects = project_ids.clone();
             let create_handle = handle.clone();
             let create = Button::new("confirm-create-token")
                 .primary()
@@ -3802,13 +3933,14 @@ impl XWikiApp {
                     }
                     let c = create_client.clone();
                     let h = create_handle.clone();
+                    let projects = create_projects.clone();
                     h.update(cx, |app, cx| {
                         app.settings_access_loading = true;
                         app.settings_error = None;
                         cx.notify();
                     });
-                    cx.spawn(async move |cx| {
-                        match c.create_token(&name, &scope, Vec::new(), Vec::new()).await {
+                    cx.spawn(
+                        async move |cx| match c.create_token(&name, &scope, projects).await {
                             Ok((_token, secret)) => {
                                 h.update(cx, |app, cx| {
                                     app.settings_access_loading = false;
@@ -3827,8 +3959,8 @@ impl XWikiApp {
                                     cx.notify();
                                 });
                             }
-                        }
-                    })
+                        },
+                    )
                     .detach();
                     window.close_dialog(cx);
                 });
@@ -4197,17 +4329,17 @@ impl XWikiApp {
                             ),
                             _ => (
                                 false,
-                                format!(
-                                    "无法识别 GitHub Release 版本号：{}",
-                                    release.tag_name
-                                ),
+                                format!("无法识别 GitHub Release 版本号：{}", release.tag_name),
                             ),
                         });
                     }
                     Err(error) => {
                         app.settings_ota_status = Some((
                             false,
-                            format!("检查 GitHub Releases 失败：{}", Self::github_release_error(&error)),
+                            format!(
+                                "检查 GitHub Releases 失败：{}",
+                                Self::github_release_error(&error)
+                            ),
                         ));
                     }
                 }
@@ -5377,10 +5509,12 @@ impl Render for XWikiApp {
                     .relative()
                     .child(match self.screen {
                         Screen::Login => self.render_login(cx).into_any_element(),
-                        Screen::Settings | Screen::Workspace | Screen::ApiReference | Screen::Audit => {
-                            self.render_authenticated_shell(window, cx)
-                                .into_any_element()
-                        }
+                        Screen::Settings
+                        | Screen::Workspace
+                        | Screen::ApiReference
+                        | Screen::Audit => self
+                            .render_authenticated_shell(window, cx)
+                            .into_any_element(),
                     })
                     .child(if self.quick_open {
                         self.render_quick_open(cx).into_any_element()

@@ -1,6 +1,7 @@
 //! Document workspace (plan §5): render methods for this screen/region; state and logic
 //! stay in `crate::app` (mod.rs).
 
+use gpui::prelude::FluentBuilder;
 use gpui::InteractiveElement;
 use gpui::*;
 use gpui_component::{
@@ -65,8 +66,7 @@ impl XWikiApp {
                     .icon(IconName::ArrowLeft)
                     .tooltip("返回上一级目录 (←)")
                     .on_click(cx.listener(|this, _, _, cx| {
-                        let parent =
-                            this.tree_path.rsplit_once('/').map(|(p, _)| p.to_string());
+                        let parent = this.tree_path.rsplit_once('/').map(|(p, _)| p.to_string());
                         this.load_tree(parent.as_deref().unwrap_or(""), cx);
                     })),
             );

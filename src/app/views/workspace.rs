@@ -683,11 +683,18 @@ impl XWikiApp {
 /// The four project actions shared by the card dropdown and its context
 /// menu — kept in one place so the two menus can't drift apart.
 fn project_menu(menu: PopupMenu, id: String, name: String, archived: bool) -> PopupMenu {
-    let mut m = menu.menu("打开项目", Box::new(ProjectContextAction {
-        project_id: id.clone(),
-    }));
+    let mut m = menu.menu(
+        "打开项目",
+        Box::new(ProjectContextAction {
+            project_id: id.clone(),
+        }),
+    );
     m = m.menu(
-        if archived { "取消归档" } else { "归档项目" },
+        if archived {
+            "取消归档"
+        } else {
+            "归档项目"
+        },
         Box::new(ProjectArchiveAction {
             project_id: id.clone(),
             archived: !archived,

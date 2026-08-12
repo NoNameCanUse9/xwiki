@@ -941,10 +941,9 @@ impl XWikiApp {
                         .v_flex()
                         .gap_4()
                         .child(
-                            div()
-                                .text_sm()
-                                .text_color(theme.muted_foreground)
-                                .child("按项目查看操作记录：谁在什么时间对哪个文档执行了什么操作。"),
+                            div().text_sm().text_color(theme.muted_foreground).child(
+                                "按项目查看操作记录：谁在什么时间对哪个文档执行了什么操作。",
+                            ),
                         )
                         .child(
                             div()
@@ -961,7 +960,9 @@ impl XWikiApp {
                                     mono_label(format!("ENTRIES · {}", self.audit_entries.len()))
                                         .text_color(theme.muted_foreground),
                                 )
-                                .child(div().border_t_1().border_color(theme.border).child(entries)),
+                                .child(
+                                    div().border_t_1().border_color(theme.border).child(entries),
+                                ),
                         ),
                 ),
         )
