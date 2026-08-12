@@ -41,6 +41,7 @@ import ImportFilesButton from "@/components/editor/import-files";
 import NewEntryButton from "@/components/editor/new-entry";
 import RowActions from "@/components/editor/row-actions";
 import AttachmentsPanel from "@/components/editor/attachments";
+import { ProjectChanges } from "@/components/editor/project-changes";
 import { enhanceRenderedMarkdown } from "@/components/editor/markdown-render";
 import {
 	extractToc,
@@ -982,6 +983,12 @@ export default function DocsViewerPage() {
 								dirPath=""
 								depth={0}
 								defaultExpanded
+								onOpen={(path) => navigate(`/projects/${id}/docs/${path}`)}
+							/>
+						)}
+						{showHome && !loading && !error && (
+							<ProjectChanges
+								projectId={id}
 								onOpen={(path) => navigate(`/projects/${id}/docs/${path}`)}
 							/>
 						)}

@@ -25,6 +25,8 @@ vi.mock("@/lib/api/changesets", () => ({
 
 vi.mock("@/lib/api/history", () => ({
 	fileHistory: vi.fn(),
+	listCommits: vi.fn(),
+	getCommitDiff: vi.fn(),
 }));
 
 vi.mock("@/lib/api/locks", () => ({
@@ -109,6 +111,7 @@ function renderPage(path = "/projects/prj_1/docs") {
 describe("DocsViewerPage", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
+		vi.mocked(historyApi.listCommits).mockResolvedValue({ commits: [] });
 		// _sidebar.md 查询默认失败（多数测试不关心侧栏菜单）
 		vi.mocked(docsApi.getPage).mockRejectedValue(new Error("no sidebar"));
 		// 编辑锁默认可获取/可释放/可续期。
@@ -141,6 +144,11 @@ describe("DocsViewerPage", () => {
 		await new Promise((r) => setTimeout(r, 400));
 		expect(screen.queryAllByText("docs").length).toBeGreaterThanOrEqual(1);
 		expect(screen.queryAllByText("README.md").length).toBeGreaterThanOrEqual(1);
+		const readme = screen.getByRole("button", { name: "README.md" });
+		const changes = screen.getByRole("region", { name: "项目变更记录" });
+		expect(
+			readme.compareDocumentPosition(changes) & Node.DOCUMENT_POSITION_FOLLOWING,
+		).toBeTruthy();
 		expect(docsApi.getHome).not.toHaveBeenCalled();
 	});
 
