@@ -28,8 +28,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
         with: { toolchain: stable, components: rustfmt }
       - run: cargo fmt --all -- --check
-      - run: cargo test --all-targets
-      - run: cargo check
+      - run: cargo test --locked --all-targets
+      - run: cargo check --locked
   build:
     name: Build ${{ matrix.name }}
     needs: test
@@ -71,7 +71,7 @@ jobs:
         uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
 
       - name: Build release
-        run: cargo build --release
+        run: cargo build --locked --release
 
       - name: Package asset
         shell: bash
