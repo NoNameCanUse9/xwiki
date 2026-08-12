@@ -1,12 +1,8 @@
-import { useEffect, useState } from "react";
-import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
-import { ChevronDown, FileText, GitCommitHorizontal } from "lucide-react";
-import {
-	getCommitDiff,
-	listCommits,
-	type CommitSummary,
-} from "@/lib/api/history";
-import { parseDocumentPatch } from "./project-changes-parser";
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { useQuery } from "@tanstack/react-query";
+import { ChevronLeft, ChevronRight } from "lucide-react";
+import { listCommits, type CommitSummary } from "@/lib/api/history";
 
 function formatDateTime(iso: string): string {
 	return new Date(iso).toLocaleString("zh-CN", {
@@ -17,147 +13,185 @@ function formatDateTime(iso: string): string {
 	});
 }
 
-function ChangeDetails({
-	projectId,
-	sha,
-	onOpen,
+function CommitNode({
+	commit,
+	side,
 }: {
-	projectId: string;
-	sha: string;
-	onOpen: (path: string) => void;
+	commit: CommitSummary;
+	side: "top" | "bottom";
 }) {
-	const { data, isLoading, isError } = useQuery({
-		queryKey: ["commit-diff", projectId, sha, "patch"],
-		queryFn: () => getCommitDiff(projectId, sha, "patch"),
-	});
-	if (isLoading) {
-		return <p className="px-4 py-3 text-xs text-[var(--color-ink-3)]">loading…</p>;
-	}
-	if (isError) {
-		return <p className="px-4 py-3 text-xs text-[var(--color-destructive)]">变更详情加载失败</p>;
-	}
-	const files = parseDocumentPatch(data?.patch ?? "");
-	if (files.length === 0) {
-		return <p className="px-4 py-3 text-xs text-[var(--color-ink-3)]">本次提交没有可显示的文本变更</p>;
-	}
-	return (
-		<div className="space-y-4 border-t border-[var(--color-rule)] px-4 py-4">
-		{files.map((entry) => (
-			<div key={entry.path} className="overflow-hidden rounded-[var(--radius)] border border-[var(--color-rule)]">
-				<button
-					type="button"
-					onClick={() => onOpen(entry.path)}
-					className="flex w-full items-center gap-2 bg-[var(--color-paper-2)] px-3 py-2 text-left font-mono text-xs text-[var(--color-accent)] hover:underline"
+	const message = commit.message || "（无提交信息）";
+	const nodeRef = useRef<HTMLSpanElement>(null);
+	const [hoverRect, setHoverRect] = useState<DOMRect | null>(null);
+
+	const showTooltip = () => {
+		const rect = nodeRef.current?.getBoundingClientRect();
+		if (rect) setHoverRect(rect);
+	};
+	const hideTooltip = () => setHoverRect(null);
+	const tooltip = hoverRect
+		? (() => {
+			const width = 256;
+			const margin = 8;
+			const above = side === "top" || hoverRect.bottom + 180 > window.innerHeight - margin;
+			const left = Math.min(
+				Math.max(hoverRect.left + hoverRect.width / 2, width / 2 + margin),
+				window.innerWidth - width / 2 - margin,
+			);
+			const top = above ? hoverRect.top - margin : hoverRect.bottom + margin;
+			return createPortal(
+				<div
+					id={`commit-tooltip-${commit.sha}`}
+					role="tooltip"
+					className="pointer-events-none fixed z-[100] w-64 rounded-[var(--radius)] border border-[var(--color-rule)] bg-[var(--color-paper)] p-3 text-left shadow-xl"
+					style={{ left, top, transform: `translate(-50%, ${above ? "-100%" : "0"})` }}
 				>
-					<FileText className="size-3.5 shrink-0" />
-					<span className="truncate">{entry.path}</span>
-				</button>
-				{entry.hunks.map((hunk, index) => (
-					<div key={`${hunk.oldStart}-${hunk.newStart}-${index}`} className="border-t border-[var(--color-rule)]">
-						<div className="flex flex-wrap items-center gap-x-3 gap-y-1 bg-[var(--color-surface-accent)] px-3 py-1.5 font-mono text-[11px]">
-							<span className="text-[var(--color-accent)]">{entry.path}:L{hunk.newStart}</span>
-							{hunk.heading && <span className="text-[var(--color-ink-2)]">§ {hunk.heading}</span>}
-						</div>
-						<pre className="overflow-x-auto py-1 text-[11px] leading-5">
-							{hunk.lines.map((line, lineIndex) => {
-								const number = line.kind === "delete" ? line.oldLine : line.newLine;
-								const marker = line.kind === "add" ? "+" : line.kind === "delete" ? "−" : " ";
-								return (
-									<div
-										key={`${lineIndex}-${line.kind}`}
-										className={line.kind === "add" ? "bg-[oklch(94%_0.04_145)] text-[oklch(38%_0.11_145)] dark:bg-[oklch(25%_0.04_145)] dark:text-[oklch(78%_0.1_145)]" : line.kind === "delete" ? "bg-[oklch(94%_0.035_25)] text-[var(--color-destructive)] dark:bg-[oklch(25%_0.035_25)]" : "text-[var(--color-ink-3)]"}
-									>
-										<span className="inline-block w-12 select-none pr-2 text-right opacity-60">{number}</span>
-										<span className="inline-block w-5 select-none text-center">{marker}</span>
-										<code>{line.content || " "}</code>
-									</div>
-								);
-							})}
-						</pre>
-					</div>
-				))}
-			</div>
-		))}
+					<p className="break-words text-sm font-medium leading-snug text-[var(--color-ink)]">{message}</p>
+					<p className="mt-2 text-xs text-[var(--color-ink-2)]">{commit.author} · {formatDateTime(commit.date)}</p>
+					<code className="mt-1 block text-[11px] text-[var(--color-accent)]">{commit.sha.slice(0, 12)}</code>
+				</div>,
+				document.body,
+			);
+		  })()
+		: null;
+
+	return (
+		<div
+			className="group relative h-24 min-w-32 flex-1"
+			data-side={side}
+			onMouseEnter={showTooltip}
+			onMouseLeave={hideTooltip}
+		>
+			<span
+				className={`absolute left-1/2 max-w-40 -translate-x-1/2 truncate text-center text-[11px] text-[var(--color-ink-2)] ${side === "top" ? "top-0" : "bottom-0"}`}
+			>
+				{message}
+			</span>
+			<span
+				ref={nodeRef}
+				data-track-marker="true"
+				data-track-anchor="center"
+				role="img"
+				tabIndex={0}
+				aria-label={`提交：${message}`}
+				aria-describedby={hoverRect ? `commit-tooltip-${commit.sha}` : undefined}
+				data-side={side}
+				onFocus={showTooltip}
+				onBlur={hideTooltip}
+				className="absolute left-1/2 top-1/2 z-10 flex size-5 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full outline-none"
+			>
+				<span className="size-3 rounded-full border-2 border-[var(--color-accent)] bg-[var(--color-paper)] transition-shadow group-hover:ring-4 group-hover:ring-[var(--color-surface-accent)] group-focus-within:ring-4 group-focus-within:ring-[var(--color-surface-accent)]" />
+			</span>
+			<span
+				data-track-tick="true"
+				data-track-anchor="center"
+				aria-hidden="true"
+				className={`absolute left-1/2 h-1.5 w-px -translate-x-1/2 bg-[var(--color-rule)] ${side === "top" ? "top-[calc(50%-0.375rem)]" : "top-1/2"}`}
+			/>
+			{tooltip}
 		</div>
 	);
 }
 
-function CommitChange({ projectId, commit, onOpen }: { projectId: string; commit: CommitSummary; onOpen: (path: string) => void }) {
-	const [expanded, setExpanded] = useState(false);
-	return (
-		<article className="border-b border-[var(--color-rule)] last:border-b-0">
-			<button type="button" onClick={() => setExpanded((value) => !value)} className="flex w-full items-start gap-3 px-4 py-3 text-left hover:bg-[var(--color-surface-accent)]" aria-expanded={expanded}>
-				<ChevronDown className={`mt-0.5 size-4 shrink-0 text-[var(--color-ink-3)] transition-transform ${expanded ? "" : "-rotate-90"}`} />
-				<div className="min-w-0 flex-1">
-					<p className="text-sm font-medium text-[var(--color-ink)]">{commit.message || "（无提交信息）"}</p>
-					<p className="mt-1 text-xs text-[var(--color-ink-3)]">{commit.author} · {formatDateTime(commit.date)}</p>
-				</div>
-				<code className="shrink-0 text-xs text-[var(--color-accent)]">{commit.sha.slice(0, 8)}</code>
-			</button>
-			{expanded && <ChangeDetails projectId={projectId} sha={commit.sha} onOpen={onOpen} />}
-		</article>
-	);
-}
-
-/** Project-level roadmap of recent document changes, intended for humans and agents. */
-export function ProjectChanges({ projectId, onOpen }: { projectId: string; onOpen: (path: string) => void }) {
-	const [query, setQuery] = useState("");
-	const [searchQuery, setSearchQuery] = useState("");
-	useEffect(() => {
-		const timer = window.setTimeout(() => setSearchQuery(query), 300);
-		return () => window.clearTimeout(timer);
-	}, [query]);
-	const {
-		data,
-		isLoading,
-		isError,
-		hasNextPage,
-		fetchNextPage,
-		isFetchingNextPage,
-	} = useInfiniteQuery({
-		queryKey: ["commits", projectId, searchQuery],
-		queryFn: ({ pageParam }) => searchQuery
-			? listCommits(projectId, 20, pageParam, searchQuery)
-			: listCommits(projectId, 20, pageParam),
-		initialPageParam: 0,
-		getNextPageParam: (lastPage, pages) =>
-			(lastPage.has_more ?? lastPage.commits.length === 20)
-				? pages.reduce((total, page) => total + page.commits.length, 0)
-				: undefined,
+/** Compact project timeline showing the five latest commits. */
+export function ProjectChanges({ projectId }: { projectId: string }) {
+	const { data, isLoading, isError } = useQuery({
+		queryKey: ["commits", projectId],
+		queryFn: () => listCommits(projectId, 5, 0),
 		enabled: projectId.length > 0,
 	});
-	const commits = data?.pages.flatMap((page) => page.commits) ?? [];
+	const commits = (data?.commits ?? []).slice(0, 5).reverse();
+	const scrollRef = useRef<HTMLDivElement>(null);
+	const [canScroll, setCanScroll] = useState(false);
+	const [atStart, setAtStart] = useState(true);
+	const [atEnd, setAtEnd] = useState(true);
+	const updateScrollState = () => {
+		const element = scrollRef.current;
+		if (!element) return;
+		const maxScroll = Math.max(0, element.scrollWidth - element.clientWidth);
+		setCanScroll(maxScroll > 1);
+		setAtStart(element.scrollLeft <= 1);
+		setAtEnd(element.scrollLeft >= maxScroll - 1);
+	};
+	useEffect(() => {
+		updateScrollState();
+		window.addEventListener("resize", updateScrollState);
+		return () => window.removeEventListener("resize", updateScrollState);
+	}, [commits.length]);
+	const scrollTimeline = (direction: "left" | "right") => {
+		const element = scrollRef.current;
+		if (!element) return;
+		element.scrollBy({
+			left: direction === "right" ? element.clientWidth * 0.8 : -element.clientWidth * 0.8,
+			behavior: "smooth",
+		});
+	};
+
 	return (
-		<section className="mt-10 space-y-3" aria-label="项目变更记录">
-			<div className="flex items-center justify-between">
-				<div>
-					<p className="mono-label flex items-center gap-2 text-[var(--color-ink-3)]"><GitCommitHorizontal className="size-3.5" />changes · roadmap</p>
-					<p className="mt-1 text-xs text-[var(--color-ink-3)]">展开提交可查看文档路径、标题位置、行号和实际增删内容</p>
-				</div>
-				{data && <span className="mono-label text-[var(--color-ink-3)]">已加载 {commits.length} 次</span>}
-			</div>
-			<input
-				value={query}
-				onChange={(event) => setQuery(event.target.value.slice(0, 200))}
-				placeholder="搜索提交消息、作者或 SHA"
-				className="w-full border-b border-[var(--color-rule)] bg-transparent px-1 py-2 text-sm outline-none placeholder:text-[var(--color-ink-3)] focus:border-[var(--color-accent)]"
-			/>
-			<div className="hairline-panel overflow-hidden">
-				{isLoading && <p className="px-4 py-6 text-center text-sm text-[var(--color-ink-3)]">loading…</p>}
-				{isError && <p className="px-4 py-6 text-center text-sm text-[var(--color-destructive)]">变更记录加载失败</p>}
-				{data && commits.length === 0 && <p className="px-4 py-6 text-center text-sm text-[var(--color-ink-2)]">还没有文档变更</p>}
-				{commits.map((commit) => <CommitChange key={commit.sha} projectId={projectId} commit={commit} onOpen={onOpen} />)}
-				{hasNextPage && (
-					<button
-						type="button"
-						onClick={() => void fetchNextPage()}
-						disabled={isFetchingNextPage}
-						className="w-full border-t border-[var(--color-rule)] px-4 py-3 text-xs text-[var(--color-accent)] hover:bg-[var(--color-surface-accent)] disabled:opacity-60"
+		<section className="mt-auto space-y-3 pt-24" aria-label="项目变更记录">
+			{isLoading && (
+				<p className="py-4 text-center text-sm text-[var(--color-ink-3)]">loading…</p>
+			)}
+			{isError && (
+				<p className="py-4 text-center text-sm text-[var(--color-destructive)]">
+					变更记录加载失败
+				</p>
+			)}
+			{data && commits.length === 0 && (
+				<p className="py-4 text-center text-sm text-[var(--color-ink-2)]">
+					还没有文档变更
+				</p>
+			)}
+			{commits.length > 0 && (
+				<div className="relative flex items-center gap-2">
+					{canScroll && (
+						<button
+							type="button"
+							aria-label="向左滚动时间线"
+							disabled={atStart}
+							onClick={() => scrollTimeline("left")}
+							className="shrink-0 rounded-full p-1 text-[var(--color-ink-3)] hover:bg-[var(--color-surface-accent)] hover:text-[var(--color-accent)] disabled:opacity-30"
+						>
+							<ChevronLeft className="size-4" />
+						</button>
+					)}
+					<div
+						ref={scrollRef}
+						data-timeline-scroll
+						className="min-w-0 flex-1 overflow-x-auto pb-1"
+						onScroll={updateScrollState}
+						role="region"
+						aria-label="项目变更时间线"
 					>
-						{isFetchingNextPage ? "加载中…" : "加载更早的改动"}
-					</button>
-				)}
-			</div>
+						<div className="relative min-w-[720px] px-4">
+						<div
+							aria-hidden="true"
+							className="absolute left-[8%] right-[8%] top-1/2 h-px bg-[var(--color-accent)]"
+						/>
+						<div className="relative flex h-24 items-stretch justify-between gap-4">
+							{commits.map((commit, index) => (
+								<CommitNode
+									key={commit.sha}
+									commit={commit}
+									side={index % 2 === 0 ? "top" : "bottom"}
+								/>
+							))}
+						</div>
+						</div>
+					</div>
+					{canScroll && (
+						<button
+							type="button"
+							aria-label="向右滚动时间线"
+							disabled={atEnd}
+							onClick={() => scrollTimeline("right")}
+							className="shrink-0 rounded-full p-1 text-[var(--color-ink-3)] hover:bg-[var(--color-surface-accent)] hover:text-[var(--color-accent)] disabled:opacity-30"
+						>
+							<ChevronRight className="size-4" />
+						</button>
+					)}
+				</div>
+			)}
 		</section>
 	);
 }

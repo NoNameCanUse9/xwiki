@@ -922,7 +922,7 @@ export default function DocsViewerPage() {
 					}`}
 				>
 					<div
-						className={`mx-auto w-full transition-[max-width] duration-200 ${
+						className={`mx-auto flex min-h-[calc(100vh-8rem)] w-full flex-col transition-[max-width] duration-200 ${
 							editing ? "max-w-4xl" : "max-w-3xl"
 						}`}
 					>
@@ -1021,10 +1021,7 @@ export default function DocsViewerPage() {
 							/>
 						)}
 						{showHome && !loading && !error && (
-							<ProjectChanges
-								projectId={id}
-								onOpen={(path) => navigate(`/projects/${id}/docs/${path}`)}
-							/>
+							<ProjectChanges projectId={id} />
 						)}
 						{!showHome && !editing && showBacklinks && (
 							<div className="mt-10">
