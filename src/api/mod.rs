@@ -73,7 +73,11 @@ mod tests {
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize};
 use std::future::Future;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
+
+/// Keep binary responses bounded before the GUI writes them to disk. Exports
+/// can be large, but never need to occupy an unbounded amount of memory.
+pub(crate) const MAX_BUFFERED_RESPONSE_BYTES: usize = 128 << 20;
 
 /// reqwest needs a tokio reactor, but the GUI runs on gpui's own executor.
 /// Every request is therefore dispatched onto a process-wide tokio runtime
@@ -231,20 +235,50 @@ impl Client {
     /// JSON or buffering it in a string.
     async fn send_bytes(req: reqwest::RequestBuilder) -> Result<Vec<u8>, ApiError> {
         tokio_spawn(async move {
-            let resp = req.send().await.map_err(network_error)?;
+            let mut resp = req.send().await.map_err(network_error)?;
             let status = resp.status().as_u16();
             if !resp.status().is_success() {
                 return Err(Self::error_from_resp(resp).await);
             }
-            resp.bytes()
-                .await
-                .map(|bytes| bytes.to_vec())
-                .map_err(|e| ApiError {
-                    code: "decode_error".into(),
-                    message: e.to_string(),
+            if resp
+                .content_length()
+                .is_some_and(|length| length > MAX_BUFFERED_RESPONSE_BYTES as u64)
+            {
+                return Err(ApiError {
+                    code: "response_too_large".into(),
+                    message: format!(
+                        "响应超过 {} MiB 内存缓冲限制",
+                        MAX_BUFFERED_RESPONSE_BYTES / (1 << 20)
+                    ),
                     request_id: None,
                     status,
-                })
+                });
+            }
+            let mut bytes = Vec::with_capacity(
+                resp.content_length()
+                    .unwrap_or_default()
+                    .min(MAX_BUFFERED_RESPONSE_BYTES as u64) as usize,
+            );
+            while let Some(chunk) = resp.chunk().await.map_err(|e| ApiError {
+                code: "decode_error".into(),
+                message: e.to_string(),
+                request_id: None,
+                status,
+            })? {
+                if bytes.len().saturating_add(chunk.len()) > MAX_BUFFERED_RESPONSE_BYTES {
+                    return Err(ApiError {
+                        code: "response_too_large".into(),
+                        message: format!(
+                            "响应超过 {} MiB 内存缓冲限制",
+                            MAX_BUFFERED_RESPONSE_BYTES / (1 << 20)
+                        ),
+                        request_id: None,
+                        status,
+                    });
+                }
+                bytes.extend_from_slice(&chunk);
+            }
+            Ok(bytes)
         })
         .await
     }
@@ -746,9 +780,10 @@ impl Client {
     pub async fn import_bundle(
         &self,
         name: &str,
-        bundle: Vec<u8>,
+        bundle: Arc<Vec<u8>>,
     ) -> Result<dto::ImportProjectResult, ApiError> {
-        let part = reqwest::multipart::Part::bytes(bundle).file_name("project.bundle");
+        let part =
+            reqwest::multipart::Part::bytes(bundle.as_ref().clone()).file_name("project.bundle");
         let form = reqwest::multipart::Form::new()
             .text("name", name.to_string())
             .part("file", part);
@@ -765,16 +800,16 @@ impl Client {
         &self,
         name: &str,
         description: &str,
-        files: Vec<dto::UploadFile>,
+        files: Arc<Vec<dto::UploadFile>>,
     ) -> Result<dto::ImportProjectResult, ApiError> {
         let mut form = reqwest::multipart::Form::new()
             .text("name", name.to_string())
             .text("description", description.to_string());
-        for file in files {
+        for file in files.iter() {
             let path = file.path.clone();
             form = form.text("paths", path.clone()).part(
                 "files",
-                reqwest::multipart::Part::bytes(file.content).file_name(path),
+                reqwest::multipart::Part::bytes(file.content.clone()).file_name(path),
             );
         }
         Self::send(

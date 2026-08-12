@@ -1,4 +1,5 @@
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+use std::io::Read;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -20,6 +21,11 @@ mod outline;
 pub mod views;
 use crate::ui::{mono_label, tokens};
 use crate::{QuickOpen, SaveEditor, TogglePalette, ToggleTheme};
+
+const MAX_IMPORT_FILE_BYTES: usize = 5 * 1024 * 1024;
+const MAX_IMPORT_TOTAL_BYTES: usize = 128 * 1024 * 1024;
+const MAX_IMPORT_FILES: usize = 10_000;
+const MAX_IMPORT_DIRECTORIES: usize = 100_000;
 
 const OTA_GITHUB_OWNER: &str = "NoNameCanUse9";
 const OTA_GITHUB_REPO: &str = "xwiki";
@@ -677,6 +683,10 @@ impl XWikiApp {
         };
         self.history_open = false;
         self.history_file_path = None;
+        self.history_loading = false;
+        self.history_detail_loading = false;
+        self.restoring = false;
+        self.clear_history_data();
         self.tree_path = path.to_string();
         self.tree_focus = None;
         self.doc_path = None;
@@ -905,6 +915,7 @@ impl XWikiApp {
         self.history_detail_loading = false;
         self.history_error = None;
         self.history_focus = None;
+        self.commits.clear();
         self.commit_detail = None;
         self.diff_stats.clear();
         self.commit_patch = None;
@@ -942,7 +953,7 @@ impl XWikiApp {
             .and_then(|value| value.to_str())
             .unwrap_or("attachment")
             .to_string();
-        let content = match std::fs::read(&path) {
+        let content = match read_file_limited(&path, MAX_IMPORT_FILE_BYTES) {
             Ok(content) => content,
             Err(error) => {
                 self.attachments_error = Some(format!("读取附件失败: {error}"));
@@ -950,11 +961,6 @@ impl XWikiApp {
                 return;
             }
         };
-        if content.len() > 5 * 1024 * 1024 {
-            self.attachments_error = Some("附件超过后端 5 MiB 限制。".into());
-            cx.notify();
-            return;
-        }
         self.attachments_loading = true;
         self.attachments_error = None;
         cx.notify();
@@ -1163,6 +1169,10 @@ impl XWikiApp {
         self.attachments.clear();
         self.history_open = false;
         self.history_file_path = None;
+        self.history_loading = false;
+        self.history_detail_loading = false;
+        self.restoring = false;
+        self.clear_history_data();
         cx.notify();
     }
 
@@ -1501,8 +1511,19 @@ impl XWikiApp {
         self.history_file_path = None;
         self.history_detail_loading = false;
         self.restoring = false;
+        self.clear_history_data();
         config::save_layout(&self.layout);
         cx.notify();
+    }
+
+    fn clear_history_data(&mut self) {
+        self.commits.clear();
+        self.commit_detail = None;
+        self.diff_stats.clear();
+        self.commit_patch = None;
+        self.selected_sha = None;
+        self.history_focus = None;
+        self.history_error = None;
     }
 
     fn load_file_history(&mut self, cx: &mut Context<Self>) {
@@ -1520,6 +1541,11 @@ impl XWikiApp {
                 Ok(list) => {
                     let first_sha = list.first().map(|commit| commit.sha.clone());
                     let _ = this.update(cx, |app, cx| {
+                        if !app.history_open
+                            || app.history_file_path.as_deref() != Some(path.as_str())
+                        {
+                            return;
+                        }
                         app.history_loading = false;
                         app.history_error = None;
                         app.history_focus = first_sha.as_ref().map(|_| 0);
@@ -1534,6 +1560,11 @@ impl XWikiApp {
                 }
                 Err(e) => {
                     let _ = this.update(cx, |app, cx| {
+                        if !app.history_open
+                            || app.history_file_path.as_deref() != Some(path.as_str())
+                        {
+                            return;
+                        }
                         app.history_loading = false;
                         app.history_error = Some(format!("加载文件历史失败: {e}"));
                         cx.notify();
@@ -1561,6 +1592,9 @@ impl XWikiApp {
             let stats = client.diff_stats(&project, &sha).await;
             let patch = client.commit_patch(&project, &sha).await;
             let _ = this.update(cx, |app, cx| {
+                if !app.history_open || app.selected_sha.as_deref() != Some(sha.as_str()) {
+                    return;
+                }
                 app.history_detail_loading = false;
                 let mut errors = Vec::new();
                 match detail {
@@ -2773,6 +2807,29 @@ impl XWikiApp {
         self.project_action = None;
         self.history_open = false;
         self.history_file_path = None;
+        self.history_loading = false;
+        self.history_detail_loading = false;
+        self.restoring = false;
+        self.clear_history_data();
+        self.selected_project = None;
+        self.tree_entries.clear();
+        self.tree_path.clear();
+        self.doc_path = None;
+        self.doc_content.clear();
+        self.doc_outline = outline::ParsedDocument {
+            entries: Vec::new(),
+            sections: Vec::new(),
+        };
+        self.backlinks.clear();
+        self.attachments.clear();
+        self.audit_entries.clear();
+        self.audit_projects.clear();
+        self.audit_selected_project = None;
+        self.api_reference = None;
+        self.search_results.clear();
+        self.search_open = false;
+        self.quick_open = false;
+        self.share_url = None;
         self.settings_tokens.clear();
         self.settings_users.clear();
         self.settings_token_secret = None;
@@ -3955,6 +4012,9 @@ impl XWikiApp {
     }
 
     fn friendly_api_error(error: &crate::api::ApiError) -> String {
+        if error.code == "response_too_large" {
+            return error.message.clone();
+        }
         match error.status {
             0 => "无法连接到服务，请检查地址和网络连接。".into(),
             401 | 403 => "服务拒绝了请求，请重新登录后再试。".into(),
@@ -4391,8 +4451,11 @@ impl XWikiApp {
                         .file_name()
                         .map(|name| name.to_string_lossy().to_string())
                         .unwrap_or_else(|| "imported.md".into());
-                    let content = std::fs::read_to_string(path)
-                        .map_err(|error| format!("读取 Markdown 失败: {error}"))?;
+                    let content = String::from_utf8(
+                        read_file_limited(path, MAX_IMPORT_FILE_BYTES)
+                            .map_err(|error| format!("读取 Markdown 失败: {error}"))?,
+                    )
+                    .map_err(|_| "Markdown 文件不是 UTF-8。".to_string())?;
                     Ok(vec![dto::ImportFile {
                         path: join_document_import_path(&base_path, &name),
                         content,
@@ -4624,6 +4687,7 @@ impl XWikiApp {
         cx: &mut Context<Self>,
     ) {
         let handle = cx.entity();
+        let files = Arc::new(files);
         let count = files.len();
         window.open_dialog(cx, move |dialog, _, cx| {
             let theme = cx.theme().clone();
@@ -4743,8 +4807,10 @@ impl XWikiApp {
             cx.notify();
             return;
         }
-        match std::fs::read(&source) {
-            Ok(bytes) if !bytes.is_empty() => self.confirm_bundle_import(window, name, bytes, cx),
+        match read_file_limited(std::path::Path::new(&source), MAX_IMPORT_TOTAL_BYTES) {
+            Ok(bytes) if !bytes.is_empty() => {
+                self.confirm_bundle_import(window, name, Arc::new(bytes), cx);
+            }
             Ok(_) => {
                 self.status_msg = Some("Bundle 文件为空。".into());
                 cx.notify();
@@ -4760,7 +4826,7 @@ impl XWikiApp {
         &mut self,
         window: &mut Window,
         name: String,
-        bytes: Vec<u8>,
+        bytes: Arc<Vec<u8>>,
         cx: &mut Context<Self>,
     ) {
         let handle = cx.entity();
@@ -4810,7 +4876,7 @@ impl XWikiApp {
         &mut self,
         name: String,
         description: String,
-        files: Vec<dto::UploadFile>,
+        files: Arc<Vec<dto::UploadFile>>,
         cx: &mut Context<Self>,
     ) {
         let Some(client) = self.client.clone() else {
@@ -4878,7 +4944,7 @@ impl XWikiApp {
         .detach();
     }
 
-    fn execute_bundle_import(&mut self, name: String, bytes: Vec<u8>, cx: &mut Context<Self>) {
+    fn execute_bundle_import(&mut self, name: String, bytes: Arc<Vec<u8>>, cx: &mut Context<Self>) {
         let Some(client) = self.client.clone() else {
             return;
         };
@@ -5193,15 +5259,24 @@ impl Render for XWikiApp {
 }
 
 fn collect_import_files(root: &std::path::Path) -> Result<Vec<dto::UploadFile>, String> {
-    if !root.is_dir() {
+    if !std::fs::symlink_metadata(root)
+        .map_err(|error| error.to_string())?
+        .is_dir()
+    {
         return Err("路径不是文件夹".into());
     }
     let mut pending = vec![(root.to_path_buf(), String::new())];
     let mut files = Vec::new();
+    let mut total_bytes = 0usize;
+    let mut directories_seen = 0usize;
     while let Some((directory, relative)) = pending.pop() {
         let entries = std::fs::read_dir(&directory).map_err(|error| error.to_string())?;
         for entry in entries {
             let entry = entry.map_err(|error| error.to_string())?;
+            let file_type = entry.file_type().map_err(|error| error.to_string())?;
+            if file_type.is_symlink() {
+                continue;
+            }
             let path = entry.path();
             let name = entry.file_name().to_string_lossy().to_string();
             if name == ".git" || name == ".DS_Store" {
@@ -5212,12 +5287,27 @@ fn collect_import_files(root: &std::path::Path) -> Result<Vec<dto::UploadFile>, 
             } else {
                 format!("{relative}/{name}")
             };
-            if path.is_dir() {
+            if file_type.is_dir() {
+                directories_seen = directories_seen.saturating_add(1);
+                if directories_seen > MAX_IMPORT_DIRECTORIES {
+                    return Err(format!(
+                        "文件夹层级项目过多，超过 {} 个目录限制",
+                        MAX_IMPORT_DIRECTORIES
+                    ));
+                }
                 pending.push((path, child_relative));
-            } else if path.is_file() {
-                let content = std::fs::read(&path).map_err(|error| error.to_string())?;
-                if content.len() > 5 * 1024 * 1024 {
-                    return Err(format!("文件 {child_relative} 超过 5 MiB 限制"));
+            } else if file_type.is_file() {
+                if files.len() >= MAX_IMPORT_FILES {
+                    return Err(format!("文件数量超过 {} 个限制", MAX_IMPORT_FILES));
+                }
+                let content = read_file_limited(&path, MAX_IMPORT_FILE_BYTES)
+                    .map_err(|error| format!("文件 {child_relative}: {error}"))?;
+                total_bytes = total_bytes.saturating_add(content.len());
+                if total_bytes > MAX_IMPORT_TOTAL_BYTES {
+                    return Err(format!(
+                        "导入内容超过 {} MiB 总大小限制",
+                        MAX_IMPORT_TOTAL_BYTES / (1 << 20)
+                    ));
                 }
                 files.push(dto::UploadFile {
                     path: child_relative,
@@ -5230,6 +5320,18 @@ fn collect_import_files(root: &std::path::Path) -> Result<Vec<dto::UploadFile>, 
     Ok(files)
 }
 
+fn read_file_limited(path: &std::path::Path, max_bytes: usize) -> Result<Vec<u8>, String> {
+    let file = std::fs::File::open(path).map_err(|error| error.to_string())?;
+    let mut content = Vec::new();
+    file.take(max_bytes as u64 + 1)
+        .read_to_end(&mut content)
+        .map_err(|error| error.to_string())?;
+    if content.len() > max_bytes {
+        return Err(format!("文件超过 {} MiB 限制", max_bytes / (1 << 20)));
+    }
+    Ok(content)
+}
+
 fn folder_path_prompt_options() -> PathPromptOptions {
     PathPromptOptions {
         files: false,
@@ -5239,10 +5341,7 @@ fn folder_path_prompt_options() -> PathPromptOptions {
     }
 }
 
-fn import_folder_picker_button(
-    folder: Entity<InputState>,
-    handle: Entity<XWikiApp>,
-) -> Button {
+fn import_folder_picker_button(folder: Entity<InputState>, handle: Entity<XWikiApp>) -> Button {
     Button::new("choose-import-folder")
         .secondary()
         .outline()
@@ -5279,7 +5378,7 @@ fn import_folder_picker_button(
 
 #[cfg(test)]
 mod import_path_prompt_tests {
-    use super::folder_path_prompt_options;
+    use super::{collect_import_files, folder_path_prompt_options, read_file_limited};
 
     #[test]
     fn project_import_picker_selects_one_directory() {
@@ -5289,6 +5388,30 @@ mod import_path_prompt_tests {
         assert!(options.directories);
         assert!(!options.multiple);
         assert!(options.prompt.is_some());
+    }
+
+    #[test]
+    fn bounded_file_reader_stops_before_loading_unbounded_input() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("sample.bin");
+        std::fs::write(&path, b"1234").unwrap();
+
+        assert!(read_file_limited(&path, 3).is_err());
+        assert_eq!(read_file_limited(&path, 4).unwrap(), b"1234");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn folder_import_skips_symlinked_directories() {
+        use std::os::unix::fs::symlink;
+
+        let dir = tempfile::tempdir().unwrap();
+        let nested = dir.path().join("nested");
+        std::fs::create_dir(&nested).unwrap();
+        symlink(dir.path(), nested.join("loop")).unwrap();
+
+        let files = collect_import_files(dir.path()).unwrap();
+        assert!(files.is_empty());
     }
 }
 
