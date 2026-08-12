@@ -403,6 +403,7 @@ export default function DocsViewerPage() {
 	const draftRef = useRef("");
 	const dirtyRef = useRef(false);
 	const [seed, setSeed] = useState<string | null>(null);
+	const [editBaseRevision, setEditBaseRevision] = useState<string | null>(null);
 	const [saving, setSaving] = useState(false);
 	// Lock state machine: idle (locked/read-only) -> opening (acquiring) ->
 	// held (editing) | blocked (another user holds the page).
@@ -496,6 +497,9 @@ export default function DocsViewerPage() {
 		queryFn: () => getPage(id, filePath, "raw"),
 		enabled: editing && !showHome,
 	});
+	useEffect(() => {
+		if (rawQuery.data?.revision && !editBaseRevision) setEditBaseRevision(rawQuery.data.revision);
+	}, [rawQuery.data?.revision, editBaseRevision]);
 
 	// --- Exclusive edit lock: unlock to edit, lock to commit & finish. ---
 
@@ -520,10 +524,22 @@ export default function DocsViewerPage() {
 	const startEditing = async () => {
 		if (lockState === "opening") return;
 		setLockState("opening");
-		const saved = localStorage.getItem(draftKey(id, filePath));
+		const savedRaw = localStorage.getItem(draftKey(id, filePath));
+		let saved: string | null = savedRaw;
+		let savedBase: string | null = null;
+		try {
+			if (savedRaw?.startsWith("{")) {
+				const parsed = JSON.parse(savedRaw) as { content?: string; baseRevision?: string };
+				saved = parsed.content ?? "";
+				savedBase = parsed.baseRevision ?? null;
+			}
+		} catch {
+			// Legacy plain-text drafts remain recoverable.
+		}
 		try {
 			await acquireLock(id, filePath);
 			setSeed(saved ?? null);
+			setEditBaseRevision(savedBase);
 			markClean();
 			setLockHolder(null);
 			setLockState("held");
@@ -543,14 +559,17 @@ export default function DocsViewerPage() {
 
 	// Commit the current draft as one changeset (Cmd/Ctrl+S). One edit = one
 	// commit; message stays empty so the backend stamps 时间 + 用户名.
-	const commitDraft = async () => {
-		if (!editing || saving) return;
+	const commitDraft = async (): Promise<boolean> => {
+		if (!editing || saving) return false;
+		if (!editBaseRevision) {
+			toast.error("文档版本尚未加载，请稍后再试");
+			return false;
+		}
 		setSaving(true);
 		setSaveState("saving");
 		try {
-			const rev = await getRevision(id);
 			await submitChangeset(id, {
-				base_revision: rev.revision,
+				base_revision: editBaseRevision,
 				// 留空则后端生成默认：时间 + 操作者 修改 <path>
 				message: commitMessage.trim(),
 				changes: [{ op: "update", path: filePath, content: draftRef.current }],
@@ -565,15 +584,17 @@ export default function DocsViewerPage() {
 			// Keep the raw cache in sync so a re-edit of the same file shows
 			// the just-committed content, not the pre-commit snapshot.
 			await queryClient.invalidateQueries({ queryKey: ["docs", "raw"] });
+			const next = await queryClient.fetchQuery({ queryKey: ["docs", "raw", id, filePath], queryFn: () => getPage(id, filePath, "raw") });
+			if (next.revision) setEditBaseRevision(next.revision);
+			return true;
 		} catch (err) {
 			setSaveState("idle");
 			if ((err as { status?: number })?.status === 409) {
 				toast.error("文档已被他人修改，请刷新后重试");
-				setEditing(false);
-				setLockState("idle");
 			} else {
 				toast.error(err instanceof Error ? err.message : "保存失败");
 			}
+			return false;
 		} finally {
 			setSaving(false);
 		}
@@ -584,7 +605,7 @@ export default function DocsViewerPage() {
 		if (!editing || saving) return;
 		setCommitOpen(false);
 		try {
-			if (dirty) await commitDraft();
+			if (dirty && !(await commitDraft())) return;
 		} catch {
 			return; // commit failed; stay editing so nothing is lost
 		}
@@ -620,10 +641,11 @@ export default function DocsViewerPage() {
 		if (!editing || !filePath) return;
 		const beat = () => {
 			heartbeatLock(id, filePath).catch(() => {
+				try {
+					localStorage.setItem(draftKey(id, filePath), JSON.stringify({ content: draftRef.current, baseRevision: editBaseRevision }));
+				} catch { /* best effort */ }
 				setEditing(false);
 				setLockState("idle");
-				markClean();
-				localStorage.removeItem(draftKey(id, filePath));
 				toast.error("编辑锁已失效，已回到只读模式");
 			});
 		};
@@ -638,13 +660,16 @@ export default function DocsViewerPage() {
 		if (!editing || !dirtyRef.current) return;
 		const t = window.setTimeout(() => {
 			try {
-				localStorage.setItem(draftKey(id, filePath), draftRef.current);
+				localStorage.setItem(draftKey(id, filePath), JSON.stringify({
+					content: draftRef.current,
+					baseRevision: editBaseRevision,
+				}));
 			} catch {
 				// quota exceeded — ignore, the draft lives in memory anyway
 			}
 		}, 800);
 		return () => window.clearTimeout(t);
-	}, [editing, dirty, id, filePath]);
+	}, [editing, dirty, id, filePath, editBaseRevision]);
 
 	// Navigating to a different target (another file, a directory, or the docs
 	// root) releases the lock and ends the edit session. Without this,

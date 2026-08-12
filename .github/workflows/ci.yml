@@ -1,0 +1,25 @@
+name: CI
+on:
+  push:
+  pull_request:
+jobs:
+  main:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: '1.24' }
+      - run: go test ./...
+      - run: go vet ./...
+      - run: go build ./cmd/xwiki
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - uses: pnpm/action-setup@v4
+        with: { version: 10 }
+      - run: pnpm install --frozen-lockfile
+        working-directory: web
+      - run: pnpm test -- --run
+        working-directory: web
+      - run: pnpm build
+        working-directory: web
+      - run: docker build -t xwiki-ci .

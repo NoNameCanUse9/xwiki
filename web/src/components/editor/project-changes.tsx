@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { ChevronDown, FileText, GitCommitHorizontal } from "lucide-react";
 import {
@@ -101,6 +101,12 @@ function CommitChange({ projectId, commit, onOpen }: { projectId: string; commit
 
 /** Project-level roadmap of recent document changes, intended for humans and agents. */
 export function ProjectChanges({ projectId, onOpen }: { projectId: string; onOpen: (path: string) => void }) {
+	const [query, setQuery] = useState("");
+	const [searchQuery, setSearchQuery] = useState("");
+	useEffect(() => {
+		const timer = window.setTimeout(() => setSearchQuery(query), 300);
+		return () => window.clearTimeout(timer);
+	}, [query]);
 	const {
 		data,
 		isLoading,
@@ -109,11 +115,13 @@ export function ProjectChanges({ projectId, onOpen }: { projectId: string; onOpe
 		fetchNextPage,
 		isFetchingNextPage,
 	} = useInfiniteQuery({
-		queryKey: ["commits", projectId],
-		queryFn: ({ pageParam }) => listCommits(projectId, 20, pageParam),
+		queryKey: ["commits", projectId, searchQuery],
+		queryFn: ({ pageParam }) => searchQuery
+			? listCommits(projectId, 20, pageParam, searchQuery)
+			: listCommits(projectId, 20, pageParam),
 		initialPageParam: 0,
 		getNextPageParam: (lastPage, pages) =>
-			lastPage.commits.length === 20
+			(lastPage.has_more ?? lastPage.commits.length === 20)
 				? pages.reduce((total, page) => total + page.commits.length, 0)
 				: undefined,
 		enabled: projectId.length > 0,
@@ -128,6 +136,12 @@ export function ProjectChanges({ projectId, onOpen }: { projectId: string; onOpe
 				</div>
 				{data && <span className="mono-label text-[var(--color-ink-3)]">已加载 {commits.length} 次</span>}
 			</div>
+			<input
+				value={query}
+				onChange={(event) => setQuery(event.target.value.slice(0, 200))}
+				placeholder="搜索提交消息、作者或 SHA"
+				className="w-full border-b border-[var(--color-rule)] bg-transparent px-1 py-2 text-sm outline-none placeholder:text-[var(--color-ink-3)] focus:border-[var(--color-accent)]"
+			/>
 			<div className="hairline-panel overflow-hidden">
 				{isLoading && <p className="px-4 py-6 text-center text-sm text-[var(--color-ink-3)]">loading…</p>}
 				{isError && <p className="px-4 py-6 text-center text-sm text-[var(--color-destructive)]">变更记录加载失败</p>}

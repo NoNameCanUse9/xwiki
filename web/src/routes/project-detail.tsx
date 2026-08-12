@@ -1,4 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ArrowLeft, BookOpen, FolderGit2, History, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
@@ -82,6 +83,12 @@ function CommitRow({ projectId, commit }: { projectId: string; commit: CommitSum
 
 export default function ProjectDetailPage() {
   const { id = "" } = useParams();
+  const [commitQuery, setCommitQuery] = useState("");
+  const [commitSearch, setCommitSearch] = useState("");
+  useEffect(() => {
+    const timer = window.setTimeout(() => setCommitSearch(commitQuery), 300);
+    return () => window.clearTimeout(timer);
+  }, [commitQuery]);
   const { data, isLoading, isError } = useQuery({
     queryKey: ["projects", id],
     queryFn: () => getProject(id),
@@ -97,8 +104,8 @@ export default function ProjectDetailPage() {
   const homeHtml = homeQuery.data?.content ?? "";
 
   const commitsQuery = useQuery({
-    queryKey: ["commits", id],
-    queryFn: () => listCommits(id, 5),
+    queryKey: ["commits", id, commitSearch],
+    queryFn: () => listCommits(id, 5, 0, commitSearch),
     enabled: id.length > 0,
   });
 
@@ -181,6 +188,12 @@ export default function ProjectDetailPage() {
                     </Button>
                   </Link>
                 </div>
+                <input
+                  value={commitQuery}
+                  onChange={(event) => setCommitQuery(event.target.value.slice(0, 200))}
+                  placeholder="搜索提交消息、作者或 SHA"
+                  className="w-full border-b border-[var(--color-rule)] bg-transparent px-1 py-2 text-sm outline-none placeholder:text-[var(--color-ink-3)] focus:border-[var(--color-accent)]"
+                />
                 {homeQuery.isLoading && (
                   <p className="mono-label text-[var(--color-ink-3)]">loading…</p>
                 )}

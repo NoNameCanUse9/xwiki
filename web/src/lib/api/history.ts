@@ -26,6 +26,7 @@ export interface CommitDiffResponse {
 
 export interface CommitsResponse {
   commits: CommitSummary[];
+  has_more?: boolean;
 }
 
 export interface FileHistoryResponse {
@@ -33,9 +34,11 @@ export interface FileHistoryResponse {
   commits: CommitSummary[];
 }
 
-export function listCommits(projectId: string, limit = 20, offset = 0) {
+export function listCommits(projectId: string, limit = 20, offset = 0, query = "") {
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+  if (query) params.set("q", query);
   return api<CommitsResponse>(
-    `/projects/${encodeURIComponent(projectId)}/commits?limit=${limit}&offset=${offset}`,
+    `/projects/${encodeURIComponent(projectId)}/commits?${params.toString()}`,
   );
 }
 
