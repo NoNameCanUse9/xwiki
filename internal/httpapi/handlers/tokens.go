@@ -85,6 +85,9 @@ func (h *TokenHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 
 // Audit handles GET /api/v1/projects/{id}/audit (session only).
 func (h *TokenHandler) Audit(w http.ResponseWriter, r *http.Request) {
+	if !sessionOnly(w, r) {
+		return
+	}
 	projectID := request.PathParam(r, "id")
 	entries, err := h.svc.StoreRecent(r.Context(), projectID, 50)
 	if err != nil {

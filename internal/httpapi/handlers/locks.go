@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"xwiki/internal/agent"
 	"xwiki/internal/httpapi/middleware"
 	"xwiki/internal/httpapi/request"
 	"xwiki/internal/httpapi/response"
@@ -25,13 +26,14 @@ const (
 
 // LockHandler serves exclusive per-page edit locks.
 type LockHandler struct {
-	db  *sql.DB
-	log *slog.Logger
+	db       *sql.DB
+	agentSvc *agent.Service
+	log      *slog.Logger
 }
 
 // NewLockHandler builds the edit-lock handler.
-func NewLockHandler(db *sql.DB, log *slog.Logger) *LockHandler {
-	return &LockHandler{db: db, log: log}
+func NewLockHandler(db *sql.DB, agentSvc *agent.Service, log *slog.Logger) *LockHandler {
+	return &LockHandler{db: db, agentSvc: agentSvc, log: log}
 }
 
 // LockInfo is the wire representation of an edit lock.
@@ -105,6 +107,9 @@ var (
 // Status handles GET /api/v1/projects/{id}/locks?path=…
 func (h *LockHandler) Status(w http.ResponseWriter, r *http.Request) {
 	projectID := request.PathParam(r, "id")
+	if !authorizeAgentRead(h.agentSvc, w, r, projectID) {
+		return
+	}
 	path := r.URL.Query().Get("path")
 	if !validLockPath(path) {
 		response.WriteError(w, r, http.StatusBadRequest, "invalid_lock_path", "a valid path query parameter is required")
@@ -123,6 +128,9 @@ func (h *LockHandler) Status(w http.ResponseWriter, r *http.Request) {
 // 409 page_locked when another user holds the lock.
 func (h *LockHandler) Acquire(w http.ResponseWriter, r *http.Request) {
 	projectID := request.PathParam(r, "id")
+	if !authorizeAgentWrite(h.agentSvc, w, r, projectID) {
+		return
+	}
 	path := r.URL.Query().Get("path")
 	if !validLockPath(path) {
 		response.WriteError(w, r, http.StatusBadRequest, "invalid_lock_path", "a valid path query parameter is required")
@@ -167,6 +175,9 @@ func (h *LockHandler) Acquire(w http.ResponseWriter, r *http.Request) {
 // Only the holder may release; releasing a missing/expired lock is a no-op.
 func (h *LockHandler) Release(w http.ResponseWriter, r *http.Request) {
 	projectID := request.PathParam(r, "id")
+	if !authorizeAgentWrite(h.agentSvc, w, r, projectID) {
+		return
+	}
 	path := r.URL.Query().Get("path")
 	if !validLockPath(path) {
 		response.WriteError(w, r, http.StatusBadRequest, "invalid_lock_path", "a valid path query parameter is required")
@@ -201,6 +212,9 @@ func (h *LockHandler) Release(w http.ResponseWriter, r *http.Request) {
 // the editor can surface the conflict instead of editing a dead lock.
 func (h *LockHandler) Heartbeat(w http.ResponseWriter, r *http.Request) {
 	projectID := request.PathParam(r, "id")
+	if !authorizeAgentWrite(h.agentSvc, w, r, projectID) {
+		return
+	}
 	path := r.URL.Query().Get("path")
 	if !validLockPath(path) {
 		response.WriteError(w, r, http.StatusBadRequest, "invalid_lock_path", "a valid path query parameter is required")
@@ -238,6 +252,9 @@ func (h *LockHandler) Heartbeat(w http.ResponseWriter, r *http.Request) {
 // discarded); the confirm dialog on the client spells that out.
 func (h *LockHandler) ForceRelease(w http.ResponseWriter, r *http.Request) {
 	projectID := request.PathParam(r, "id")
+	if !sessionOnly(w, r) {
+		return
+	}
 	path := r.URL.Query().Get("path")
 	if !validLockPath(path) {
 		response.WriteError(w, r, http.StatusBadRequest, "invalid_lock_path", "a valid path query parameter is required")

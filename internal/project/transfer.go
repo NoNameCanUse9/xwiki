@@ -391,7 +391,18 @@ func (s *Service) ImportBundle(ctx context.Context, input ImportBundleInput) (*B
 	if err := bundleFile.Close(); err != nil {
 		return nil, err
 	}
-	if _, err := gitOutputPlain(context.Background(), "bundle", "verify", bundlePath); err != nil {
+	// `git bundle verify` needs a repository context to check prerequisites.
+	// The server runs from a container directory without .git, so create a
+	// disposable bare repository instead of relying on the process cwd.
+	verifyDir, err := os.MkdirTemp("", "xwiki-bundle-verify-*")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(verifyDir)
+	if _, err := gitOutput(ctx, verifyDir, "init", "--bare", verifyDir); err != nil {
+		return nil, fmt.Errorf("bundle verifier init: %w", err)
+	}
+	if _, err := gitOutput(ctx, verifyDir, "bundle", "verify", bundlePath); err != nil {
 		return nil, ErrInvalid // not a valid bundle
 	}
 

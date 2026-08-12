@@ -1,9 +1,11 @@
 package project
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 )
@@ -50,6 +52,16 @@ const MaxDiffBytes = 1 << 20 // 1 MiB
 
 // ListCommits returns commit summaries, newest first.
 func (s *Service) ListCommits(ctx context.Context, projectID string, limit, offset int) ([]CommitSummary, error) {
+	commits, _, err := s.SearchCommits(ctx, projectID, "", limit, offset)
+	return commits, err
+}
+
+// SearchCommits returns commit summaries newest first. Query matches the
+// commit subject, author name, or SHA prefix. It scans the reachable history
+// incrementally and stops once the requested page plus one extra result is
+// found, so callers can render a stable has-more indicator without loading
+// the whole history into memory.
+func (s *Service) SearchCommits(ctx context.Context, projectID, query string, limit, offset int) ([]CommitSummary, bool, error) {
 	if limit <= 0 {
 		limit = 20
 	}
@@ -58,21 +70,63 @@ func (s *Service) ListCommits(ctx context.Context, projectID string, limit, offs
 	}
 	repo, err := s.openRepoChecked(ctx, projectID)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	branch, err := repo.DefaultBranch(ctx)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	out, err := gitOutput(ctx, repo.Dir, "log",
-		"--format=%H%x1f%s%x1f%an%x1f%aI",
-		"-n", fmt.Sprintf("%d", limit),
-		"--skip", fmt.Sprintf("%d", offset),
-		branch)
+	q := strings.ToLower(strings.TrimSpace(query))
+	matched := make([]CommitSummary, 0, limit+1)
+	cmd := exec.CommandContext(ctx, "git", "--git-dir", repo.Dir, "log", "--format=%H%x1f%s%x1f%an%x1f%aI", branch)
+	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return nil, fmt.Errorf("log: %w", err)
+		return nil, false, fmt.Errorf("log: %w", err)
 	}
-	return parseCommitSummaries(out), nil
+	if err := cmd.Start(); err != nil {
+		return nil, false, fmt.Errorf("log: %w", err)
+	}
+	scanner := bufio.NewScanner(stdout)
+	seen := 0
+	for scanner.Scan() {
+		parts := strings.Split(scanner.Text(), "\x1f")
+		if len(parts) < 4 {
+			continue
+		}
+		commit := CommitSummary{SHA: parts[0], Message: parts[1], Author: parts[2], Date: parts[3]}
+		if q != "" && !strings.Contains(strings.ToLower(commit.Message), q) &&
+			!strings.Contains(strings.ToLower(commit.Author), q) &&
+			!strings.HasPrefix(strings.ToLower(commit.SHA), q) {
+			continue
+		}
+		if seen < offset {
+			seen++
+			continue
+		}
+		matched = append(matched, commit)
+		if len(matched) >= limit+1 {
+			break
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		_ = cmd.Wait()
+		return nil, false, fmt.Errorf("log: %w", err)
+	}
+	if err := cmd.Process.Kill(); err != nil {
+		_ = err
+	}
+	if err := cmd.Wait(); err != nil && ctx.Err() == nil {
+		// Killing after the extra result is intentional; git may report a
+		// signal exit, which is not a history failure.
+	}
+	hasMore := len(matched) > limit
+	if hasMore {
+		matched = matched[:limit]
+	}
+	if len(matched) == 0 {
+		return []CommitSummary{}, false, nil
+	}
+	return matched, hasMore, nil
 }
 
 func parseCommitSummaries(out string) []CommitSummary {

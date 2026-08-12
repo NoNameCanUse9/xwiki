@@ -160,7 +160,12 @@ func (h *DocsHandler) Page(w http.ResponseWriter, r *http.Request) {
 	if at := r.URL.Query().Get("at"); at != "" {
 		rev = at
 	}
-	content, err := repo.ReadBlobAt(r.Context(), rev, filePath)
+	resolvedRevision, err := repo.ResolveRevision(r.Context(), rev)
+	if err != nil {
+		response.WriteError(w, r, http.StatusNotFound, "doc_not_found", "document revision not found")
+		return
+	}
+	content, err := repo.ReadBlobAt(r.Context(), resolvedRevision, filePath)
 	if err != nil {
 		response.WriteError(w, r, http.StatusNotFound, "doc_not_found", "document not found")
 		return
@@ -169,7 +174,7 @@ func (h *DocsHandler) Page(w http.ResponseWriter, r *http.Request) {
 		response.WriteError(w, r, http.StatusRequestEntityTooLarge, "doc_too_large", "document exceeds size limit")
 		return
 	}
-	resp := map[string]any{"path": filePath, "format": format}
+	resp := map[string]any{"path": filePath, "format": format, "revision": resolvedRevision}
 	if format == "base64" {
 		resp["encoding"] = "base64"
 		resp["content"] = base64.StdEncoding.EncodeToString(content)
@@ -371,6 +376,11 @@ func (h *DocsHandler) Home(w http.ResponseWriter, r *http.Request) {
 		if len(content) > maxDocBlobBytes {
 			continue
 		}
+		revision, revErr := repo.Revision(r.Context())
+		if revErr != nil {
+			response.WriteError(w, r, http.StatusInternalServerError, "internal_error", "could not resolve revision")
+			return
+		}
 		var buf bytes.Buffer
 		if err := h.markdown.Convert(markdownForRender(content, projectID), &buf); err != nil {
 			h.log.Error("markdown render failed", "error", err, "request_id", request.RequestID(r))
@@ -378,7 +388,7 @@ func (h *DocsHandler) Home(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		response.WriteJSON(w, http.StatusOK, map[string]any{
-			"path": candidate, "format": "html", "content": buf.String(),
+			"path": candidate, "format": "html", "content": buf.String(), "revision": revision,
 		})
 		return
 	}

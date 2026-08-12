@@ -711,6 +711,10 @@ paths:
           in: query
           required: false
           schema: { type: integer, default: 0 }
+        - name: q
+          in: query
+          required: false
+          schema: { type: string, maxLength: 200 }
       responses:
         "200":
           description: OK
@@ -718,12 +722,14 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [commits]
+                required: [commits, has_more]
                 properties:
                   commits:
                     type: array
                     items:
                       $ref: "#/components/schemas/Commit"
+                  has_more:
+                    type: boolean
   /projects/{id}/commits/{sha}:
     get:
       summary: Commit 详情
@@ -943,10 +949,10 @@ components:
         application/json:
           schema:
             type: object
-            required: [lock]
             properties:
               lock:
                 $ref: "#/components/schemas/Lock"
+                nullable: true
   schemas:
     Error:
       type: object
@@ -1121,7 +1127,7 @@ components:
           type: string
     DocPage:
       type: object
-      required: [path, format, content]
+      required: [path, format, content, revision]
       properties:
         path:
           type: string
@@ -1129,6 +1135,8 @@ components:
           type: string
           enum: [raw, html, base64]
         content:
+          type: string
+        revision:
           type: string
         encoding:
           type: string

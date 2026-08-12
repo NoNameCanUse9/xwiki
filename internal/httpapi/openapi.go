@@ -6,9 +6,9 @@ import (
 	"net/http"
 	"sync"
 
+	"gopkg.in/yaml.v3"
 	"xwiki/internal/httpapi/response"
 	"xwiki/internal/project"
-	"gopkg.in/yaml.v3"
 )
 
 //go:embed openapi.yaml

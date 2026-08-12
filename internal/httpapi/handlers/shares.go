@@ -19,10 +19,10 @@ import (
 // renders that page as standalone HTML with no authentication, so the
 // link can be handed out directly (to humans or agents).
 type ShareHandler struct {
-	db        *sql.DB
-	docs      *DocsHandler
+	db         *sql.DB
+	docs       *DocsHandler
 	projectSvc *project.Service
-	log       *slog.Logger
+	log        *slog.Logger
 }
 
 // NewShareHandler builds the share handler.
@@ -55,7 +55,7 @@ func (h *ShareHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	projectID := request.PathParam(r, "id")
-	if !authorizeAgentRead(h.docs.agentSvc, w, r, projectID) {
+	if !authorizeAgentWrite(h.docs.agentSvc, w, r, projectID) {
 		return
 	}
 	// The page must exist (project not found -> 404 for the caller).

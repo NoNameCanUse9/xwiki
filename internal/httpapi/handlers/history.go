@@ -5,7 +5,9 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 
+	"xwiki/internal/agent"
 	"xwiki/internal/config"
 	"xwiki/internal/httpapi/middleware"
 	"xwiki/internal/httpapi/request"
@@ -19,29 +21,41 @@ type HistoryHandler struct {
 	cfg       *config.Config
 	svc       *project.Service
 	searchSvc *search.Service
+	agentSvc  *agent.Service
 	log       *slog.Logger
 }
 
-func NewHistoryHandler(cfg *config.Config, svc *project.Service, searchSvc *search.Service, log *slog.Logger) *HistoryHandler {
-	return &HistoryHandler{cfg: cfg, svc: svc, searchSvc: searchSvc, log: log}
+func NewHistoryHandler(cfg *config.Config, svc *project.Service, searchSvc *search.Service, agentSvc *agent.Service, log *slog.Logger) *HistoryHandler {
+	return &HistoryHandler{cfg: cfg, svc: svc, searchSvc: searchSvc, agentSvc: agentSvc, log: log}
 }
 
 // Commits handles GET /api/v1/projects/{id}/commits.
 func (h *HistoryHandler) Commits(w http.ResponseWriter, r *http.Request) {
 	projectID := request.PathParam(r, "id")
+	if !authorizeAgentRead(h.agentSvc, w, r, projectID) {
+		return
+	}
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
-	commits, err := h.svc.ListCommits(r.Context(), projectID, limit, offset)
+	query := strings.TrimSpace(r.URL.Query().Get("q"))
+	if len(query) > 200 {
+		response.WriteError(w, r, http.StatusBadRequest, "invalid_query", "query is too long")
+		return
+	}
+	commits, hasMore, err := h.svc.SearchCommits(r.Context(), projectID, query, limit, offset)
 	if err != nil {
 		h.writeRepoError(w, r, err)
 		return
 	}
-	response.WriteJSON(w, http.StatusOK, map[string]any{"commits": commits})
+	response.WriteJSON(w, http.StatusOK, map[string]any{"commits": commits, "has_more": hasMore})
 }
 
 // Commit handles GET /api/v1/projects/{id}/commits/{sha}.
 func (h *HistoryHandler) Commit(w http.ResponseWriter, r *http.Request) {
 	projectID := request.PathParam(r, "id")
+	if !authorizeAgentRead(h.agentSvc, w, r, projectID) {
+		return
+	}
 	sha := request.PathParam(r, "sha")
 	detail, err := h.svc.GetCommit(r.Context(), projectID, sha)
 	if err != nil {
@@ -54,6 +68,9 @@ func (h *HistoryHandler) Commit(w http.ResponseWriter, r *http.Request) {
 // FileHistory handles GET /api/v1/projects/{id}/files/{path}/history.
 func (h *HistoryHandler) FileHistory(w http.ResponseWriter, r *http.Request) {
 	projectID := request.PathParam(r, "id")
+	if !authorizeAgentRead(h.agentSvc, w, r, projectID) {
+		return
+	}
 	filePath := request.PathParam(r, "*")
 	commits, err := h.svc.FileHistory(r.Context(), projectID, filePath)
 	if err != nil {
@@ -66,6 +83,9 @@ func (h *HistoryHandler) FileHistory(w http.ResponseWriter, r *http.Request) {
 // Diff handles GET /api/v1/projects/{id}/commits/{sha}/diff?format=numstat|patch.
 func (h *HistoryHandler) Diff(w http.ResponseWriter, r *http.Request) {
 	projectID := request.PathParam(r, "id")
+	if !authorizeAgentRead(h.agentSvc, w, r, projectID) {
+		return
+	}
 	sha := request.PathParam(r, "sha")
 	format := r.URL.Query().Get("format")
 	if format == "" {
@@ -84,6 +104,9 @@ func (h *HistoryHandler) Diff(w http.ResponseWriter, r *http.Request) {
 // Revert handles POST /api/v1/projects/{id}/commits/{sha}/revert.
 func (h *HistoryHandler) Revert(w http.ResponseWriter, r *http.Request) {
 	projectID := request.PathParam(r, "id")
+	if !authorizeAgentWrite(h.agentSvc, w, r, projectID) {
+		return
+	}
 	sha := request.PathParam(r, "sha")
 	var body struct {
 		Message string `json:"message"`

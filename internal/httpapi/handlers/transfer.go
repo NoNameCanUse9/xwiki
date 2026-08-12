@@ -11,18 +11,20 @@ import (
 	"xwiki/internal/httpapi/request"
 	"xwiki/internal/httpapi/response"
 	"xwiki/internal/project"
+	"xwiki/internal/search"
 )
 
 // TransferHandler serves import/export endpoints.
 type TransferHandler struct {
-	cfg      *config.Config
-	svc      *project.Service
-	agentSvc *agent.Service
-	log      *slog.Logger
+	cfg       *config.Config
+	svc       *project.Service
+	agentSvc  *agent.Service
+	searchSvc *search.Service
+	log       *slog.Logger
 }
 
-func NewTransferHandler(cfg *config.Config, svc *project.Service, agentSvc *agent.Service, log *slog.Logger) *TransferHandler {
-	return &TransferHandler{cfg: cfg, svc: svc, agentSvc: agentSvc, log: log}
+func NewTransferHandler(cfg *config.Config, svc *project.Service, agentSvc *agent.Service, searchSvc *search.Service, log *slog.Logger) *TransferHandler {
+	return &TransferHandler{cfg: cfg, svc: svc, agentSvc: agentSvc, searchSvc: searchSvc, log: log}
 }
 
 // ExportZip handles GET /api/v1/projects/{id}/export.zip.
@@ -62,6 +64,9 @@ func (h *TransferHandler) ExportBundle(w http.ResponseWriter, r *http.Request) {
 // Import handles POST /api/v1/projects/{id}/import.
 func (h *TransferHandler) Import(w http.ResponseWriter, r *http.Request) {
 	projectID := request.PathParam(r, "id")
+	if !authorizeAgentWrite(h.agentSvc, w, r, projectID) {
+		return
+	}
 	var input project.ImportZipInput
 	if err := request.DecodeJSON(w, r, &input, h.cfg.MaxBodyBytes*4); err != nil {
 		response.WriteError(w, r, http.StatusBadRequest, "invalid_import", "invalid import body")
@@ -91,6 +96,9 @@ func (h *TransferHandler) ImportRepo(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		h.writeError(w, r, err)
 		return
+	}
+	if h.searchSvc != nil {
+		_, _ = h.searchSvc.ReindexProject(r.Context(), res.Project.ID)
 	}
 	_ = h.agentSvc.Audit(r.Context(), "user", middleware.ActorID(r), res.Project.ID,
 		"import.repo", "", url, request.RequestID(r))
@@ -132,6 +140,9 @@ func (h *TransferHandler) ImportBundle(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		h.writeError(w, r, err)
 		return
+	}
+	if h.searchSvc != nil {
+		_, _ = h.searchSvc.ReindexProject(r.Context(), res.Project.ID)
 	}
 	_ = h.agentSvc.Audit(r.Context(), "user", middleware.ActorID(r), res.Project.ID,
 		"import.bundle", "", name, request.RequestID(r))
