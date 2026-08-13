@@ -19,13 +19,13 @@ import (
 	"github.com/yuin/goldmark/renderer"
 	"github.com/yuin/goldmark/util"
 
-	"agentdocs/internal/markdownx"
+	"xwiki/internal/markdownx"
 
-	"agentdocs/internal/agent"
-	"agentdocs/internal/config"
-	"agentdocs/internal/httpapi/request"
-	"agentdocs/internal/httpapi/response"
-	"agentdocs/internal/project"
+	"xwiki/internal/agent"
+	"xwiki/internal/config"
+	"xwiki/internal/httpapi/request"
+	"xwiki/internal/httpapi/response"
+	"xwiki/internal/project"
 )
 
 // maxDocBlobBytes is the readable document size cap (see project.MaxDocBlobBytes).
@@ -176,7 +176,7 @@ func (h *DocsHandler) Page(w http.ResponseWriter, r *http.Request) {
 		resp["content"] = base64.StdEncoding.EncodeToString(content)
 	} else if format == "html" {
 		var buf bytes.Buffer
-		if err := h.markdown.Convert(rewriteWikiLinks(content, projectID), &buf); err != nil {
+		if err := h.markdown.Convert(markdownForRender(content, projectID), &buf); err != nil {
 			h.log.Error("markdown render failed", "error", err, "request_id", request.RequestID(r))
 			response.WriteError(w, r, http.StatusInternalServerError, "internal_error", "could not render document")
 			return
@@ -265,7 +265,7 @@ func (h *DocsHandler) renderDocHTML(r *http.Request, projectID, filePath string)
 		return "", errDocTooLarge
 	}
 	var buf bytes.Buffer
-	if err := h.markdown.Convert(rewriteWikiLinks(content, projectID), &buf); err != nil {
+	if err := h.markdown.Convert(markdownForRender(content, projectID), &buf); err != nil {
 		return "", err
 	}
 	title := filePath
@@ -306,6 +306,43 @@ func rewriteWikiLinks(content []byte, projectID string) []byte {
 	})
 }
 
+// markdownForRender removes YAML front matter from rendered HTML while
+// preserving it in raw reads and editor content. A delimiter only counts at
+// the start of the file and must have a matching closing delimiter, so an
+// ordinary Markdown horizontal rule is left untouched.
+func markdownForRender(content []byte, projectID string) []byte {
+	return rewriteWikiLinks(stripYAMLFrontMatter(content), projectID)
+}
+
+func stripYAMLFrontMatter(content []byte) []byte {
+	remaining := content
+	if bytes.HasPrefix(remaining, []byte{0xef, 0xbb, 0xbf}) {
+		remaining = remaining[3:]
+	}
+	firstEnd := bytes.IndexByte(remaining, '\n')
+	if firstEnd < 0 || string(bytes.TrimSuffix(remaining[:firstEnd], []byte{'\r'})) != "---" {
+		return content
+	}
+	for offset := firstEnd + 1; offset <= len(remaining); {
+		next := bytes.IndexByte(remaining[offset:], '\n')
+		lineEnd := len(remaining)
+		afterLine := len(remaining)
+		if next >= 0 {
+			lineEnd = offset + next
+			afterLine = lineEnd + 1
+		}
+		line := string(bytes.TrimSuffix(remaining[offset:lineEnd], []byte{'\r'}))
+		if line == "---" || line == "..." {
+			return remaining[afterLine:]
+		}
+		if next < 0 {
+			break
+		}
+		offset = afterLine
+	}
+	return content
+}
+
 // Home handles GET /api/v1/projects/{id}/docs/home — renders README.md,
 // falling back to docs/README.md.
 func (h *DocsHandler) Home(w http.ResponseWriter, r *http.Request) {
@@ -335,14 +372,19 @@ func (h *DocsHandler) Home(w http.ResponseWriter, r *http.Request) {
 		if len(content) > maxDocBlobBytes {
 			continue
 		}
+		revision, revErr := repo.Revision(r.Context())
+		if revErr != nil {
+			response.WriteError(w, r, http.StatusInternalServerError, "internal_error", "could not resolve revision")
+			return
+		}
 		var buf bytes.Buffer
-		if err := h.markdown.Convert(rewriteWikiLinks(content, projectID), &buf); err != nil {
+		if err := h.markdown.Convert(markdownForRender(content, projectID), &buf); err != nil {
 			h.log.Error("markdown render failed", "error", err, "request_id", request.RequestID(r))
 			response.WriteError(w, r, http.StatusInternalServerError, "internal_error", "could not render document")
 			return
 		}
 		response.WriteJSON(w, http.StatusOK, map[string]any{
-			"path": candidate, "format": "html", "content": buf.String(),
+			"path": candidate, "format": "html", "content": buf.String(), "revision": revision,
 		})
 		return
 	}

@@ -8,7 +8,7 @@ import (
 )
 
 // ErrDataLocked reports that another AgentDocs process owns the data directory.
-var ErrDataLocked = errors.New("agentdocs data directory is locked")
+var ErrDataLocked = errors.New("xwiki data directory is locked")
 
 // DataLock is an advisory, cross-process lock for one data directory.
 // The lock file lives beside the data directory so restore can replace the

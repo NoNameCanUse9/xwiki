@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"agentdocs/internal/platform/id"
+	"xwiki/internal/platform/id"
 )
 
 // ZipFile is one entry of an import payload.
@@ -115,7 +115,7 @@ func (s *Service) ImportZip(ctx context.Context, projectID string, input ImportZ
 		BaseRevision: input.BaseRevision,
 		Message:      message,
 		Changes:      changes,
-	}, CommitAuthor{Name: "import", Email: "import@agentdocs.local"})
+	}, CommitAuthor{Name: "import", Email: "import@xwiki.local"})
 	if err != nil {
 		return nil, err
 	}
@@ -128,7 +128,7 @@ func (s *Service) ExportBundle(ctx context.Context, projectID string) ([]byte, e
 	if err != nil {
 		return nil, err
 	}
-	tmp, err := os.CreateTemp("", "agentdocs-bundle-*.bundle")
+	tmp, err := os.CreateTemp("", "xwiki-bundle-*.bundle")
 	if err != nil {
 		return nil, err
 	}
@@ -256,7 +256,7 @@ func (s *Service) ImportFolder(ctx context.Context, input ImportFolderInput) (*I
 
 	// Build a temporary non-bare repository, write all files, then convert
 	// to bare and move into the target location.
-	tmpDir, err := os.MkdirTemp("", "agentdocs-folder-import-*")
+	tmpDir, err := os.MkdirTemp("", "xwiki-folder-import-*")
 	if err != nil {
 		return nil, fmt.Errorf("create temp dir: %w", err)
 	}
@@ -391,7 +391,7 @@ func (s *Service) ImportBundle(ctx context.Context, input ImportBundleInput) (*B
 	if len(input.Bundle) == 0 {
 		return nil, ErrInvalid
 	}
-	bundleFile, err := os.CreateTemp("", "agentdocs-in-*.bundle")
+	bundleFile, err := os.CreateTemp("", "xwiki-in-*.bundle")
 	if err != nil {
 		return nil, err
 	}
@@ -404,6 +404,7 @@ func (s *Service) ImportBundle(ctx context.Context, input ImportBundleInput) (*B
 	if err := bundleFile.Close(); err != nil {
 		return nil, err
 	}
+
 	projectID := id.New("prj")
 	now := s.clock.Now().UTC()
 	stagingParent := filepath.Join(s.reposRoot, ".staging-"+projectID)

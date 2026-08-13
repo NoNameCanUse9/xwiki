@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	storesqlite "agentdocs/internal/store/sqlite"
+	storesqlite "xwiki/internal/store/sqlite"
 )
 
 const backupFormatVersion = 1
@@ -36,7 +36,7 @@ func Backup(ctx context.Context, dataDir, output string) error {
 	if err != nil {
 		return fmt.Errorf("resolve data directory: %w", err)
 	}
-	if _, err := os.Stat(filepath.Join(absData, "agentdocs.db")); err != nil {
+	if _, err := os.Stat(filepath.Join(absData, "xwiki.db")); err != nil {
 		return fmt.Errorf("data directory is not initialized: %w", err)
 	}
 	db, err := storesqlite.Open(absData)
@@ -58,7 +58,7 @@ func Backup(ctx context.Context, dataDir, output string) error {
 	if err := os.MkdirAll(filepath.Dir(absOutput), 0o755); err != nil {
 		return fmt.Errorf("create backup directory: %w", err)
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(absOutput), ".agentdocs-backup-*.tmp")
+	tmp, err := os.CreateTemp(filepath.Dir(absOutput), ".xwiki-backup-*.tmp")
 	if err != nil {
 		return fmt.Errorf("create backup temp file: %w", err)
 	}
@@ -111,7 +111,7 @@ func Restore(ctx context.Context, archive, dataDir string, replace bool) error {
 		return fmt.Errorf("resolve data directory: %w", err)
 	}
 	parent := filepath.Dir(absData)
-	staging, err := os.MkdirTemp(parent, ".agentdocs-restore-*")
+	staging, err := os.MkdirTemp(parent, ".xwiki-restore-*")
 	if err != nil {
 		return fmt.Errorf("create restore staging: %w", err)
 	}
@@ -158,7 +158,7 @@ func addDataTree(ctx context.Context, tw *tar.Writer, root string) error {
 		if err != nil || rel == "." {
 			return err
 		}
-		if rel == "agentdocs.db-wal" || rel == "agentdocs.db-shm" {
+		if rel == "xwiki.db-wal" || rel == "xwiki.db-shm" {
 			return nil
 		}
 		name := filepath.ToSlash(filepath.Join("data", rel))
@@ -263,7 +263,7 @@ func extractBackup(ctx context.Context, archive, staging string) error {
 }
 
 func validateRestoredData(ctx context.Context, staging string) error {
-	if _, err := os.Stat(filepath.Join(staging, "agentdocs.db")); err != nil {
+	if _, err := os.Stat(filepath.Join(staging, "xwiki.db")); err != nil {
 		return fmt.Errorf("backup database is missing: %w", err)
 	}
 	db, err := storesqlite.Open(staging)

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, ChevronDown, CornerDownRight, History } from "lucide-react";
-import { fileHistory, type CommitSummary } from "@/lib/api/history";
+import { fileHistory, getCommitDiff, type CommitSummary } from "@/lib/api/history";
 import { getPage, type PageResponse } from "@/lib/api/docs";
 
 /** TOC entry derived from rendered h1-h3 headings. */
@@ -15,11 +15,37 @@ export interface TocEntry {
 
 const headingSelector = "h1, h2, h3";
 
+/** Goldmark/CommonMark can render leading YAML front matter as `<hr>` followed
+ * by one large setext `<h2>`. Keep that rendering artifact out of the TOC. */
+function isRenderedFrontMatterHeading(
+	root: HTMLElement,
+	heading: Element,
+): boolean {
+	if (heading.tagName !== "H2") return false;
+	const delimiter = heading.previousElementSibling;
+	if (delimiter?.tagName !== "HR" || delimiter !== root.firstElementChild) {
+		return false;
+	}
+
+	const text = (heading.textContent ?? "").trim();
+	const yamlKeys = text.match(/(?:^|\n)\s*[A-Za-z_][\w.-]*\s*:/g) ?? [];
+	return yamlKeys.length >= 2;
+}
+
 function formatDate(iso: string): string {
 	return new Date(iso).toLocaleDateString("zh-CN", {
 		year: "numeric",
 		month: "2-digit",
 		day: "2-digit",
+	});
+}
+
+function formatDateTime(iso: string): string {
+	return new Date(iso).toLocaleString("zh-CN", {
+		month: "2-digit",
+		day: "2-digit",
+		hour: "2-digit",
+		minute: "2-digit",
 	});
 }
 
@@ -33,6 +59,7 @@ function headingEl(e: TocEntry): HTMLElement | null {
 export function extractToc(root: HTMLElement): TocEntry[] {
 	const out: TocEntry[] = [];
 	root.querySelectorAll(headingSelector).forEach((el, i) => {
+		if (isRenderedFrontMatterHeading(root, el)) return;
 		const level = Number(el.tagName[1]);
 		const text = (el.textContent ?? "").trim();
 		if (!text) return;
@@ -222,6 +249,148 @@ export function VersionPanel({
 					</div>,
 					document.body,
 				)}
+		</div>
+	);
+}
+
+/** Right-side history drawer: per-commit author/date/full sha plus a lazy
+ * per-file diff (numstat) expanded on demand. */
+export function HistoryPanel({
+	projectId,
+	filePath,
+	currentVersion,
+	onSelect,
+	onClose,
+}: {
+	projectId: string;
+	filePath: string;
+	currentVersion: string | null; // null = latest
+	onSelect: (sha: string | null) => void;
+	onClose: () => void;
+}) {
+	// Same queryKey as VersionPanel, so the commit list is fetched once.
+	const { data } = useQuery({
+		queryKey: ["history", projectId, filePath],
+		queryFn: () => fileHistory(projectId, filePath),
+		enabled: filePath.length > 0,
+	});
+	const [openSha, setOpenSha] = useState<string | null>(null);
+	if (!data || data.commits.length === 0) return null;
+	return (
+		<div className="flex h-full flex-col">
+			<div className="mono-label flex items-center justify-between gap-2 border-b border-[var(--color-rule)] px-4 py-3">
+				<span className="truncate text-[var(--color-ink-3)]">
+					history · {filePath}
+				</span>
+				<button
+					type="button"
+					onClick={onClose}
+					aria-label="关闭历史"
+					className="shrink-0 text-[var(--color-ink-3)] hover:text-[var(--color-ink)]"
+				>
+					✕
+				</button>
+			</div>
+			<div className="scrollbar-hidden min-h-0 flex-1 overflow-y-auto p-2">
+				<button
+					type="button"
+					onClick={() => onSelect(null)}
+					className={`flex w-full items-center gap-1.5 rounded-sm px-2 py-1.5 text-left text-xs hover:bg-[var(--color-surface-accent)] ${
+						currentVersion === null
+							? "text-[var(--color-accent)]"
+							: "text-[var(--color-ink-2)]"
+					}`}
+				>
+					<CornerDownRight className="size-3 shrink-0" />
+					<span className="truncate">最新版本</span>
+				</button>
+				{data.commits.map((c) => {
+					const active = currentVersion === c.sha;
+					const expanded = openSha === c.sha;
+					return (
+						<div
+							key={c.sha}
+							className={`rounded-sm ${
+								active
+									? "bg-[var(--color-surface-accent)]"
+									: "hover:bg-[var(--color-surface-accent)]"
+							}`}
+						>
+							<div className="flex items-start gap-1 px-2 py-1.5">
+								<button
+									type="button"
+									aria-label={expanded ? "收起详情" : "展开详情"}
+									onClick={() => setOpenSha(expanded ? null : c.sha)}
+									className="mt-0.5 shrink-0 text-[var(--color-ink-3)] hover:text-[var(--color-ink)]"
+								>
+									<ChevronDown
+										className={`size-3 transition-transform ${expanded ? "" : "-rotate-90"}`}
+									/>
+								</button>
+								<button
+									type="button"
+									onClick={() => onSelect(c.sha)}
+									title={c.message}
+									className="min-w-0 flex-1 text-left"
+								>
+									<span
+										className={`block truncate text-xs ${
+											active
+												? "text-[var(--color-accent)]"
+												: "text-[var(--color-ink)]"
+										}`}
+									>
+										{c.message || "(无提交信息)"}
+									</span>
+									<span className="block truncate text-[11px] text-[var(--color-ink-3)]">
+										{c.author} · {formatDateTime(c.date)}
+									</span>
+									<span className="block truncate font-mono text-[11px] text-[var(--color-accent)]">
+										{c.sha}
+									</span>
+								</button>
+							</div>
+							{expanded && <CommitFiles projectId={projectId} sha={c.sha} />}
+						</div>
+					);
+				})}
+			</div>
+		</div>
+	);
+}
+
+/** Per-file +N/-N diff stats for one commit (fetched on expand). */
+function CommitFiles({ projectId, sha }: { projectId: string; sha: string }) {
+	const { data, isLoading } = useQuery({
+		queryKey: ["commit-diff", projectId, sha],
+		queryFn: () => getCommitDiff(projectId, sha, "numstat"),
+	});
+	if (isLoading) {
+		return (
+			<p className="mono-label px-2 pb-2 pl-7 text-[11px] text-[var(--color-ink-3)]">
+				loading…
+			</p>
+		);
+	}
+	const stats = data?.stats ?? [];
+	const added = stats.reduce((n, s) => n + s.added, 0);
+	const deleted = stats.reduce((n, s) => n + s.deleted, 0);
+	return (
+		<div className="mb-2 space-y-0.5 pl-7 pr-2">
+			<p className="mono-label text-[11px] text-[var(--color-ink-3)]">
+				+{added} -{deleted} · {stats.length} files
+			</p>
+			{stats.map((s) => (
+				<p
+					key={s.path}
+					className="truncate font-mono text-[11px] text-[var(--color-ink-2)]"
+					title={s.path}
+				>
+					<span className="text-[var(--color-success)]">+{s.added}</span>{" "}
+					<span className="text-[var(--color-destructive)]">-{s.deleted}</span>{" "}
+					{s.path}
+				</p>
+			))}
 		</div>
 	);
 }

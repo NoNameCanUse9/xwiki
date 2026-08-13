@@ -15,7 +15,7 @@ func seedHistory(t *testing.T) (*Service, string) {
 		BaseRevision: mustHead(t, svc, pid),
 		Message:      "add a",
 		Changes:      []Change{{Op: "create", Path: "docs/a.md", Content: "# A\n"}},
-	}, CommitAuthor{Name: "Test Author", Email: "test@agentdocs.local"}); err != nil {
+	}, CommitAuthor{Name: "Test Author", Email: "test@xwiki.local"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := svc.ApplyChangeset(context.Background(), pid, ChangesetInput{
@@ -25,7 +25,7 @@ func seedHistory(t *testing.T) (*Service, string) {
 			{Op: "update", Path: "docs/a.md", Content: "# A updated\n"},
 			{Op: "create", Path: "docs/b.md", Content: "# B\n"},
 		},
-	}, CommitAuthor{Name: "Test Author", Email: "test@agentdocs.local"}); err != nil {
+	}, CommitAuthor{Name: "Test Author", Email: "test@xwiki.local"}); err != nil {
 		t.Fatal(err)
 	}
 	return svc, pid
@@ -46,11 +46,10 @@ func mustHead(t *testing.T, svc *Service, pid string) string {
 
 func TestListCommitsIncludesAllWrites(t *testing.T) {
 	svc, pid := seedHistory(t)
-	page, err := svc.SearchCommits(context.Background(), pid, CommitQuery{Limit: 10})
+	commits, _, err := svc.SearchCommits(context.Background(), pid, "", 10, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	commits := page.Commits
 	// root README commit + 2 changesets = 3.
 	if len(commits) != 3 {
 		t.Fatalf("want 3 commits, got %d: %+v", len(commits), commits)
@@ -62,12 +61,12 @@ func TestListCommitsIncludesAllWrites(t *testing.T) {
 		t.Fatalf("bad sha %q", commits[0].SHA)
 	}
 	// Pagination.
-	two, err := svc.SearchCommits(context.Background(), pid, CommitQuery{Limit: 2})
-	if err != nil || len(two.Commits) != 2 || !two.HasMore {
+	two, twoMore, err := svc.SearchCommits(context.Background(), pid, "", 2, 0)
+	if err != nil || len(two) != 2 || !twoMore {
 		t.Fatalf("limit failed: %+v %v", two, err)
 	}
-	rest, err := svc.SearchCommits(context.Background(), pid, CommitQuery{Limit: 10, Offset: 2})
-	if err != nil || len(rest.Commits) != 1 || rest.HasMore {
+	rest, restMore, err := svc.SearchCommits(context.Background(), pid, "", 10, 2)
+	if err != nil || len(rest) != 1 || restMore {
 		t.Fatalf("offset failed: %+v %v", rest, err)
 	}
 }
@@ -101,18 +100,18 @@ func TestSearchCommitsMatchesAllRefsAndFields(t *testing.T) {
 		{name: "short sha", query: orphan[:8], want: orphan},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			page, err := svc.SearchCommits(context.Background(), pid, CommitQuery{Query: tc.query, Limit: 10})
+			commits, _, err := svc.SearchCommits(context.Background(), pid, tc.query, 10, 0)
 			if err != nil {
 				t.Fatal(err)
 			}
 			found := false
-			for _, commit := range page.Commits {
+			for _, commit := range commits {
 				if commit.SHA == tc.want {
 					found = true
 				}
 			}
 			if !found {
-				t.Fatalf("query %q did not find %s in %+v", tc.query, tc.want, page.Commits)
+				t.Fatalf("query %q did not find %s in %+v", tc.query, tc.want, commits)
 			}
 		})
 	}
@@ -190,7 +189,7 @@ func TestRevertCreatesNewCommit(t *testing.T) {
 	svc, pid := seedHistory(t)
 	head := mustHead(t, svc, pid)
 
-	reverted, err := svc.RevertCommit(context.Background(), pid, head, "", CommitAuthor{Name: "Test Author", Email: "test@agentdocs.local"})
+	reverted, err := svc.RevertCommit(context.Background(), pid, head, "", CommitAuthor{Name: "Test Author", Email: "test@xwiki.local"})
 	if err != nil {
 		t.Fatalf("revert: %v", err)
 	}
@@ -198,8 +197,7 @@ func TestRevertCreatesNewCommit(t *testing.T) {
 		t.Fatal("revert returned no sha")
 	}
 	// Count advanced by 1, original commit still present.
-	page, _ := svc.SearchCommits(context.Background(), pid, CommitQuery{Limit: 10})
-	commits := page.Commits
+	commits, _, _ := svc.SearchCommits(context.Background(), pid, "", 10, 0)
 	if len(commits) != 4 {
 		t.Fatalf("want 4 commits after revert, got %d", len(commits))
 	}
@@ -232,7 +230,7 @@ func TestRevertCreatesNewCommit(t *testing.T) {
 		t.Fatal("b.md still exists after revert")
 	}
 	// Unknown sha -> ErrNotFound.
-	if _, err := svc.RevertCommit(context.Background(), pid, "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef", "", CommitAuthor{Name: "Test Author", Email: "test@agentdocs.local"}); !errors.Is(err, ErrNotFound) {
+	if _, err := svc.RevertCommit(context.Background(), pid, "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef", "", CommitAuthor{Name: "Test Author", Email: "test@xwiki.local"}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("unknown sha: want ErrNotFound, got %v", err)
 	}
 }

@@ -1,6 +1,6 @@
 openapi: 3.0.3
 info:
-  title: AgentDocs API
+  title: XWiki API
   version: 0.8.0
   description: |
     面向人类与 AI Agent 的 Git-backed 文档管理系统。
@@ -786,7 +786,7 @@ paths:
         - name: q
           in: query
           required: false
-          schema: { type: string }
+          schema: { type: string, maxLength: 200 }
           description: 匹配提交消息、作者、完整或短 SHA
       responses:
         "200":
@@ -906,7 +906,7 @@ components:
     sessionCookie:
       type: apiKey
       in: cookie
-      name: agentdocs_session
+      name: xwiki_session
     bearerAuth:
       type: http
       scheme: bearer
@@ -1022,10 +1022,10 @@ components:
         application/json:
           schema:
             type: object
-            required: [lock]
             properties:
               lock:
                 $ref: "#/components/schemas/Lock"
+                nullable: true
   schemas:
     Error:
       type: object
@@ -1158,7 +1158,16 @@ components:
     Project:
       type: object
       required:
-        [id, name, description, repo_dir, archived, deleted, created_at, updated_at]
+        [
+          id,
+          name,
+          description,
+          repo_dir,
+          archived,
+          deleted,
+          created_at,
+          updated_at,
+        ]
       properties:
         id:
           type: string

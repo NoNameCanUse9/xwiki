@@ -8,13 +8,13 @@ import (
 	"log/slog"
 	"net/http"
 
-	"agentdocs/internal/agent"
-	"agentdocs/internal/config"
-	"agentdocs/internal/httpapi/middleware"
-	"agentdocs/internal/httpapi/request"
-	"agentdocs/internal/httpapi/response"
-	"agentdocs/internal/project"
-	"agentdocs/internal/search"
+	"xwiki/internal/agent"
+	"xwiki/internal/config"
+	"xwiki/internal/httpapi/middleware"
+	"xwiki/internal/httpapi/request"
+	"xwiki/internal/httpapi/response"
+	"xwiki/internal/project"
+	"xwiki/internal/search"
 )
 
 // ChangesetHandler serves write endpoints for project documents.
@@ -70,7 +70,7 @@ func (h *ChangesetHandler) Apply(w http.ResponseWriter, r *http.Request) {
 
 	// Agent tokens: scope and project binding.
 	if secret := middleware.AgentSecret(r); secret != "" {
-		if !h.authorizeAgentWrite(w, r, projectID) {
+		if !authorizeAgentWrite(h.agentSvc, w, r, projectID) {
 			return
 		}
 	}
@@ -131,9 +131,12 @@ func authorizeAgentRead(svc *agent.Service, w http.ResponseWriter, r *http.Reque
 }
 
 // authorizeAgentWrite enforces scope and project binding for agent writes.
-func (h *ChangesetHandler) authorizeAgentWrite(w http.ResponseWriter, r *http.Request, projectID string) bool {
+func authorizeAgentWrite(svc *agent.Service, w http.ResponseWriter, r *http.Request, projectID string) bool {
 	secret := middleware.AgentSecret(r)
-	if _, err := h.agentSvc.Authorize(r.Context(), secret, projectID, true); err != nil {
+	if secret == "" {
+		return true
+	}
+	if _, err := svc.Authorize(r.Context(), secret, projectID, true); err != nil {
 		response.WriteError(w, r, http.StatusForbidden, "agent_forbidden",
 			"token lacks write permission")
 		return false

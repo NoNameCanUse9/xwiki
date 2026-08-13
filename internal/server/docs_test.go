@@ -17,8 +17,8 @@ import (
 func appendDocToRepo(t *testing.T, repoDir, path, content, branch string) {
 	t.Helper()
 	env := append(os.Environ(),
-		"GIT_AUTHOR_NAME=AgentDocs", "GIT_AUTHOR_EMAIL=agentdocs@local",
-		"GIT_COMMITTER_NAME=AgentDocs", "GIT_COMMITTER_EMAIL=agentdocs@local",
+		"GIT_AUTHOR_NAME=XWiki", "GIT_AUTHOR_EMAIL=xwiki@local",
+		"GIT_COMMITTER_NAME=XWiki", "GIT_COMMITTER_EMAIL=xwiki@local",
 		"GIT_CONFIG_NOSYSTEM=1",
 	)
 	runGit := func(args ...string) string {
@@ -112,7 +112,7 @@ func TestDocsTreePagesHome(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	appendDocToRepo(t, repo.Dir, "docs/guide.md", "# Guide\n\nhello *world*\n", "main")
+	appendDocToRepo(t, repo.Dir, "docs/guide.md", "---\ntitle: Guide\nmodule: docs\nversion: v1.0\nsummary: hello world\n---\n\n# Guide\n\nhello *world*\n", "main")
 
 	// Tree listing (root + docs/).
 	rec := apiRequest(h, http.MethodGet,
@@ -159,7 +159,8 @@ func TestDocsTreePagesHome(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil {
 		t.Fatal(err)
 	}
-	if page.Path != "docs/guide.md" || page.Format != "raw" || !strings.Contains(page.Raw, "# Guide") {
+	if page.Path != "docs/guide.md" || page.Format != "raw" ||
+		!strings.Contains(page.Raw, "title: Guide") || !strings.Contains(page.Raw, "# Guide") {
 		t.Fatalf("raw page wrong: %+v", page)
 	}
 	if page.Revision == "" || page.Revision != getRevision(t, h, cookie, projectID) {
@@ -179,7 +180,8 @@ func TestDocsTreePagesHome(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &htmlPage); err != nil {
 		t.Fatal(err)
 	}
-	if htmlPage.Format != "html" || !strings.Contains(htmlPage.Content, "<h1>Guide</h1>") ||
+	if htmlPage.Format != "html" || strings.Contains(htmlPage.Content, "title: Guide") ||
+		!strings.Contains(htmlPage.Content, "<h1>Guide</h1>") ||
 		!strings.Contains(htmlPage.Content, "<em>world</em>") {
 		t.Fatalf("html page wrong: %+v", htmlPage.Content)
 	}

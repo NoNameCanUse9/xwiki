@@ -19,7 +19,8 @@ import { Strike } from "@tiptap/extension-strike";
 import { Code } from "@tiptap/extension-code";
 import { Heading } from "@tiptap/extension-heading";
 import { Blockquote } from "@tiptap/extension-blockquote";
-import { CodeBlock } from "@tiptap/extension-code-block";
+import { CodeBlockLowlight } from "@tiptap/extension-code-block-lowlight";
+import { common, createLowlight } from "lowlight";
 import { BulletList, ListItem, ListKeymap, OrderedList } from "@tiptap/extension-list";
 import { HorizontalRule } from "@tiptap/extension-horizontal-rule";
 import { HardBreak } from "@tiptap/extension-hard-break";
@@ -41,6 +42,10 @@ import { cn } from "../../lib/utils";
 // (#, -, >, ```) are disabled so typing them never instantly converts a
 // paragraph into a huge heading/list/quote (Notion-like predictability).
 // Inline marks (bold/italic/code) keep their input rules.
+// Code blocks are highlighted with highlight.js via lowlight (the same
+// engine the docs viewer uses); fenced ```json etc. parse into the node's
+// language attribute, which drives the highlighting.
+const lowlight = createLowlight(common);
 const extensions = [
 	Document,
 	Paragraph,
@@ -53,7 +58,7 @@ const extensions = [
 	Blockquote.extend({ addInputRules: () => [] }),
 	BulletList.extend({ addInputRules: () => [] }),
 	OrderedList.extend({ addInputRules: () => [] }),
-	CodeBlock.extend({ addInputRules: () => [] }),
+	CodeBlockLowlight.extend({ addInputRules: () => [] }).configure({ lowlight }),
 	ListItem,
 	ListKeymap,
 	HorizontalRule,
@@ -377,7 +382,7 @@ export default function RichEditor({
 		editable: !readOnly,
 		editorProps: {
 			attributes: {
-				class: "prose-agentdocs focus:outline-none min-h-[70vh]",
+				class: "prose-xwiki focus:outline-none min-h-[70vh]",
 				role: "textbox",
 			},
 			handleKeyDown: (view, event) => {

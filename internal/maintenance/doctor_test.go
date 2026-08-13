@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	storesqlite "agentdocs/internal/store/sqlite"
+	storesqlite "xwiki/internal/store/sqlite"
 )
 
 func TestDoctorReportsHealthyDataDirectory(t *testing.T) {

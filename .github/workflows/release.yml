@@ -1,15 +1,16 @@
 name: Release
 
-# 触发方式：推送形如 app-v1.2.3 的 tag（且该 commit 在 main 分支上）
-#   git tag app-v1.2.3
+# 触发方式：推送形如 backend-v1.2.3 的 tag（且该 commit 在 main 分支上）
+#   git tag backend-v1.2.3
 #   git push origin main --tags
 #
-# 注意：Git ref 规则禁止冒号，`app:v1.2.3` 无法作为 tag 名（git 会直接
-# 拒绝创建），所以用 `app-v*` 匹配。
+# 注意：Git ref 规则禁止冒号，`backend:v1.2.3` 无法作为 tag 名（git 会直接
+# 拒绝创建），所以用 `backend-v*` 匹配。app 分支（Rust 桌面客户端）的
+# release 用 `app-v*`。
 on:
   push:
     tags:
-      - 'app-v*'
+      - 'backend-v*'
 
 permissions:
   contents: write   # 创建 GitHub Release
@@ -17,9 +18,24 @@ permissions:
 
 jobs:
   test:
-    name: Test release candidate
-    uses: ./.github/workflows/ci.yml
-
+    name: Complete test gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version-file: go.mod }
+      - run: go test ./...
+      - run: go vet ./...
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - uses: pnpm/action-setup@v4
+        with: { version: 10 }
+      - run: pnpm install --frozen-lockfile
+        working-directory: web
+      - run: pnpm test -- --run
+        working-directory: web
+      - run: pnpm build
+        working-directory: web
   build-and-release:
     name: Build linux/amd64 binary & create release
     needs: test
@@ -58,21 +74,21 @@ jobs:
 
       - name: Build linux/amd64 binary
         run: |
-          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o agentdocs-linux-amd64 ./cmd/agentdocs
-          tar -czf agentdocs-linux-amd64.tar.gz agentdocs-linux-amd64
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o xwiki-linux-amd64 ./cmd/xwiki
+          tar -czf xwiki-linux-amd64.tar.gz xwiki-linux-amd64
 
       - name: Extract version from tag
         id: version
         run: |
-          echo "name=${GITHUB_REF_NAME//:/ }" >> "$GITHUB_OUTPUT" # app-v1.2.3 -> app-v1.2.3
-          echo "version=${GITHUB_REF_NAME#app-}" >> "$GITHUB_OUTPUT" # app-v1.2.3 -> v1.2.3
+          echo "name=${GITHUB_REF_NAME//:/ }" >> "$GITHUB_OUTPUT" # backend-v1.2.3 -> backend-v1.2.3
+          echo "version=${GITHUB_REF_NAME#backend-}" >> "$GITHUB_OUTPUT" # backend-v1.2.3 -> v1.2.3
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           name: ${{ steps.version.outputs.name }}
           generate_release_notes: true # 自动生成基于上一 tag 的 changelog
-          files: agentdocs-linux-amd64.tar.gz
+          files: xwiki-linux-amd64.tar.gz
 
   docker:
     name: Build & push Docker image (GHCR)
@@ -94,11 +110,18 @@ jobs:
 
       - name: Extract image tag from git tag
         id: version
-        run: echo "tag=${GITHUB_REF_NAME//:/-}" >> "$GITHUB_OUTPUT" # app:v1.2.3 -> app-v1.2.3 (镜像 tag 不能含冒号)
+        run: echo "tag=${GITHUB_REF_NAME//:/-}" >> "$GITHUB_OUTPUT" # backend-v1.2.3 -> backend-v1.2.3 (镜像 tag 不能含冒号)
+
+      # GHCR 要求仓库名小写；github.repository 的 owner 可能含大写（如 NoNameCanUse9）
+      - name: Lowercase image repository
+        id: repo
+        run: echo "name=${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
 
       - name: Build and push image
         uses: docker/build-push-action@v6
         with:
           context: .
           push: true
-          tags: ghcr.io/${{ github.repository }}:${{ steps.version.outputs.tag }}
+          tags: |
+            ghcr.io/${{ steps.repo.outputs.name }}:${{ steps.version.outputs.tag }}
+            ghcr.io/${{ steps.repo.outputs.name }}:latest

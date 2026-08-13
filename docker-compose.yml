@@ -1,12 +1,13 @@
 services:
-  agentdocs:
+  xwiki:
     build: .
+    image: ghcr.io/nonamecanuse9/xwiki:latest
     ports:
       - "8080:8080"
     environment:
-      AGENTDOCS_HTTP_ADDR: ":8080"
+      XWIKI_HTTP_ADDR: ":8080"
     volumes:
-      - agentdocs-data:/data
+      - xwiki-data:/data
 
 volumes:
-  agentdocs-data:
+  xwiki-data:

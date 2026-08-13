@@ -13,7 +13,7 @@
 
 请求：{"username":"...","password":"..."}
 
-- 200 {"user":{...}}，Set-Cookie: agentdocs_session（HttpOnly）
+- 200 {"user":{...}}，Set-Cookie: xwiki_session（HttpOnly）
 - 401 invalid_credentials
 
 ### POST /auth/logout
@@ -223,8 +223,8 @@ invalid_token / invalid_token_input / agent_forbidden / idempotency_conflict / t
 ## Reindex CLI
 
 ```bash
-agentdocs reindex                 # 全量重建全部项目
-agentdocs reindex --project <id>  # 单项目
+xwiki reindex                 # 全量重建全部项目
+xwiki reindex --project <id>  # 单项目
 ```
 
 
@@ -280,7 +280,7 @@ invalid_import / invalid_upload / bundle_too_large
 | 13 | 归档后拒绝写入 | ✅ | 410 project_archived |
 | 14 | Token 限制项目与目录 | ✅ | 阶段六 403 矩阵 |
 | 15 | 数据库不存 Markdown 正文 | ✅ | 正文只在仓库；DB 只有索引/审计/元数据 |
-| 16 | 搜索索引可完整重建 | ✅ | agentdocs reindex + 幂等测试 |
+| 16 | 搜索索引可完整重建 | ✅ | xwiki reindex + 幂等测试 |
 | 17 | Markdown 无明显 XSS | ✅ | goldmark 转义 + 前端 sanitize |
 | 18 | 路径无法逃逸仓库 | ✅ | validateDocPath + 穿越测试 |
 | 19 | 完整 Bundle 导出 | ✅ | 阶段八 export.bundle + 历史保留测试 |

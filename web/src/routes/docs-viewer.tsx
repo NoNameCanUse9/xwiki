@@ -22,7 +22,6 @@ import {
 	DialogTitle,
 } from "@/components/ui/dialog";
 import { getRevision, submitChangeset } from "@/lib/api/changesets";
-import { fileHistory } from "@/lib/api/history";
 import { createShare } from "@/lib/api/shares";
 import {
 	acquireLock,
@@ -32,18 +31,19 @@ import {
 	releaseLock,
 	type EditLock,
 } from "@/lib/api/locks";
-import { getPage, getTree, type PageResponse, type TreeEntry } from "@/lib/api/docs";
+import { getPage, getTree, type TreeEntry } from "@/lib/api/docs";
 import CommandPalette from "@/components/editor/command-palette";
 import ProjectSearch from "@/components/editor/project-search";
 import RichEditor from "@/components/editor/rich-editor";
 import FileMenu from "@/components/editor/file-menu";
-import ImportFilesButton from "@/components/editor/import-files";
 import NewEntryButton from "@/components/editor/new-entry";
 import RowActions from "@/components/editor/row-actions";
 import AttachmentsPanel from "@/components/editor/attachments";
+import { ProjectChanges } from "@/components/editor/project-changes";
 import { enhanceRenderedMarkdown } from "@/components/editor/markdown-render";
 import {
 	extractToc,
+	HistoryPanel,
 	TocPanel,
 	VersionPanel,
 	useVersionedPage,
@@ -70,44 +70,6 @@ function sanitizeHtml(html: string): string {
 					: `${attr}=${val}`;
 			},
 		);
-}
-
-interface LocalDraft {
-	version: 1;
-	project_id: string;
-	path: string;
-	content: string;
-	base_revision: string;
-	updated_at: string;
-}
-
-function parseLocalDraft(raw: string | null, projectId: string, path: string): LocalDraft | null {
-	if (!raw) return null;
-	try {
-		const parsed = JSON.parse(raw) as Partial<LocalDraft>;
-		if (
-			parsed.version === 1 &&
-			parsed.project_id === projectId &&
-			parsed.path === path &&
-			typeof parsed.content === "string" &&
-			typeof parsed.base_revision === "string" &&
-			typeof parsed.updated_at === "string"
-		) {
-			return parsed as LocalDraft;
-		}
-	} catch {
-		// Legacy drafts were plain strings. Keep them recoverable, but require
-		// the same explicit stale-draft choice as an unknown base revision.
-		return {
-			version: 1,
-			project_id: projectId,
-			path,
-			content: raw,
-			base_revision: "",
-			updated_at: new Date(0).toISOString(),
-		};
-	}
-	return null;
 }
 
 function Breadcrumbs({
@@ -173,7 +135,7 @@ function MarkdownArticle({
 	return (
 		<article
 			ref={ref}
-			className="prose-agentdocs"
+			className="prose-xwiki"
 			dangerouslySetInnerHTML={{ __html: html }}
 			onClick={(e) => {
 				const anchor = (e.target as HTMLElement).closest("a");
@@ -439,11 +401,12 @@ export default function DocsViewerPage() {
 	// `seed` is the initial content the editor mounts with (a restored
 	// local draft, or the server raw content).
 	const draftRef = useRef("");
-	const baseRevisionRef = useRef("");
 	const dirtyRef = useRef(false);
 	const [seed, setSeed] = useState<string | null>(null);
-	const [rawPage, setRawPage] = useState<PageResponse | null>(null);
-	const [savedDraft, setSavedDraft] = useState<LocalDraft | null>(null);
+	const [editBaseRevision, setEditBaseRevision] = useState<string | null>(null);
+	const [savedDraftContent, setSavedDraftContent] = useState<string | null>(
+		null,
+	);
 	const [draftConflict, setDraftConflict] = useState(false);
 	const [saving, setSaving] = useState(false);
 	// Lock state machine: idle (locked/read-only) -> opening (acquiring) ->
@@ -452,7 +415,9 @@ export default function DocsViewerPage() {
 		"idle" | "opening" | "held" | "blocked"
 	>("idle");
 	const [lockHolder, setLockHolder] = useState<EditLock | null>(null);
-	const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
+	const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">(
+		"idle",
+	);
 	const [commitMessage, setCommitMessage] = useState("");
 	const [commitOpen, setCommitOpen] = useState(false);
 	const [restoring, setRestoring] = useState(false);
@@ -509,12 +474,6 @@ export default function DocsViewerPage() {
 
 	const pageQuery = useVersionedPage(id, filePath, atSha);
 
-	const historyQuery = useQuery({
-		queryKey: ["history", id, filePath],
-		queryFn: () => fileHistory(id, filePath),
-		enabled: showHistory && !showHome,
-	});
-
 	const selectVersion = (sha: string | null) => {
 		setAtSha(sha);
 		setTocEntries([]);
@@ -538,6 +497,17 @@ export default function DocsViewerPage() {
 		}
 	};
 
+	// Edit flow: load raw content, submit an update changeset on save.
+	const rawQuery = useQuery({
+		queryKey: ["docs", "raw", id, filePath],
+		queryFn: () => getPage(id, filePath, "raw"),
+		enabled: editing && !showHome,
+	});
+	useEffect(() => {
+		if (rawQuery.data?.revision && !editBaseRevision)
+			setEditBaseRevision(rawQuery.data.revision);
+	}, [rawQuery.data?.revision, editBaseRevision]);
+
 	// --- Exclusive edit lock: unlock to edit, lock to commit & finish. ---
 
 	// Keyed per keystroke: updates a ref only (no re-render). The first edit
@@ -556,47 +526,44 @@ export default function DocsViewerPage() {
 	};
 
 	const draftKey = (projectId: string, path: string) =>
-		`agentdocs:draft:${projectId}:${path}`;
-	const persistDraft = () => {
-		const draft: LocalDraft = {
-			version: 1,
-			project_id: id,
-			path: filePath,
-			content: draftRef.current,
-			base_revision: baseRevisionRef.current,
-			updated_at: new Date().toISOString(),
-		};
-		try {
-			localStorage.setItem(draftKey(id, filePath), JSON.stringify(draft));
-		} catch {
-			// The in-memory draft remains available when storage quota is full.
-		}
-	};
+		`xwiki:draft:${projectId}:${path}`;
 
 	const startEditing = async () => {
 		if (lockState === "opening") return;
 		setLockState("opening");
-		const saved = parseLocalDraft(localStorage.getItem(draftKey(id, filePath)), id, filePath);
+		const savedRaw = localStorage.getItem(draftKey(id, filePath));
+		let saved: string | null = savedRaw;
+		let savedBase: string | null = null;
+		try {
+			if (savedRaw?.startsWith("{")) {
+				const parsed = JSON.parse(savedRaw) as {
+					content?: string;
+					baseRevision?: string;
+				};
+				saved = parsed.content ?? "";
+				savedBase = parsed.baseRevision ?? null;
+			}
+		} catch {
+			// Legacy plain-text drafts remain recoverable.
+		}
 		let acquired = false;
 		try {
 			await acquireLock(id, filePath);
 			acquired = true;
+			// Compare the saved draft's base revision against the server's
+			// current revision; a mismatch means the doc moved on while the
+			// draft was sitting in localStorage, and needs an explicit choice.
 			const raw = await queryClient.fetchQuery({
 				queryKey: ["docs", "raw", id, filePath],
 				queryFn: () => getPage(id, filePath, "raw"),
 			});
-			const revision = raw.revision ?? "";
-			baseRevisionRef.current = revision;
-			setRawPage(raw);
-			setSavedDraft(saved);
-			const staleDraft = saved !== null && saved.base_revision !== revision;
+			const currentRevision = raw.revision ?? "";
+			const staleDraft = savedBase !== null && savedBase !== currentRevision;
+			setSavedDraftContent(staleDraft ? saved : null);
 			setDraftConflict(staleDraft);
-			if (staleDraft) {
-				setSeed(null);
-			} else {
-				const initial = saved?.content ?? raw.content;
-				draftRef.current = initial;
-				setSeed(initial);
+			setEditBaseRevision(currentRevision);
+			if (!staleDraft) {
+				setSeed(saved ?? raw.content);
 			}
 			markClean();
 			if (saved && !staleDraft) {
@@ -621,20 +588,30 @@ export default function DocsViewerPage() {
 	};
 
 	const resolveDraftConflict = (restoreLocal: boolean) => {
-		if (!rawPage) return;
-		baseRevisionRef.current = rawPage.revision ?? "";
-		const initial = restoreLocal && savedDraft ? savedDraft.content : rawPage.content;
-		draftRef.current = initial;
-		setSeed(initial);
-		setDraftConflict(false);
-		if (restoreLocal) {
+		const currentRevision = editBaseRevision ?? "";
+		if (restoreLocal && savedDraftContent !== null) {
+			setSeed(savedDraftContent);
+			draftRef.current = savedDraftContent;
 			dirtyRef.current = true;
 			setDirty(true);
-			persistDraft();
+			try {
+				localStorage.setItem(
+					draftKey(id, filePath),
+					JSON.stringify({
+						content: savedDraftContent,
+						baseRevision: currentRevision,
+					}),
+				);
+			} catch {
+				// The in-memory draft remains available when storage quota is full.
+			}
 		} else {
 			localStorage.removeItem(draftKey(id, filePath));
+			setSeed(rawQuery.data?.content ?? "");
 			markClean();
 		}
+		setSavedDraftContent(null);
+		setDraftConflict(false);
 	};
 
 	// Commit the current draft as one changeset (Cmd/Ctrl+S). One edit = one
@@ -644,16 +621,19 @@ export default function DocsViewerPage() {
 		setSaving(true);
 		setSaveState("saving");
 		try {
-			if (!baseRevisionRef.current) {
-				throw new Error("文档响应缺少 revision，请刷新后重试");
+			let baseRevision = editBaseRevision;
+			if (!baseRevision) {
+				// Compatibility fallback for older servers that did not yet expose
+				// DocPage.revision; current servers always use the captured page SHA.
+				baseRevision = (await getRevision(id)).revision;
+				setEditBaseRevision(baseRevision);
 			}
-			const result = await submitChangeset(id, {
-				base_revision: baseRevisionRef.current,
+			await submitChangeset(id, {
+				base_revision: baseRevision,
 				// 留空则后端生成默认：时间 + 操作者 修改 <path>
 				message: commitMessage.trim(),
 				changes: [{ op: "update", path: filePath, content: draftRef.current }],
 			});
-			baseRevisionRef.current = result.revision;
 			setSaveState("saved");
 			toast.success("已提交");
 			markClean();
@@ -664,10 +644,24 @@ export default function DocsViewerPage() {
 			// Keep the raw cache in sync so a re-edit of the same file shows
 			// the just-committed content, not the pre-commit snapshot.
 			await queryClient.invalidateQueries({ queryKey: ["docs", "raw"] });
+			const next = await queryClient.fetchQuery({
+				queryKey: ["docs", "raw", id, filePath],
+				queryFn: () => getPage(id, filePath, "raw"),
+			});
+			if (next.revision) setEditBaseRevision(next.revision);
 			return true;
 		} catch (err) {
 			setSaveState("idle");
-			persistDraft();
+			// Keep the draft so a failed save (e.g. a 409 conflict) never
+			// loses the in-progress edits.
+			try {
+				localStorage.setItem(draftKey(id, filePath), JSON.stringify({
+					content: draftRef.current,
+					baseRevision: editBaseRevision,
+				}));
+			} catch {
+				// quota exceeded — the in-memory draft still exists
+			}
 			if ((err as { status?: number })?.status === 409) {
 				toast.error("文档已被他人修改，请刷新后重试");
 			} else {
@@ -683,9 +677,10 @@ export default function DocsViewerPage() {
 	const lockAndCommit = async () => {
 		if (!editing || saving) return;
 		setCommitOpen(false);
-		if (dirty) {
-			const committed = await commitDraft();
-			if (!committed) return;
+		try {
+			if (dirty && !(await commitDraft())) return;
+		} catch {
+			return; // commit failed; stay editing so nothing is lost
 		}
 		await releaseLock(id, filePath).catch(() => {});
 		setEditing(false);
@@ -719,10 +714,20 @@ export default function DocsViewerPage() {
 		if (!editing || !filePath) return;
 		const beat = () => {
 			heartbeatLock(id, filePath).catch(() => {
-				if (dirtyRef.current) persistDraft();
+				try {
+					localStorage.setItem(
+						draftKey(id, filePath),
+						JSON.stringify({
+							content: draftRef.current,
+							baseRevision: editBaseRevision,
+						}),
+					);
+				} catch {
+					/* best effort */
+				}
 				setEditing(false);
 				setLockState("idle");
-				toast.error("编辑锁已失效，本地草稿已保留");
+				toast.error("编辑锁已失效，已回到只读模式");
 			});
 		};
 		beat();
@@ -736,13 +741,19 @@ export default function DocsViewerPage() {
 		if (!editing || !dirtyRef.current) return;
 		const t = window.setTimeout(() => {
 			try {
-				persistDraft();
+				localStorage.setItem(
+					draftKey(id, filePath),
+					JSON.stringify({
+						content: draftRef.current,
+						baseRevision: editBaseRevision,
+					}),
+				);
 			} catch {
 				// quota exceeded — ignore, the draft lives in memory anyway
 			}
 		}, 800);
 		return () => window.clearTimeout(t);
-	}, [editing, dirty, id, filePath]);
+	}, [editing, dirty, id, filePath, editBaseRevision]);
 
 	// Navigating to a different target (another file, a directory, or the docs
 	// root) releases the lock and ends the edit session. Without this,
@@ -853,6 +864,17 @@ export default function DocsViewerPage() {
 					</div>
 				</aside>
 			)}
+			{showHistory && !showHome && !editing && (
+				<aside className="fixed inset-y-0 right-0 z-30 hidden w-80 flex-col border-l border-[var(--color-rule)] bg-[var(--color-paper-2)] sm:flex">
+					<HistoryPanel
+						projectId={id}
+						filePath={filePath}
+						currentVersion={atSha}
+						onSelect={selectVersion}
+						onClose={() => setShowHistory(false)}
+					/>
+				</aside>
+			)}
 
 			<CommandPalette projectId={id} />
 			<Dialog open={commitOpen} onOpenChange={setCommitOpen}>
@@ -860,7 +882,8 @@ export default function DocsViewerPage() {
 					<DialogHeader>
 						<DialogTitle>提交修改</DialogTitle>
 						<DialogDescription>
-							填写 commit message，留空则使用默认（时间 + 用户名）。提交后文档将被锁定（只读）。
+							填写 commit message，留空则使用默认（时间 +
+							用户名）。提交后文档将被锁定（只读）。
 						</DialogDescription>
 					</DialogHeader>
 					<div className="space-y-2">
@@ -880,10 +903,7 @@ export default function DocsViewerPage() {
 						<Button variant="outline" onClick={() => setCommitOpen(false)}>
 							取消
 						</Button>
-						<Button
-							onClick={() => void lockAndCommit()}
-							disabled={saving}
-						>
+						<Button onClick={() => void lockAndCommit()} disabled={saving}>
 							<Lock className="size-3.5" />
 							{saving ? "提交中…" : "提交并上锁"}
 						</Button>
@@ -963,7 +983,8 @@ export default function DocsViewerPage() {
 											items={{
 												onEdit: () => void startEditing(),
 												onToggleHistory: () => setShowHistory((v) => !v),
-												onToggleAttachments: () => setShowAttachments((v) => !v),
+												onToggleAttachments: () =>
+													setShowAttachments((v) => !v),
 												onToggleBacklinks: () => setShowBacklinks((v) => !v),
 											}}
 										/>
@@ -971,14 +992,17 @@ export default function DocsViewerPage() {
 								)}
 							</div>
 						)}
-						{!showHome && <ImportFilesButton projectId={id} />}
 						<ProjectSearch projectId={id} />
 					</div>
 				</header>
 
-				<main className="flex-1 px-6 py-8 sm:ml-64 sm:px-10">
+				<main
+					className={`flex-1 px-6 py-8 sm:px-10 ${
+						!showHome ? "sm:ml-64" : ""
+					} ${showHistory && !showHome && !editing ? "sm:mr-80" : ""}`}
+				>
 					<div
-						className={`mx-auto w-full transition-[max-width] duration-200 ${
+						className={`mx-auto flex min-h-[calc(100vh-8rem)] w-full flex-col transition-[max-width] duration-200 ${
 							editing ? "max-w-4xl" : "max-w-3xl"
 						}`}
 					>
@@ -1064,7 +1088,6 @@ export default function DocsViewerPage() {
 								</span>
 								<div className="flex items-center gap-2">
 									<NewEntryButton projectId={id} />
-									<ImportFilesButton projectId={id} />
 								</div>
 							</div>
 						)}
@@ -1077,6 +1100,9 @@ export default function DocsViewerPage() {
 								onOpen={(path) => navigate(`/projects/${id}/docs/${path}`)}
 							/>
 						)}
+						{showHome && !loading && !error && (
+							<ProjectChanges projectId={id} />
+						)}
 						{!showHome && !editing && showBacklinks && (
 							<div className="mt-10">
 								<BacklinksPanel projectId={id} filePath={filePath} />
@@ -1087,36 +1113,10 @@ export default function DocsViewerPage() {
 								<AttachmentsPanel projectId={id} />
 							</div>
 						)}
-						{showHistory && !editing && (
-							<div className="hairline-panel mt-4 px-5">
-								<p className="mono-label py-3 text-[var(--color-ink-3)]">
-									history · {filePath}
-								</p>
-								{historyQuery.isLoading && (
-									<p className="mono-label pb-3 text-[var(--color-ink-3)]">
-										loading…
-									</p>
-								)}
-								{historyQuery.data?.commits.map((c) => (
-									<div
-										key={c.sha}
-										className="flex items-center justify-between gap-3 border-t border-[var(--color-rule)] py-2.5"
-									>
-										<p className="truncate font-mono text-xs text-[var(--color-accent)]">
-											{c.sha.slice(0, 8)}
-										</p>
-										<p className="min-w-0 flex-1 truncate text-sm text-[var(--color-ink)]">
-											{c.message}
-										</p>
-										<p className="mono-label shrink-0 text-[var(--color-ink-3)]">
-											{new Date(c.date).toLocaleDateString("zh-CN")}
-										</p>
-									</div>
-								))}
-							</div>
-						)}
-						{editing && !showHome && !isDirPath && (
-							draftConflict ? (
+						{editing &&
+							!showHome &&
+							!isDirPath &&
+							(draftConflict ? (
 								<div className="hairline-panel space-y-4 p-5">
 									<div>
 										<p className="font-medium text-[var(--color-ink)]">
@@ -1130,26 +1130,26 @@ export default function DocsViewerPage() {
 										<Button onClick={() => resolveDraftConflict(true)}>
 											恢复本地草稿
 										</Button>
-										<Button variant="outline" onClick={() => resolveDraftConflict(false)}>
+										<Button
+											variant="outline"
+											onClick={() => resolveDraftConflict(false)}
+										>
 											使用服务器版本
 										</Button>
 									</div>
 								</div>
-							) : (
-								seed !== null ? <>
+							) : seed !== null ? (
+								<>
 									<RichEditor
 										initialMarkdown={seed}
 										onChange={handleEditorChange}
 										onNavigateLink={(href) => {
-											const m = href.match(
-												/^\/projects\/[^/]+\/docs\/(.+)$/,
-											);
+											const m = href.match(/^\/projects\/[^/]+\/docs\/(.+)$/);
 											if (m) navigate(`/projects/${id}/docs/${m[1]}`);
 										}}
 									/>
-								</> : null
-							)
-						)}
+								</>
+							) : null)}
 					</div>
 				</main>
 			</div>

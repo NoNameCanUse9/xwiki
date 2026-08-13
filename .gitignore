@@ -6,9 +6,9 @@
 # Editor
 .vscode/
 
-# AgentDocs runtime
+# XWiki runtime
 /data/
-/agentdocs
+/xwiki
 *.log
 
 # Local agent skills & tooling (not part of the product)

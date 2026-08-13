@@ -13,7 +13,7 @@ interface ThemeContextValue {
   toggle: () => void;
 }
 
-const STORAGE_KEY = "agentdocs-theme";
+const STORAGE_KEY = "xwiki-theme";
 
 const ThemeContext = createContext<ThemeContextValue>({
   theme: "light",

@@ -10,17 +10,17 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/cors"
 
-	"agentdocs/internal/agent"
-	"agentdocs/internal/auth"
-	"agentdocs/internal/config"
-	"agentdocs/internal/httpapi"
-	"agentdocs/internal/httpapi/handlers"
-	"agentdocs/internal/httpapi/middleware"
-	"agentdocs/internal/httpapi/response"
-	"agentdocs/internal/project"
-	"agentdocs/internal/search"
-	"agentdocs/internal/user"
-	"agentdocs/web"
+	"xwiki/internal/agent"
+	"xwiki/internal/auth"
+	"xwiki/internal/config"
+	"xwiki/internal/httpapi"
+	"xwiki/internal/httpapi/handlers"
+	"xwiki/internal/httpapi/middleware"
+	"xwiki/internal/httpapi/response"
+	"xwiki/internal/project"
+	"xwiki/internal/search"
+	"xwiki/internal/user"
+	"xwiki/web"
 )
 
 func NewRouter(cfg *config.Config, log *slog.Logger, db *sql.DB, users *user.Store, authSvc *auth.Service, projectsSvc *project.Service, agentSvc *agent.Service, searchSvc *search.Service) http.Handler {
@@ -38,7 +38,7 @@ func NewRouter(cfg *config.Config, log *slog.Logger, db *sql.DB, users *user.Sto
 	}))
 
 	h := handlers.NewAuthHandler(cfg, authSvc, users, log)
-	ph := handlers.NewProjectHandler(cfg, projectsSvc, agentSvc, searchSvc, log)
+	ph := handlers.NewProjectHandler(cfg, projectsSvc, searchSvc, agentSvc, log)
 	dh := handlers.NewDocsHandler(cfg, projectsSvc, agentSvc, log)
 	ch := handlers.NewChangesetHandler(cfg, projectsSvc, agentSvc, searchSvc, log)
 	th := handlers.NewTokenHandler(cfg, agentSvc, log)
@@ -46,8 +46,8 @@ func NewRouter(cfg *config.Config, log *slog.Logger, db *sql.DB, users *user.Sto
 	ah := handlers.NewAttachmentHandler(cfg, projectsSvc, agentSvc, log)
 	uh := handlers.NewUserHandler(cfg, authSvc, users, log)
 	gh := handlers.NewGitHTTPHandler(projectsSvc, agentSvc, searchSvc, log)
-	lh := handlers.NewLockHandler(db, log)
-	hh := handlers.NewHistoryHandler(cfg, projectsSvc, searchSvc, log)
+	lh := handlers.NewLockHandler(db, agentSvc, log)
+	hh := handlers.NewHistoryHandler(cfg, projectsSvc, searchSvc, agentSvc, log)
 	sh := handlers.NewSearchHandler(cfg, searchSvc, projectsSvc, agentSvc, log)
 	shareH := handlers.NewShareHandler(db, dh, projectsSvc, log)
 

@@ -6,7 +6,7 @@
 
 **Architecture:** 两层验证：① 自动化基线（web 111 测试 + go test ./... 全量）；② 通过正在运行的 dev server（后端 :9090，Vite :5173）用 curl 走真实 HTTP 全链路冒烟（登录→建项目→写文档→版本→Token→Git→搜索→审计→用户管理→附件→锁→导出/导入→分享→API 文档→健康检查）。
 
-**Tech Stack:** curl / jq、Go test、Vitest、Git 客户端、dev server（agentdocs :9090 + Vite :5173，WSL 环境，浏览器在 Windows）
+**Tech Stack:** curl / jq、Go test、Vitest、Git 客户端、dev server（xwiki :9090 + Vite :5173，WSL 环境，浏览器在 Windows）
 
 **环境事实：**
 - 后端 API 前缀 `/api/v1`，session cookie 认证；Agent Token 用 `Bearer ad_...`；Git 用 `Basic x:<secret>`

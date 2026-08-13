@@ -20,7 +20,7 @@ func Open(dataDir string) (*sql.DB, error) {
 	if err := os.MkdirAll(dataDir, 0o755); err != nil {
 		return nil, fmt.Errorf("create data dir: %w", err)
 	}
-	db, err := sql.Open("sqlite", filepath.Join(dataDir, "agentdocs.db"))
+	db, err := sql.Open("sqlite", filepath.Join(dataDir, "xwiki.db"))
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
 	}

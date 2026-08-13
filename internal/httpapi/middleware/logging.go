@@ -7,8 +7,8 @@ import (
 
 	"github.com/oklog/ulid/v2"
 
-	"agentdocs/internal/httpapi/request"
-	"agentdocs/internal/httpapi/response"
+	"xwiki/internal/httpapi/request"
+	"xwiki/internal/httpapi/response"
 )
 
 // RequestID ensures every request has an ID and echoes it in the response.

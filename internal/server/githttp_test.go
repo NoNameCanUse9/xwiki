@@ -123,8 +123,8 @@ func TestGitHTTPAuthMatrix(t *testing.T) {
 
 func gitIdentityEnv() []string {
 	return []string{
-		"GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@agentdocs.local",
-		"GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@agentdocs.local",
+		"GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@xwiki.local",
+		"GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@xwiki.local",
 		"GIT_CONFIG_NOSYSTEM=1",
 	}
 }

@@ -8,11 +8,11 @@ import (
 	"path/filepath"
 	"strconv"
 
-	"agentdocs/internal/agent"
-	"agentdocs/internal/config"
-	"agentdocs/internal/httpapi/request"
-	"agentdocs/internal/httpapi/response"
-	"agentdocs/internal/project"
+	"xwiki/internal/agent"
+	"xwiki/internal/config"
+	"xwiki/internal/httpapi/request"
+	"xwiki/internal/httpapi/response"
+	"xwiki/internal/project"
 )
 
 // AttachmentHandler serves binary attachment downloads backed directly by Git.

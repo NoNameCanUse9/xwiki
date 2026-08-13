@@ -1,4 +1,4 @@
-# AgentDocs：面向 AI Agent 的轻量 Git 文档管理系统开发计划
+# XWiki：面向 AI Agent 的轻量 Git 文档管理系统开发计划
 
 ## 1. 你的角色
 
@@ -18,14 +18,14 @@
 项目暂定名：
 
 ```text
-AgentDocs
+XWiki
 ```
 
 ---
 
 # 2. 产品定位
 
-AgentDocs 是一个面向人类和 AI Agent 的轻量 Git 文档服务。
+XWiki 是一个面向人类和 AI Agent 的轻量 Git 文档服务。
 
 它不是传统 Wiki，也不是完整代码托管平台，而是：
 
@@ -131,9 +131,9 @@ Windows / WSL2 开发
 最终部署形态优先为：
 
 ```text
-agentdocs
+xwiki
 data/
-├── agentdocs.db
+├── xwiki.db
 ├── repositories/
 ├── worktrees/
 └── assets/
@@ -253,7 +253,7 @@ openapi/
 assets/
 └── images/
 
-.agentdocs.yaml
+.xwiki.yaml
 ```
 
 ## 5.1 文件职责
@@ -283,7 +283,7 @@ assets/
 保存图片和附件。
 
 ```text
-.agentdocs.yaml
+.xwiki.yaml
 ```
 
 保存需要进入 Git 版本管理的项目配置。
@@ -846,7 +846,7 @@ Token 可以限制路径：
     "openapi/**"
   ],
   "deny_paths": [
-    ".agentdocs.yaml",
+    ".xwiki.yaml",
     "docs/internal/**"
   ]
 }
@@ -1092,8 +1092,8 @@ Markdown 保存成功后：
 需要提供命令：
 
 ```bash
-agentdocs reindex
-agentdocs reindex --project <project_id>
+xwiki reindex
+xwiki reindex --project <project_id>
 ```
 
 系统启动时不得强制全量重建索引。
@@ -1484,7 +1484,7 @@ internal_error
 
 ```text
 cmd/
-└── agentdocs/
+└── xwiki/
     └── main.go
 
 internal/
@@ -1590,14 +1590,14 @@ API 类型应从 OpenAPI 自动生成，避免前后端手工维护两套类型�
 Go 服务同时提供管理命令：
 
 ```bash
-agentdocs serve
-agentdocs admin create
-agentdocs project create
-agentdocs project list
-agentdocs project export
-agentdocs project import
-agentdocs reindex
-agentdocs doctor
+xwiki serve
+xwiki admin create
+xwiki project create
+xwiki project list
+xwiki project export
+xwiki project import
+xwiki reindex
+xwiki doctor
 ```
 
 `doctor` 检查：

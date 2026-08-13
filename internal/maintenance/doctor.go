@@ -79,7 +79,7 @@ func Doctor(ctx context.Context, dataDir string) (DoctorReport, error) {
 		}
 	}
 
-	dbPath := filepath.Join(absData, "agentdocs.db")
+	dbPath := filepath.Join(absData, "xwiki.db")
 	db, err := sql.Open("sqlite", "file:"+filepath.ToSlash(dbPath)+"?mode=ro")
 	if err != nil {
 		add("sqlite", CheckError, err.Error())

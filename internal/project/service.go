@@ -7,10 +7,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sync"
 
-	"agentdocs/internal/platform/clock"
-	"agentdocs/internal/platform/id"
+	"xwiki/internal/platform/clock"
+	"xwiki/internal/platform/id"
 )
 
 // Service coordinates project metadata (Store) with on-disk bare Git
@@ -104,7 +103,7 @@ func (s *Service) Get(ctx context.Context, projectID string) (*Project, error) {
 // Archive marks a project archived. The operation is idempotent: archiving an
 // already archived project succeeds and keeps the original timestamp.
 func (s *Service) Archive(ctx context.Context, projectID string) (*Project, error) {
-	unlock := lockProject(projectID)
+	unlock := LockProjectWrite(projectID)
 	defer unlock()
 	now := s.clock.Now().UTC()
 	if err := s.store.Archive(ctx, projectID, now); err != nil {
@@ -122,7 +121,7 @@ func (s *Service) Archive(ctx context.Context, projectID string) (*Project, erro
 
 // Unarchive restores an archived project (idempotent).
 func (s *Service) Unarchive(ctx context.Context, projectID string) (*Project, error) {
-	unlock := lockProject(projectID)
+	unlock := LockProjectWrite(projectID)
 	defer unlock()
 	now := s.clock.Now().UTC()
 	if err := s.store.Unarchive(ctx, projectID, now); err != nil {
@@ -139,7 +138,7 @@ type RenameInput struct {
 // Rename updates a project's name in metadata and refreshes the README
 // headline in the repository with a new commit, keeping the two in sync.
 func (s *Service) Rename(ctx context.Context, projectID string, input RenameInput) (*Project, error) {
-	unlock := lockProject(projectID)
+	unlock := LockProjectWrite(projectID)
 	defer unlock()
 	if err := ValidateName(input.Name); err != nil {
 		return nil, ErrInvalid
@@ -166,16 +165,17 @@ func (s *Service) Rename(ctx context.Context, projectID string, input RenameInpu
 	return s.store.GetByID(ctx, projectID)
 }
 
-// Delete removes a project completely: metadata row and the on-disk bare
-// repository (git history included). It is destructive and irreversible.
+// Delete moves a project to the recoverable deleted-project view. The
+// metadata row is soft-deleted (deleted_at set) and the repository stays in
+// place, so RestoreDeleted can bring the project back without disk moves.
 func (s *Service) Delete(ctx context.Context, projectID string) error {
-	unlock := lockProject(projectID)
+	unlock := LockProjectWrite(projectID)
 	defer unlock()
 	return s.store.SoftDelete(ctx, projectID, s.clock.Now().UTC())
 }
 
 func (s *Service) RestoreDeleted(ctx context.Context, projectID string) (*Project, error) {
-	unlock := lockProject(projectID)
+	unlock := LockProjectWrite(projectID)
 	defer unlock()
 	if _, err := s.store.GetDeletedByID(ctx, projectID); err != nil {
 		return nil, err
@@ -186,8 +186,11 @@ func (s *Service) RestoreDeleted(ctx context.Context, projectID string) (*Projec
 	return s.store.GetByID(ctx, projectID)
 }
 
+// PurgeDeleted permanently removes a soft-deleted project: metadata row and
+// the on-disk repository. The repository is staged in a trash directory
+// first so a failed metadata delete can roll the repo back.
 func (s *Service) PurgeDeleted(ctx context.Context, projectID string) error {
-	unlock := lockProject(projectID)
+	unlock := LockProjectWrite(projectID)
 	defer unlock()
 	p, err := s.store.GetDeletedByID(ctx, projectID)
 	if errors.Is(err, ErrNotFound) {
@@ -218,16 +221,10 @@ func (s *Service) PurgeDeleted(ctx context.Context, projectID string) error {
 	return nil
 }
 
-func lockProject(projectID string) func() {
-	mu, _ := projectLocks.LoadOrStore(projectID, &sync.Mutex{})
-	mu.(*sync.Mutex).Lock()
-	return mu.(*sync.Mutex).Unlock
-}
-
 // Purge rewrites the project's git history to remove the given paths
 // completely (hard delete, irreversible). It requires an existing project.
 func (s *Service) Purge(ctx context.Context, projectID string, paths []string, message string) error {
-	unlock := lockProject(projectID)
+	unlock := LockProjectWrite(projectID)
 	defer unlock()
 	p, err := s.store.GetByID(ctx, projectID)
 	if err != nil {

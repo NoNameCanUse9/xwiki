@@ -3,19 +3,19 @@ package config
 import "testing"
 
 func TestEnvOr(t *testing.T) {
-	t.Setenv("AGENTDOCS_TEST_X", "value")
-	if got := envOr("AGENTDOCS_TEST_X", "default"); got != "value" {
+	t.Setenv("XWIKI_TEST_X", "value")
+	if got := envOr("XWIKI_TEST_X", "default"); got != "value" {
 		t.Fatalf("envOr = %q, want %q", got, "value")
 	}
-	t.Setenv("AGENTDOCS_TEST_X", "")
-	if got := envOr("AGENTDOCS_TEST_X", "default"); got != "default" {
+	t.Setenv("XWIKI_TEST_X", "")
+	if got := envOr("XWIKI_TEST_X", "default"); got != "default" {
 		t.Fatalf("envOr = %q, want %q", got, "default")
 	}
 }
 
 func TestLoadDefaults(t *testing.T) {
-	t.Setenv("AGENTDOCS_DATA_DIR", "")
-	t.Setenv("AGENTDOCS_HTTP_ADDR", "")
+	t.Setenv("XWIKI_DATA_DIR", "")
+	t.Setenv("XWIKI_HTTP_ADDR", "")
 	cfg := Load()
 	if cfg.DataDir != "data" || cfg.HTTPAddr != ":8080" {
 		t.Fatalf("unexpected defaults: %+v", cfg)
@@ -26,8 +26,8 @@ func TestLoadDefaults(t *testing.T) {
 }
 
 func TestLoadFromEnv(t *testing.T) {
-	t.Setenv("AGENTDOCS_HTTP_ADDR", ":9090")
-	t.Setenv("AGENTDOCS_SESSION_TTL", "1h")
+	t.Setenv("XWIKI_HTTP_ADDR", ":9090")
+	t.Setenv("XWIKI_SESSION_TTL", "1h")
 	cfg := Load()
 	if cfg.HTTPAddr != ":9090" {
 		t.Fatalf("HTTPAddr = %q", cfg.HTTPAddr)

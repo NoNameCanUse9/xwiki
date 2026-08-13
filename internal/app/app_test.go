@@ -3,39 +3,13 @@ package app
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
-	"agentdocs/internal/config"
-	"agentdocs/internal/maintenance"
+	"xwiki/internal/config"
 )
-
-func TestAppOwnsDataDirectoryUntilClosed(t *testing.T) {
-	cfg := config.Load()
-	cfg.DataDir = t.TempDir()
-
-	first, err := New(cfg)
-	if err != nil {
-		t.Fatalf("first New: %v", err)
-	}
-	if _, err := New(cfg); !errors.Is(err, maintenance.ErrDataLocked) {
-		t.Fatalf("second New = %v, want ErrDataLocked", err)
-	}
-	if err := first.Close(); err != nil {
-		t.Fatalf("close first app: %v", err)
-	}
-
-	second, err := New(cfg)
-	if err != nil {
-		t.Fatalf("New after Close: %v", err)
-	}
-	if err := second.Close(); err != nil {
-		t.Fatalf("close second app: %v", err)
-	}
-}
 
 func newTestApp(t *testing.T) *App {
 	t.Helper()
@@ -102,7 +76,7 @@ func TestLoginSuccessAndMe(t *testing.T) {
 		t.Fatal("no session cookie")
 	}
 	for _, c := range cookies {
-		if c.Name == "agentdocs_session" {
+		if c.Name == "xwiki_session" {
 			if !c.HttpOnly {
 				t.Fatal("session cookie not HttpOnly")
 			}

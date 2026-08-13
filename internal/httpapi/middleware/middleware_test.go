@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
-	"agentdocs/internal/auth"
-	"agentdocs/internal/httpapi/request"
-	"agentdocs/internal/platform/clock"
-	"agentdocs/internal/store/sqlite"
-	"agentdocs/internal/user"
+	"xwiki/internal/auth"
+	"xwiki/internal/httpapi/request"
+	"xwiki/internal/platform/clock"
+	"xwiki/internal/store/sqlite"
+	"xwiki/internal/user"
 )
 
 func newAuthService(t *testing.T) *auth.Service {
@@ -60,7 +60,7 @@ func TestSessionAuthRejectsMissingOrInvalidCookie(t *testing.T) {
 
 	rec = httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.AddCookie(&http.Cookie{Name: "agentdocs_session", Value: "garbage"})
+	req.AddCookie(&http.Cookie{Name: "xwiki_session", Value: "garbage"})
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("bad cookie: status = %d, want 401", rec.Code)
@@ -108,7 +108,7 @@ func TestSessionAuthAcceptsValidSession(t *testing.T) {
 	}))
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.AddCookie(&http.Cookie{Name: "agentdocs_session", Value: token})
+	req.AddCookie(&http.Cookie{Name: "xwiki_session", Value: token})
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)

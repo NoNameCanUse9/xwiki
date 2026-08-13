@@ -6,13 +6,13 @@ import (
 	"log/slog"
 	"net/http"
 
-	"agentdocs/internal/agent"
-	"agentdocs/internal/config"
-	"agentdocs/internal/httpapi/middleware"
-	"agentdocs/internal/httpapi/request"
-	"agentdocs/internal/httpapi/response"
-	"agentdocs/internal/project"
-	"agentdocs/internal/search"
+	"xwiki/internal/agent"
+	"xwiki/internal/config"
+	"xwiki/internal/httpapi/middleware"
+	"xwiki/internal/httpapi/request"
+	"xwiki/internal/httpapi/response"
+	"xwiki/internal/project"
+	"xwiki/internal/search"
 )
 
 // ProjectHandler serves the /api/v1/projects endpoints.
@@ -24,8 +24,8 @@ type ProjectHandler struct {
 	log       *slog.Logger
 }
 
-func NewProjectHandler(cfg *config.Config, svc *project.Service, agentSvc *agent.Service, searchSvc *search.Service, log *slog.Logger) *ProjectHandler {
-	return &ProjectHandler{cfg: cfg, svc: svc, agentSvc: agentSvc, searchSvc: searchSvc, log: log}
+func NewProjectHandler(cfg *config.Config, svc *project.Service, searchSvc *search.Service, agentSvc *agent.Service, log *slog.Logger) *ProjectHandler {
+	return &ProjectHandler{cfg: cfg, svc: svc, searchSvc: searchSvc, agentSvc: agentSvc, log: log}
 }
 
 type createProjectRequest struct {
@@ -35,6 +35,9 @@ type createProjectRequest struct {
 
 // Create handles POST /api/v1/projects.
 func (h *ProjectHandler) Create(w http.ResponseWriter, r *http.Request) {
+	if !sessionOnly(w, r) {
+		return
+	}
 	var req createProjectRequest
 	if err := request.DecodeJSON(w, r, &req, h.cfg.MaxBodyBytes); err != nil {
 		response.WriteError(w, r, http.StatusBadRequest, "validation_failed", "invalid request body")
@@ -58,8 +61,10 @@ func (h *ProjectHandler) Create(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	if _, err := h.searchSvc.ReindexProject(r.Context(), p.ID); err != nil {
-		h.log.Warn("reindex after create failed", "error", err, "project_id", p.ID)
+	if h.searchSvc != nil {
+		if _, err := h.searchSvc.ReindexProject(r.Context(), p.ID); err != nil {
+			h.log.Warn("reindex after project create failed", "error", err, "project_id", p.ID)
+		}
 	}
 	response.WriteJSON(w, http.StatusCreated, map[string]any{"project": p})
 }
@@ -106,6 +111,9 @@ func (h *ProjectHandler) List(w http.ResponseWriter, r *http.Request) {
 // Get handles GET /api/v1/projects/{id}.
 func (h *ProjectHandler) Get(w http.ResponseWriter, r *http.Request) {
 	projectID := request.PathParam(r, "id")
+	if !authorizeAgentRead(h.agentSvc, w, r, projectID) {
+		return
+	}
 	p, err := h.svc.Get(r.Context(), projectID)
 	if err != nil {
 		if errors.Is(err, project.ErrNotFound) {
@@ -121,6 +129,9 @@ func (h *ProjectHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 // ImportFolder handles POST /api/v1/projects/import-folder (multipart: files + name).
 func (h *ProjectHandler) ImportFolder(w http.ResponseWriter, r *http.Request) {
+	if !sessionOnly(w, r) {
+		return
+	}
 	if err := r.ParseMultipartForm(256 << 20); err != nil {
 		response.WriteError(w, r, http.StatusBadRequest, "invalid_upload", "multipart body required")
 		return
@@ -146,7 +157,7 @@ func (h *ProjectHandler) ImportFolder(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		defer f.Close()
-		buf, err := io.ReadAll(f)
+		buf, err := io.ReadAll(io.LimitReader(f, project.MaxImportFileBytes+1))
 		if err != nil {
 			response.WriteError(w, r, http.StatusBadRequest, "invalid_upload", "cannot read uploaded file")
 			return
@@ -194,6 +205,9 @@ func (h *ProjectHandler) ImportFolder(w http.ResponseWriter, r *http.Request) {
 // Unarchive handles POST /api/v1/projects/{id}/unarchive.
 func (h *ProjectHandler) Unarchive(w http.ResponseWriter, r *http.Request) {
 	projectID := request.PathParam(r, "id")
+	if !authorizeAgentWrite(h.agentSvc, w, r, projectID) {
+		return
+	}
 	p, err := h.svc.Unarchive(r.Context(), projectID)
 	if err != nil {
 		if errors.Is(err, project.ErrNotFound) {
@@ -210,6 +224,9 @@ func (h *ProjectHandler) Unarchive(w http.ResponseWriter, r *http.Request) {
 // Archive handles POST /api/v1/projects/{id}/archive.
 func (h *ProjectHandler) Archive(w http.ResponseWriter, r *http.Request) {
 	projectID := request.PathParam(r, "id")
+	if !authorizeAgentWrite(h.agentSvc, w, r, projectID) {
+		return
+	}
 	p, err := h.svc.Archive(r.Context(), projectID)
 	if err != nil {
 		if errors.Is(err, project.ErrNotFound) {
@@ -231,6 +248,9 @@ type renameProjectRequest struct {
 // and refreshes the repository README headline.
 func (h *ProjectHandler) Rename(w http.ResponseWriter, r *http.Request) {
 	projectID := request.PathParam(r, "id")
+	if !authorizeAgentWrite(h.agentSvc, w, r, projectID) {
+		return
+	}
 	var req renameProjectRequest
 	if err := request.DecodeJSON(w, r, &req, h.cfg.MaxBodyBytes); err != nil {
 		response.WriteError(w, r, http.StatusBadRequest, "validation_failed", "invalid request body")
@@ -253,8 +273,10 @@ func (h *ProjectHandler) Rename(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	if _, err := h.searchSvc.ReindexProject(r.Context(), projectID); err != nil {
-		h.log.Warn("reindex after rename failed", "error", err, "project_id", projectID)
+	if h.searchSvc != nil {
+		if _, err := h.searchSvc.ReindexProject(r.Context(), projectID); err != nil {
+			h.log.Warn("reindex after project rename failed", "error", err, "project_id", projectID)
+		}
 	}
 	response.WriteJSON(w, http.StatusOK, map[string]any{"project": p})
 }
@@ -263,6 +285,9 @@ func (h *ProjectHandler) Rename(w http.ResponseWriter, r *http.Request) {
 // recoverable deleted-project view while keeping its repository intact.
 func (h *ProjectHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	projectID := request.PathParam(r, "id")
+	if !sessionOnly(w, r) {
+		return
+	}
 	if err := h.svc.Delete(r.Context(), projectID); err != nil {
 		if errors.Is(err, project.ErrNotFound) {
 			response.WriteError(w, r, http.StatusNotFound, "project_not_found", "project not found")
@@ -329,6 +354,9 @@ type purgePathsRequest struct {
 // remove the given paths completely (hard delete, irreversible).
 func (h *ProjectHandler) Purge(w http.ResponseWriter, r *http.Request) {
 	projectID := request.PathParam(r, "id")
+	if !sessionOnly(w, r) {
+		return
+	}
 	var req purgePathsRequest
 	if err := request.DecodeJSON(w, r, &req, h.cfg.MaxBodyBytes); err != nil {
 		response.WriteError(w, r, http.StatusBadRequest, "validation_failed", "invalid request body")
@@ -354,4 +382,12 @@ func (h *ProjectHandler) Purge(w http.ResponseWriter, r *http.Request) {
 		h.log.Warn("reindex after purge failed", "error", err, "project_id", projectID)
 	}
 	response.WriteJSON(w, http.StatusOK, map[string]any{"purged": true})
+}
+
+func sessionOnly(w http.ResponseWriter, r *http.Request) bool {
+	if middleware.AgentSecret(r) != "" {
+		response.WriteError(w, r, http.StatusForbidden, "session_required", "this operation requires a session")
+		return false
+	}
+	return true
 }

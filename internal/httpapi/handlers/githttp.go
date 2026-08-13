@@ -12,12 +12,12 @@ import (
 	"strconv"
 	"strings"
 
-	"agentdocs/internal/agent"
-	"agentdocs/internal/httpapi/middleware"
-	"agentdocs/internal/httpapi/request"
-	"agentdocs/internal/httpapi/response"
-	"agentdocs/internal/project"
-	"agentdocs/internal/search"
+	"xwiki/internal/agent"
+	"xwiki/internal/httpapi/middleware"
+	"xwiki/internal/httpapi/request"
+	"xwiki/internal/httpapi/response"
+	"xwiki/internal/project"
+	"xwiki/internal/search"
 )
 
 // GitHTTPHandler proxies git http-backend for smart HTTP clone/pull/push.
@@ -64,7 +64,7 @@ func (h *GitHTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		secret = basicToken(r)
 	}
 	if secret == "" && middleware.UserFrom(r) == nil {
-		w.Header().Set("WWW-Authenticate", `Basic realm="agentdocs"`)
+		w.Header().Set("WWW-Authenticate", `Basic realm="xwiki"`)
 		response.WriteError(w, r, http.StatusUnauthorized, "authentication_required", "token or login required")
 		return
 	}
@@ -82,11 +82,22 @@ func (h *GitHTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	h.proxy(w, r, projectID, sub, isWrite)
+	if isWrite {
+		unlock := project.LockProjectWrite(projectID)
+		h.proxy(w, r, projectID, sub)
+		unlock()
+		if h.searchSvc != nil {
+			if _, err := h.searchSvc.ReindexProject(r.Context(), projectID); err != nil {
+				h.log.Warn("reindex after git push failed", "error", err, "project_id", projectID)
+			}
+		}
+		return
+	}
+	h.proxy(w, r, projectID, sub)
 }
 
 // proxy runs git http-backend with CGI environment and streams the response.
-func (h *GitHTTPHandler) proxy(w http.ResponseWriter, r *http.Request, projectID, sub string, isWrite bool) {
+func (h *GitHTTPHandler) proxy(w http.ResponseWriter, r *http.Request, projectID, sub string) {
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 
@@ -96,7 +107,7 @@ func (h *GitHTTPHandler) proxy(w http.ResponseWriter, r *http.Request, projectID
 		"QUERY_STRING="+r.URL.RawQuery,
 		"CONTENT_TYPE="+r.Header.Get("Content-Type"),
 		"CONTENT_LENGTH="+strconv.FormatInt(r.ContentLength, 10),
-		"REMOTE_USER=agentdocs",
+		"REMOTE_USER=xwiki",
 		"GIT_PROJECT_ROOT="+h.svc.ReposRoot()+string(os.PathSeparator)+projectID,
 		"GIT_HTTP_EXPORT_ALL=1",
 		"GIT_CONFIG_NOSYSTEM=1",
@@ -200,12 +211,7 @@ func (h *GitHTTPHandler) proxy(w http.ResponseWriter, r *http.Request, projectID
 		_, _ = w.Write(rest)
 	}
 	_, _ = io.Copy(w, stdout)
-	cmdErr := cmd.Wait()
-	if isWrite && cmdErr == nil {
-		if _, err := h.searchSvc.ReindexProject(context.Background(), projectID); err != nil {
-			h.log.Warn("reindex after git push failed", "error", err, "project_id", projectID)
-		}
-	}
+	_ = cmd.Wait()
 	if ctx.Err() != nil {
 		h.log.Debug("git http request cancelled", "project_id", projectID)
 	}

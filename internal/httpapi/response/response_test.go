@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"agentdocs/internal/httpapi/request"
+	"xwiki/internal/httpapi/request"
 )
 
 func TestWriteErrorEnvelope(t *testing.T) {

@@ -1,4 +1,4 @@
-module agentdocs
+module xwiki
 
 go 1.26.5
 

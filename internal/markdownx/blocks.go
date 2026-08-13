@@ -1,4 +1,4 @@
-// Package markdownx extends goldmark with AgentDocs-specific block syntax:
+// Package markdownx extends goldmark with XWiki-specific block syntax:
 //
 //	:::info 标题
 //	内容...

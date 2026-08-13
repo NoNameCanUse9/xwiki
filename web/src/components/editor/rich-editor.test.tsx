@@ -58,6 +58,18 @@ describe("RichEditor", () => {
     rerender(<RichEditor initialMarkdown="" onChange={vi.fn()} readOnly={false} />);
     expect(screen.getByRole("textbox")).toHaveAttribute("contenteditable", "true");
   });
+
+  it("syntax-highlights fenced json code blocks", async () => {
+    render(
+      <RichEditor
+        initialMarkdown={'```json\n{"cabinet_no": "LB1830502359"}\n```'}
+        onChange={vi.fn()}
+      />,
+    );
+    // lowlight decorations wrap tokens in hljs-* spans.
+    const attr = await screen.findByText('"cabinet_no"');
+    expect(attr.className).toContain("hljs-attr");
+  });
 });
 
 describe("no persistent toolbar", () => {

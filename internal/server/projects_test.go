@@ -23,7 +23,7 @@ func loginAndGetCookie(t *testing.T, h http.Handler) string {
 		t.Fatalf("login: status = %d body = %s", rec.Code, rec.Body.String())
 	}
 	for _, c := range rec.Result().Cookies() {
-		if c.Name == "agentdocs_session" {
+		if c.Name == "xwiki_session" {
 			return c.Value
 		}
 	}
@@ -38,7 +38,7 @@ func apiRequest(h http.Handler, method, path, cookie, payload string) *httptest.
 	}
 	req := httptest.NewRequest(method, path, body)
 	if cookie != "" {
-		req.AddCookie(&http.Cookie{Name: "agentdocs_session", Value: cookie})
+		req.AddCookie(&http.Cookie{Name: "xwiki_session", Value: cookie})
 	}
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)

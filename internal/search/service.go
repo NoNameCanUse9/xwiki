@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"agentdocs/internal/platform/clock"
-	"agentdocs/internal/project"
+	"xwiki/internal/platform/clock"
+	"xwiki/internal/project"
 )
 
 // wikiLinkPattern matches [[path]] and [[path|label]] inside markdown sources.

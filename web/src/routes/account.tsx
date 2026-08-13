@@ -127,7 +127,7 @@ export default function AccountPage() {
 
       <footer className="border-t border-[var(--color-rule)] px-6 py-4">
         <p className="mono-label text-[var(--color-ink-3)]">
-          agentdocs · account settings
+          xwiki · account settings
         </p>
       </footer>
     </div>

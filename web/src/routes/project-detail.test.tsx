@@ -93,7 +93,7 @@ describe("ProjectDetailPage", () => {
 		renderPage();
 		const input = await screen.findByLabelText("搜索提交历史");
 		await user.type(input, "release");
-		await user.click(screen.getByRole("button", { name: "搜索提交" }));
+		// Debounced (300 ms) commit search fires without a submit button.
 		await vi.waitFor(() => expect(historyApi.listCommits).toHaveBeenCalledWith("prj_1", 5, 0, "release"));
 		expect(await screen.findByText("fix release")).toBeInTheDocument();
 		await user.click(screen.getByRole("button", { name: "加载更多" }));

@@ -1,55 +1,58 @@
 name: CI
-
 on:
-  workflow_call:
   push:
-    branches: [main]
   pull_request:
-
-permissions:
-  contents: read
-
 jobs:
-  test:
+  main:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: Check formatting
-        run: test -z "$(find . -path ./web/node_modules -prune -o -name '*.go' -print0 | xargs -0 gofmt -l)"
-
-      - name: Vet
-        run: go vet ./...
-
-      - name: Test Go
-        run: go test ./... -count=1
-
-      - name: Build server
-        run: go build ./cmd/agentdocs
-
+        with: { go-version: '1.24' }
+      - run: go test ./...
+      - run: go vet ./...
+      - run: go build ./cmd/xwiki
       - uses: actions/setup-node@v4
-        with:
-          node-version: 26
-          cache: npm
-          cache-dependency-path: web/package-lock.json
-
-      - name: Install Web dependencies
+        with: { node-version: '22' }
+      - uses: pnpm/action-setup@v4
+        with: { version: 10 }
+      - run: pnpm install --frozen-lockfile
         working-directory: web
-        run: npm ci
-
-      - name: Test Web
+      - run: pnpm test -- --run
         working-directory: web
-        run: npm test
-
-      - name: Lint Web
+      - run: pnpm build
         working-directory: web
-        run: npm run lint
-
-      - name: Build Web
-        working-directory: web
-        run: npm run build
+      - run: docker build -t xwiki-ci .
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { path: server, ref: main }
+      - uses: actions/checkout@v4
+        with: { path: app, ref: app }
+      - uses: actions/setup-go@v5
+        with: { go-version: '1.24' }
+      - uses: dtolnay/rust-toolchain@stable
+        with: { components: rustfmt }
+      - name: Install GUI build deps
+        run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev libfreetype6-dev libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev
+      - name: Build server
+        run: go build -o xwiki ./cmd/xwiki
+        working-directory: server
+      - name: Seed admin and start server
+        working-directory: server
+        run: |
+          git config --global user.email ci@xwiki.local
+          git config --global user.name "xwiki ci"
+          XWIKI_DATA_DIR=/tmp/xwiki-data ./xwiki admin create -username admin -password secret123
+          XWIKI_DATA_DIR=/tmp/xwiki-data XWIKI_HTTP_ADDR=127.0.0.1:9090 ./xwiki serve &
+          for i in $(seq 1 60); do
+            curl -sf http://127.0.0.1:9090/api/v1/meta >/dev/null && exit 0
+            sleep 1
+          done
+          exit 1
+      - name: Run cross-branch contract tests
+        working-directory: app
+        env:
+          XWIKI_TEST_SERVER: http://127.0.0.1:9090
+        run: cargo test e2e_contracts -- --ignored

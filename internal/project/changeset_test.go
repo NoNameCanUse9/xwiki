@@ -3,6 +3,7 @@ package project
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -44,7 +45,7 @@ func TestApplyChangesetMultipleFilesOneCommit(t *testing.T) {
 			{Op: "update", Path: "README.md", Content: "# docs-site\n\nupdated\n"},
 			{Op: "move", Path: "docs/guide.md", NewPath: "docs/handbook.md"},
 		},
-	}, CommitAuthor{Name: "Test Author", Email: "test@agentdocs.local"})
+	}, CommitAuthor{Name: "Test Author", Email: "test@xwiki.local"})
 	if err != nil {
 		t.Fatalf("ApplyChangeset: %v", err)
 	}
@@ -86,7 +87,7 @@ func TestApplyChangesetStaleRevisionConflict(t *testing.T) {
 		BaseRevision: base,
 		Message:      "first",
 		Changes:      []Change{{Op: "create", Path: "a.md", Content: "a"}},
-	}, CommitAuthor{Name: "Test Author", Email: "test@agentdocs.local"}); err != nil {
+	}, CommitAuthor{Name: "Test Author", Email: "test@xwiki.local"}); err != nil {
 		t.Fatal(err)
 	}
 	// Second commit with the stale base revision must conflict.
@@ -94,7 +95,7 @@ func TestApplyChangesetStaleRevisionConflict(t *testing.T) {
 		BaseRevision: base,
 		Message:      "second",
 		Changes:      []Change{{Op: "create", Path: "b.md", Content: "b"}},
-	}, CommitAuthor{Name: "Test Author", Email: "test@agentdocs.local"})
+	}, CommitAuthor{Name: "Test Author", Email: "test@xwiki.local"})
 	if !errors.Is(err, ErrConflict) {
 		t.Fatalf("want ErrConflict, got %v", err)
 	}
@@ -113,7 +114,7 @@ func TestApplyChangesetFailureLeavesNoCommitOrWorktree(t *testing.T) {
 		BaseRevision: base,
 		Message:      "bad",
 		Changes:      []Change{{Op: "create", Path: "../evil.md", Content: "x"}},
-	}, CommitAuthor{Name: "Test Author", Email: "test@agentdocs.local"})
+	}, CommitAuthor{Name: "Test Author", Email: "test@xwiki.local"})
 	if err == nil {
 		t.Fatal("traversal path accepted")
 	}
@@ -125,7 +126,8 @@ func TestApplyChangesetFailureLeavesNoCommitOrWorktree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Count(wts, "worktree ") > 1 {
+	// git prints forward slashes even on Windows; compare in slash form.
+	if !strings.Contains(wts, filepath.ToSlash(repo.Dir)) || strings.Count(wts, "worktree ") > 1 {
 		t.Fatalf("worktree residue: %q", wts)
 	}
 }
@@ -139,7 +141,7 @@ func TestApplyChangesetDryRun(t *testing.T) {
 		Message:      "preview",
 		DryRun:       true,
 		Changes:      []Change{{Op: "create", Path: "preview.md", Content: "p"}},
-	}, CommitAuthor{Name: "Test Author", Email: "test@agentdocs.local"})
+	}, CommitAuthor{Name: "Test Author", Email: "test@xwiki.local"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -171,7 +173,7 @@ func TestApplyChangesetArchivedProjectRejected(t *testing.T) {
 		BaseRevision: "x",
 		Message:      "nope",
 		Changes:      []Change{{Op: "create", Path: "a.md", Content: "a"}},
-	}, CommitAuthor{Name: "Test Author", Email: "test@agentdocs.local"})
+	}, CommitAuthor{Name: "Test Author", Email: "test@xwiki.local"})
 	if !errors.Is(err, ErrArchived) {
 		t.Fatalf("want ErrArchived, got %v", err)
 	}
@@ -188,7 +190,7 @@ func TestApplyChangesetRejectsInvalidOpsAndPaths(t *testing.T) {
 		{BaseRevision: "deadbeef", Message: "m", Changes: []Change{{Op: "create", Path: "a.md", Content: "x"}}},                    // unknown base
 	}
 	for i, cs := range cases {
-		if _, err := svc.ApplyChangeset(context.Background(), pid, cs, CommitAuthor{Name: "Test Author", Email: "test@agentdocs.local"}); err == nil {
+		if _, err := svc.ApplyChangeset(context.Background(), pid, cs, CommitAuthor{Name: "Test Author", Email: "test@xwiki.local"}); err == nil {
 			t.Fatalf("case %d: expected error", i)
 		}
 	}
@@ -206,7 +208,7 @@ func TestDefaultMessageAndAuthorIdentity(t *testing.T) {
 	if _, err := svc.ApplyChangeset(context.Background(), pid, ChangesetInput{
 		BaseRevision: base,
 		Changes:      []Change{{Op: "create", Path: "docs/auto.md", Content: "# Auto\n"}},
-	}, CommitAuthor{Name: "Carol Chen", Email: "carol@agentdocs.local"}); err != nil {
+	}, CommitAuthor{Name: "Carol Chen", Email: "carol@xwiki.local"}); err != nil {
 		t.Fatal(err)
 	}
 	out, err := gitOutput(context.Background(), repo.Dir, "log", "-1", "--format=%s%x1f%an%x1f%ae")
@@ -224,7 +226,7 @@ func TestDefaultMessageAndAuthorIdentity(t *testing.T) {
 	if !regexp.MustCompile(`^\d{4}-\d{2}-\d{2} \d{2}:\d{2} `).MatchString(parts[0]) {
 		t.Fatalf("message missing time prefix: %q", parts[0])
 	}
-	if parts[1] != "Carol Chen" || parts[2] != "carol@agentdocs.local" {
+	if parts[1] != "Carol Chen" || parts[2] != "carol@xwiki.local" {
 		t.Fatalf("author identity wrong: %v", parts[1:])
 	}
 }

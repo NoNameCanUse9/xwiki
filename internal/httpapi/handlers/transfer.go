@@ -5,13 +5,13 @@ import (
 	"log/slog"
 	"net/http"
 
-	"agentdocs/internal/agent"
-	"agentdocs/internal/config"
-	"agentdocs/internal/httpapi/middleware"
-	"agentdocs/internal/httpapi/request"
-	"agentdocs/internal/httpapi/response"
-	"agentdocs/internal/project"
-	"agentdocs/internal/search"
+	"xwiki/internal/agent"
+	"xwiki/internal/config"
+	"xwiki/internal/httpapi/middleware"
+	"xwiki/internal/httpapi/request"
+	"xwiki/internal/httpapi/response"
+	"xwiki/internal/project"
+	"xwiki/internal/search"
 )
 
 // TransferHandler serves import/export endpoints.
@@ -64,6 +64,9 @@ func (h *TransferHandler) ExportBundle(w http.ResponseWriter, r *http.Request) {
 // Import handles POST /api/v1/projects/{id}/import.
 func (h *TransferHandler) Import(w http.ResponseWriter, r *http.Request) {
 	projectID := request.PathParam(r, "id")
+	if !authorizeAgentWrite(h.agentSvc, w, r, projectID) {
+		return
+	}
 	var input project.ImportZipInput
 	if err := request.DecodeJSON(w, r, &input, h.cfg.MaxBodyBytes*4); err != nil {
 		response.WriteError(w, r, http.StatusBadRequest, "invalid_import", "invalid import body")
@@ -95,7 +98,9 @@ func (h *TransferHandler) ImportRepo(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, r, err)
 		return
 	}
-	h.reindex(r, res.Project.ID)
+	if h.searchSvc != nil {
+		_, _ = h.searchSvc.ReindexProject(r.Context(), res.Project.ID)
+	}
 	_ = h.agentSvc.Audit(r.Context(), "user", middleware.ActorID(r), res.Project.ID,
 		"import.repo", "", url, request.RequestID(r))
 	response.WriteJSON(w, http.StatusCreated, map[string]any{
@@ -116,17 +121,20 @@ func (h *TransferHandler) ImportBundle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer file.Close()
+	const maxBundleBytes = 256 << 20
 	buf := make([]byte, 0, 1<<20)
 	chunk := make([]byte, 1<<20)
 	for {
 		n, err := file.Read(chunk)
-		buf = append(buf, chunk[:n]...)
+		if n > 0 {
+			if len(buf)+n > maxBundleBytes {
+				response.WriteError(w, r, http.StatusRequestEntityTooLarge, "bundle_too_large", "bundle exceeds 256 MiB")
+				return
+			}
+			buf = append(buf, chunk[:n]...)
+		}
 		if err != nil {
 			break
-		}
-		if len(buf) > 256<<20 {
-			response.WriteError(w, r, http.StatusRequestEntityTooLarge, "bundle_too_large", "bundle exceeds 256 MiB")
-			return
 		}
 	}
 	res, err := h.svc.ImportBundle(r.Context(), project.ImportBundleInput{Name: name, Bundle: buf})
@@ -134,7 +142,9 @@ func (h *TransferHandler) ImportBundle(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, r, err)
 		return
 	}
-	h.reindex(r, res.Project.ID)
+	if h.searchSvc != nil {
+		_, _ = h.searchSvc.ReindexProject(r.Context(), res.Project.ID)
+	}
 	_ = h.agentSvc.Audit(r.Context(), "user", middleware.ActorID(r), res.Project.ID,
 		"import.bundle", "", name, request.RequestID(r))
 	response.WriteJSON(w, http.StatusCreated, map[string]any{

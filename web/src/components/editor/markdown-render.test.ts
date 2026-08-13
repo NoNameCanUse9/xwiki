@@ -29,6 +29,25 @@ describe("enhanceRenderedMarkdown", () => {
     expect(root.querySelector("code")?.classList.contains("hljs")).toBe(true);
   });
 
+  it("highlights language-less json blocks", async () => {
+    const root = makeRoot(
+      `<pre><code>{"a": 1, "b": [1, 2]}</code></pre>`,
+    );
+    await enhanceRenderedMarkdown(root);
+    const code = root.querySelector("code")!;
+    expect(code.classList.contains("hljs")).toBe(true);
+    expect(code.classList.contains("language-json")).toBe(true);
+    expect(code.querySelector(".hljs-attr")).not.toBeNull();
+  });
+
+  it("auto-detects language-less non-json code blocks", async () => {
+    const root = makeRoot(
+      `<pre><code>const x = 1;</code></pre>`,
+    );
+    await enhanceRenderedMarkdown(root);
+    expect(root.querySelector("code")?.classList.contains("hljs")).toBe(true);
+  });
+
   it("renders mermaid blocks into svg", async () => {
     const root = makeRoot(
       `<pre><code class="language-mermaid">graph LR; A-->B</code></pre>`,

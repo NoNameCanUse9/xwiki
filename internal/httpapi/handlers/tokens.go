@@ -5,11 +5,11 @@ import (
 	"log/slog"
 	"net/http"
 
-	"agentdocs/internal/agent"
-	"agentdocs/internal/config"
-	"agentdocs/internal/httpapi/middleware"
-	"agentdocs/internal/httpapi/request"
-	"agentdocs/internal/httpapi/response"
+	"xwiki/internal/agent"
+	"xwiki/internal/config"
+	"xwiki/internal/httpapi/middleware"
+	"xwiki/internal/httpapi/request"
+	"xwiki/internal/httpapi/response"
 )
 
 // TokenHandler manages agent tokens (session-authenticated only).
@@ -85,6 +85,9 @@ func (h *TokenHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 
 // Audit handles GET /api/v1/projects/{id}/audit (session only).
 func (h *TokenHandler) Audit(w http.ResponseWriter, r *http.Request) {
+	if !sessionOnly(w, r) {
+		return
+	}
 	projectID := request.PathParam(r, "id")
 	entries, err := h.svc.StoreRecent(r.Context(), projectID, 50)
 	if err != nil {

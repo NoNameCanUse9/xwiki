@@ -25,6 +25,8 @@ vi.mock("@/lib/api/changesets", () => ({
 
 vi.mock("@/lib/api/history", () => ({
 	fileHistory: vi.fn(),
+	listCommits: vi.fn(),
+	getCommitDiff: vi.fn(),
 }));
 
 vi.mock("@/lib/api/locks", () => ({
@@ -110,6 +112,7 @@ describe("DocsViewerPage", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
 		localStorage.clear();
+		vi.mocked(historyApi.listCommits).mockResolvedValue({ commits: [] });
 		// _sidebar.md 查询默认失败（多数测试不关心侧栏菜单）
 		vi.mocked(docsApi.getPage).mockRejectedValue(new Error("no sidebar"));
 		// 编辑锁默认可获取/可释放/可续期。
@@ -126,7 +129,8 @@ describe("DocsViewerPage", () => {
 		vi.mocked(locksApi.getLock).mockResolvedValue({ lock: null });
 		vi.mocked(locksApi.lockFromError).mockImplementation(
 			(err) =>
-				((err as { data?: { lock?: EditLock } })?.data?.lock ?? null) as EditLock | null,
+				((err as { data?: { lock?: EditLock } })?.data?.lock ??
+					null) as EditLock | null,
 		);
 	});
 
@@ -142,6 +146,13 @@ describe("DocsViewerPage", () => {
 		await new Promise((r) => setTimeout(r, 400));
 		expect(screen.queryAllByText("docs").length).toBeGreaterThanOrEqual(1);
 		expect(screen.queryAllByText("README.md").length).toBeGreaterThanOrEqual(1);
+		const readme = screen.getByRole("button", { name: "README.md" });
+		const changes = screen.getByRole("region", { name: "项目变更记录" });
+		expect(
+			readme.compareDocumentPosition(changes) &
+				Node.DOCUMENT_POSITION_FOLLOWING,
+		).toBeTruthy();
+		expect(screen.getByRole("main")).not.toHaveClass("sm:ml-64");
 		expect(docsApi.getHome).not.toHaveBeenCalled();
 	});
 
@@ -223,9 +234,19 @@ describe("DocsViewerPage", () => {
 		vi.mocked(docsApi.getPage).mockImplementation(
 			async (_id: string, path?: string, format?: string) => {
 				if (path === "guide.md" && format === "raw") {
-					return { path: "guide.md", format: "raw", content: "# Guide\n", revision: "loaded-rev" };
+					return {
+						path: "guide.md",
+						format: "raw",
+						content: "# Guide\n",
+						revision: "loaded-rev",
+					};
 				}
-				return { path: path ?? "guide.md", format: "html", content: "<h1>Guide</h1>", revision: "loaded-rev" };
+				return {
+					path: path ?? "guide.md",
+					format: "html",
+					content: "<h1>Guide</h1>",
+					revision: "loaded-rev",
+				};
 			},
 		);
 		vi.mocked(docsApi.getTree).mockResolvedValue({
@@ -305,9 +326,19 @@ describe("DocsViewerPage", () => {
 		vi.mocked(docsApi.getPage).mockImplementation(
 			async (_id: string, path?: string, format?: string) => {
 				if (path === "guide.md" && format === "raw") {
-					return { path: "guide.md", format: "raw", content: "# Guide\n", revision: "rev1" };
+					return {
+						path: "guide.md",
+						format: "raw",
+						content: "# Guide\n",
+						revision: "rev1",
+					};
 				}
-				return { path: path ?? "guide.md", format: "html", content: "<h1>Guide</h1>", revision: "rev1" };
+				return {
+					path: path ?? "guide.md",
+					format: "html",
+					content: "<h1>Guide</h1>",
+					revision: "rev1",
+				};
 			},
 		);
 		vi.mocked(docsApi.getTree).mockResolvedValue({
@@ -343,19 +374,15 @@ describe("DocsViewerPage", () => {
 		await new Promise((r) => setTimeout(r, 400));
 		expect(screen.queryByText("文档已被他人修改，请刷新后重试")).not.toBeNull();
 		expect(
-			screen
-				.queryAllByRole("textbox")
-				.find((el) => el.tagName !== "INPUT"),
+			screen.queryAllByRole("textbox").find((el) => el.tagName !== "INPUT"),
 		).toBeTruthy();
 		expect(locksApi.releaseLock).not.toHaveBeenCalled();
 		const saved = JSON.parse(
-			localStorage.getItem("agentdocs:draft:prj_1:guide.md") ?? "null",
+			localStorage.getItem("xwiki:draft:prj_1:guide.md") ?? "null",
 		);
 		expect(saved).toMatchObject({
-			version: 1,
-			project_id: "prj_1",
-			path: "guide.md",
-			base_revision: "rev1",
+			content: expect.any(String),
+			baseRevision: "rev1",
 		});
 	});
 });
@@ -436,9 +463,7 @@ describe("DocsViewerPage sidebar", () => {
 
 describe("DocsViewerPage edit sessions", () => {
 	const getEditor = () =>
-		screen
-			.queryAllByRole("textbox")
-			.find((el) => el.tagName !== "INPUT");
+		screen.queryAllByRole("textbox").find((el) => el.tagName !== "INPUT");
 
 	function mockGuidePage() {
 		vi.mocked(docsApi.getPage).mockImplementation(
@@ -459,14 +484,10 @@ describe("DocsViewerPage edit sessions", () => {
 	it("requires an explicit choice for a draft based on an older revision", async () => {
 		mockGuidePage();
 		localStorage.setItem(
-			"agentdocs:draft:prj_1:guide.md",
+			"xwiki:draft:prj_1:guide.md",
 			JSON.stringify({
-				version: 1,
-				project_id: "prj_1",
-				path: "guide.md",
 				content: "# Local draft\n",
-				base_revision: "old-rev",
-				updated_at: "2026-08-12T12:00:00Z",
+				baseRevision: "old-rev",
 			}),
 		);
 		const user = userEvent.setup();
@@ -474,8 +495,12 @@ describe("DocsViewerPage edit sessions", () => {
 
 		await user.click(await screen.findByRole("button", { name: /解锁编辑/ }));
 		expect(await screen.findByText(/本地草稿基于旧版本/)).toBeInTheDocument();
-		expect(screen.getByRole("button", { name: "恢复本地草稿" })).toBeInTheDocument();
-		expect(screen.getByRole("button", { name: "使用服务器版本" })).toBeInTheDocument();
+		expect(
+			screen.getByRole("button", { name: "恢复本地草稿" }),
+		).toBeInTheDocument();
+		expect(
+			screen.getByRole("button", { name: "使用服务器版本" }),
+		).toBeInTheDocument();
 		expect(getEditor()).toBeUndefined();
 	});
 
@@ -498,7 +523,8 @@ describe("DocsViewerPage edit sessions", () => {
 		vi.mocked(locksApi.getLock).mockResolvedValue({ lock: null });
 		vi.mocked(locksApi.lockFromError).mockImplementation(
 			(err) =>
-				((err as { data?: { lock?: EditLock } })?.data?.lock ?? null) as EditLock | null,
+				((err as { data?: { lock?: EditLock } })?.data?.lock ??
+					null) as EditLock | null,
 		);
 	});
 
@@ -693,7 +719,9 @@ describe("DocsViewerPage edit sessions", () => {
 		renderPage("/projects/prj_1/docs/guide.md");
 
 		await user.click(await screen.findByRole("button", { name: /解锁编辑/ }));
-		expect(await screen.findByRole("button", { name: "强制解锁" })).toBeInTheDocument();
+		expect(
+			await screen.findByRole("button", { name: "强制解锁" }),
+		).toBeInTheDocument();
 		// Still read-only: no editor.
 		expect(getEditor()).toBeUndefined();
 	});
@@ -725,10 +753,7 @@ describe("DocsViewerPage edit sessions", () => {
 		await user.click(screen.getByRole("button", { name: "强制解锁" }));
 		await new Promise((r) => setTimeout(r, 100));
 		expect(confirmSpy).toHaveBeenCalled();
-		expect(locksApi.forceReleaseLock).toHaveBeenCalledWith(
-			"prj_1",
-			"guide.md",
-		);
+		expect(locksApi.forceReleaseLock).toHaveBeenCalledWith("prj_1", "guide.md");
 		expect(screen.queryByRole("button", { name: "强制解锁" })).toBeNull();
 	});
 
@@ -782,10 +807,7 @@ describe("DocsViewerPage edit sessions", () => {
 		await new Promise((r) => setTimeout(r, 100));
 
 		await user.click(screen.getByRole("button", { name: "上锁并提交" }));
-		await user.type(
-			screen.getByLabelText("commit message"),
-			"fix typo",
-		);
+		await user.type(screen.getByLabelText("commit message"), "fix typo");
 		await user.click(screen.getByRole("button", { name: "提交并上锁" }));
 		await vi.waitFor(() =>
 			expect(changesetsApi.submitChangeset).toHaveBeenCalledWith(

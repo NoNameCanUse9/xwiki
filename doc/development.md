@@ -9,7 +9,7 @@ Go 1.26+、Node 26+、Git（运行时也需要 Git，阶段二起使用）。
 - 后端测试：go test ./...
 - 前端测试：cd web && npm run test
 - 前端构建：cd web && npm run build（必须先于 go build，产物被 go:embed）
-- 编译：go build -o agentdocs ./cmd/agentdocs
+- 编译：go build -o xwiki ./cmd/xwiki
 
 ## 新增迁移
 

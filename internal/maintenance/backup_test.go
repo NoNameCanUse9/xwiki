@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	storesqlite "agentdocs/internal/store/sqlite"
+	storesqlite "xwiki/internal/store/sqlite"
 )
 
 func TestBackupAndRestoreRoundTrip(t *testing.T) {
@@ -29,7 +29,7 @@ func TestBackupAndRestoreRoundTrip(t *testing.T) {
 		t.Fatalf("init repo: %v: %s", err, out)
 	}
 
-	archive := filepath.Join(t.TempDir(), "agentdocs-backup.tar.gz")
+	archive := filepath.Join(t.TempDir(), "xwiki-backup.tar.gz")
 	if err := Backup(context.Background(), source, archive); err != nil {
 		t.Fatalf("backup: %v", err)
 	}

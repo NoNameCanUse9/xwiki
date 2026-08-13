@@ -1,9 +1,11 @@
 package project
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 )
@@ -14,19 +16,6 @@ type CommitSummary struct {
 	Message string `json:"message"`
 	Author  string `json:"author"`
 	Date    string `json:"date"`
-}
-
-// CommitQuery defines full-history filtering and offset pagination.
-type CommitQuery struct {
-	Query  string
-	Limit  int
-	Offset int
-}
-
-// CommitPage includes the requested commits and whether another page exists.
-type CommitPage struct {
-	Commits []CommitSummary `json:"commits"`
-	HasMore bool            `json:"has_more"`
 }
 
 // CommitDetail is a commit with its changed file list.
@@ -61,56 +50,81 @@ type CommitDiff struct {
 // MaxDiffBytes caps rendered patch output.
 const MaxDiffBytes = 1 << 20 // 1 MiB
 
-// SearchCommits searches every reachable ref by message, author, full SHA or
-// short SHA, then applies offset pagination to the matching history.
-func (s *Service) SearchCommits(ctx context.Context, projectID string, query CommitQuery) (*CommitPage, error) {
-	if query.Limit <= 0 {
-		query.Limit = 20
+// ListCommits returns commit summaries, newest first.
+func (s *Service) ListCommits(ctx context.Context, projectID string, limit, offset int) ([]CommitSummary, error) {
+	commits, _, err := s.SearchCommits(ctx, projectID, "", limit, offset)
+	return commits, err
+}
+
+// SearchCommits returns commit summaries newest first. Query matches the
+// commit subject, author name, or SHA prefix. It scans the reachable history
+// incrementally and stops once the requested page plus one extra result is
+// found, so callers can render a stable has-more indicator without loading
+// the whole history into memory.
+func (s *Service) SearchCommits(ctx context.Context, projectID, query string, limit, offset int) ([]CommitSummary, bool, error) {
+	if limit <= 0 {
+		limit = 20
 	}
-	if query.Limit > 100 {
-		query.Limit = 100
-	}
-	if query.Offset < 0 {
-		query.Offset = 0
+	if limit > 100 {
+		limit = 100
 	}
 	repo, err := s.openRepoChecked(ctx, projectID)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	out, err := gitOutput(ctx, repo.Dir, "log",
-		"--format=%H%x1f%s%x1f%an%x1f%aI",
-		"--all")
+	q := strings.ToLower(strings.TrimSpace(query))
+	matched := make([]CommitSummary, 0, limit+1)
+	// Scan every reachable ref (branches, tags) so commit search also finds
+	// releases and stale branches, not just the default branch.
+	cmd := exec.CommandContext(ctx, "git", "--git-dir", repo.Dir, "log", "--format=%H%x1f%s%x1f%an%x1f%aI", "--all")
+	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return nil, fmt.Errorf("log: %w", err)
+		return nil, false, fmt.Errorf("log: %w", err)
 	}
-	needle := strings.ToLower(strings.TrimSpace(query.Query))
-	all := parseCommitSummaries(out)
-	matched := make([]CommitSummary, 0, len(all))
-	for _, commit := range all {
-		if needle == "" || strings.Contains(strings.ToLower(commit.Message), needle) ||
-			strings.Contains(strings.ToLower(commit.Author), needle) ||
-			strings.Contains(strings.ToLower(commit.SHA), needle) {
-			matched = append(matched, commit)
+	if err := cmd.Start(); err != nil {
+		return nil, false, fmt.Errorf("log: %w", err)
+	}
+	scanner := bufio.NewScanner(stdout)
+	seen := 0
+	for scanner.Scan() {
+		parts := strings.Split(scanner.Text(), "\x1f")
+		if len(parts) < 4 {
+			continue
+		}
+		commit := CommitSummary{SHA: parts[0], Message: parts[1], Author: parts[2], Date: parts[3]}
+		if q != "" && !strings.Contains(strings.ToLower(commit.Message), q) &&
+			!strings.Contains(strings.ToLower(commit.Author), q) &&
+			!strings.HasPrefix(strings.ToLower(commit.SHA), q) {
+			continue
+		}
+		if seen < offset {
+			seen++
+			continue
+		}
+		matched = append(matched, commit)
+		if len(matched) >= limit+1 {
+			break
 		}
 	}
-	if query.Offset >= len(matched) {
-		return &CommitPage{Commits: []CommitSummary{}}, nil
+	if err := scanner.Err(); err != nil {
+		_ = cmd.Wait()
+		return nil, false, fmt.Errorf("log: %w", err)
 	}
-	matched = matched[query.Offset:]
-	hasMore := len(matched) > query.Limit
+	if err := cmd.Process.Kill(); err != nil {
+		_ = err
+	}
+	if err := cmd.Wait(); err != nil && ctx.Err() == nil {
+		// Killing after the extra result is intentional; git may report a
+		// signal exit, which is not a history failure.
+	}
+	hasMore := len(matched) > limit
 	if hasMore {
-		matched = matched[:query.Limit]
+		matched = matched[:limit]
 	}
-	return &CommitPage{Commits: matched, HasMore: hasMore}, nil
-}
-
-// ListCommits preserves the original service API for internal callers.
-func (s *Service) ListCommits(ctx context.Context, projectID string, limit, offset int) ([]CommitSummary, error) {
-	page, err := s.SearchCommits(ctx, projectID, CommitQuery{Limit: limit, Offset: offset})
-	if err != nil {
-		return nil, err
+	if len(matched) == 0 {
+		return []CommitSummary{}, false, nil
 	}
-	return page.Commits, nil
+	return matched, hasMore, nil
 }
 
 func parseCommitSummaries(out string) []CommitSummary {
@@ -236,7 +250,7 @@ func (s *Service) RevertCommit(ctx context.Context, projectID, sha, message stri
 		author.Name = "anonymous"
 	}
 	if author.Email == "" {
-		author.Email = "anonymous@agentdocs.local"
+		author.Email = "anonymous@xwiki.local"
 	}
 	p, err := s.store.GetByID(ctx, projectID)
 	if err != nil {
@@ -245,8 +259,9 @@ func (s *Service) RevertCommit(ctx context.Context, projectID, sha, message stri
 	if p.IsArchived() {
 		return nil, ErrArchived
 	}
-	unlock := lockProject(p.ID)
-	defer unlock()
+	mu := lockFor(p.ID)
+	mu.Lock()
+	defer mu.Unlock()
 
 	repo := &Repo{Dir: filepath.Join(s.reposRoot, p.ID, "repo.git")}
 	branch, err := repo.DefaultBranch(ctx)
@@ -262,7 +277,7 @@ func (s *Service) RevertCommit(ctx context.Context, projectID, sha, message stri
 		return nil, ErrNotFound
 	}
 
-	wtDir, err := os.MkdirTemp("", "agentdocs-wt-*")
+	wtDir, err := os.MkdirTemp("", "xwiki-wt-*")
 	if err != nil {
 		return nil, err
 	}
@@ -283,7 +298,7 @@ func (s *Service) RevertCommit(ctx context.Context, projectID, sha, message stri
 		return nil, ErrNotFound
 	}
 	// The patch file lives OUTSIDE the worktree so `git add -A` never commits it.
-	patchDir, err := os.MkdirTemp("", "agentdocs-patch-*")
+	patchDir, err := os.MkdirTemp("", "xwiki-patch-*")
 	if err != nil {
 		cleanup()
 		return nil, err

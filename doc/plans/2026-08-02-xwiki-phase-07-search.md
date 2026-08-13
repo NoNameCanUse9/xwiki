@@ -1,10 +1,10 @@
-# AgentDocs 阶段七：搜索 Implementation Plan
+# XWiki 阶段七：搜索 Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
-**Goal:** SQLite FTS5 全文搜索：写入后增量索引、项目内搜索 API、`agentdocs reindex` CLI 全量重建。
+**Goal:** SQLite FTS5 全文搜索：写入后增量索引、项目内搜索 API、`xwiki reindex` CLI 全量重建。
 
-**Architecture:** 新迁移 `00004_search.sql`（FTS5 虚拟表 + 索引状态表）；`internal/search` 包（store：FTS upsert/delete/query；service：`ReindexProject` 增量——walk Git 树，按 (project_id, path) 对比 blob sha，只更新变化的条目；`Search`：FTS5 MATCH + snippet）。changesets/revert 成功后同步调用增量索引（先同步，规模小）；CLI `agentdocs reindex [--project id]` 全量。
+**Architecture:** 新迁移 `00004_search.sql`（FTS5 虚拟表 + 索引状态表）；`internal/search` 包（store：FTS upsert/delete/query；service：`ReindexProject` 增量——walk Git 树，按 (project_id, path) 对比 blob sha，只更新变化的条目；`Search`：FTS5 MATCH + snippet）。changesets/revert 成功后同步调用增量索引（先同步，规模小）；CLI `xwiki reindex [--project id]` 全量。
 
 **Tech Stack:** modernc sqlite 支持 FTS5（编译进驱动）；无新依赖。
 
@@ -23,7 +23,7 @@
   - `SearchAll(ctx, query, limit)`（可选跨项目，token 权限在 handler 层过滤）——MVP 仅项目内
 - 挂勾：changesets.Apply 成功后（非 dry-run、非重放）与 history.Revert 成功后 → `searchSvc.ReindexProject`（同步；错误仅记日志不阻断写入）
 - API：`GET /api/v1/projects/{id}/search?q=...&limit=` → 200 `{query, results:[{path, snippet}]}`（session 或 agent read 认证 + 项目绑定）
-- CLI：`agentdocs reindex [--project <id>]`（全量重建全部或单项目；打印统计）
+- CLI：`xwiki reindex [--project <id>]`（全量重建全部或单项目；打印统计）
 - 前端：docs-viewer 顶部搜索框（提交 → 结果列表面板，点击跳转文件）
 - 文档：api.md / architecture.md / README / plans 索引
 
@@ -32,7 +32,7 @@
 **验收（spec §27 阶段七）：**
 
 1. 写入后立即可搜：changeset 创建/更新文档 → search 返回命中（增量索引）。
-2. `agentdocs reindex` 全量重建后结果一致。
+2. `xwiki reindex` 全量重建后结果一致。
 
 ## 1. 文件结构
 
@@ -44,7 +44,7 @@ internal/search/
 internal/httpapi/handlers/search.go + 测试   （新：search 端点）
 internal/server/router.go          （修改）
 internal/httpapi/handlers/changesets.go / history.go  （修改：成功后 reindex）
-cmd/agentdocs/main.go              （修改：reindex 命令）
+cmd/xwiki/main.go              （修改：reindex 命令）
 internal/app/app.go                （修改：装配 search.Service + Reindex 方法）
 web/src/lib/api/search.ts + test
 web/src/routes/docs-viewer.tsx     （修改：搜索框 + 结果面板）
@@ -66,7 +66,7 @@ GET /api/v1/projects/{id}/search?q=docs&limit=10
 - **FTS 查询**：用户输入分词后每个词 `"<词>"*` 前缀匹配（AND）；转义双引号；空查询拒绝。
 - **snippet**：`snippet(doc_search, 2, '[', ']', '…', 24)` 输出后把 `[`/`]` 转义为普通字符（防注入）。
 - **同步索引**：写路径串行（项目锁内）→ 索引一致；reindex 失败仅日志（搜索可能短暂陈旧）。
-- **CLI**：`agentdocs reindex`（全量）、`--project <id>` 单项目；exit 0 + 统计。
+- **CLI**：`xwiki reindex`（全量）、`--project <id>` 单项目；exit 0 + 统计。
 
 ## 4. 任务清单（严格 TDD）
 

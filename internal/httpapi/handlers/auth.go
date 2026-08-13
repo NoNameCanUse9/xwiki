@@ -6,12 +6,12 @@ import (
 	"net/http"
 	"time"
 
-	"agentdocs/internal/auth"
-	"agentdocs/internal/config"
-	"agentdocs/internal/httpapi/middleware"
-	"agentdocs/internal/httpapi/request"
-	"agentdocs/internal/httpapi/response"
-	"agentdocs/internal/user"
+	"xwiki/internal/auth"
+	"xwiki/internal/config"
+	"xwiki/internal/httpapi/middleware"
+	"xwiki/internal/httpapi/request"
+	"xwiki/internal/httpapi/response"
+	"xwiki/internal/user"
 )
 
 type AuthHandler struct {
@@ -46,7 +46,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.SetCookie(w, &http.Cookie{
-		Name:     "agentdocs_session",
+		Name:     "xwiki_session",
 		Value:    token,
 		Path:     "/",
 		HttpOnly: true,
@@ -58,11 +58,11 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
-	if cookie, err := r.Cookie("agentdocs_session"); err == nil {
+	if cookie, err := r.Cookie("xwiki_session"); err == nil {
 		_ = h.svc.DeleteSessionByToken(r.Context(), cookie.Value)
 	}
 	http.SetCookie(w, &http.Cookie{
-		Name:     "agentdocs_session",
+		Name:     "xwiki_session",
 		Value:    "",
 		Path:     "/",
 		HttpOnly: true,

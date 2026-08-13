@@ -1,4 +1,4 @@
-# AgentDocs 阶段五：历史和 Diff Implementation Plan
+# XWiki 阶段五：历史和 Diff Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
@@ -58,7 +58,7 @@ doc/api.md / doc/architecture.md / README.md / doc/plans/README.md  （修改）
 
 ```http
 GET /api/v1/projects/{id}/commits?limit=20&offset=0
-  → 200 {"commits":[{"sha":"<40>","message":"...","author":"AgentDocs","date":"2026-08-02T..."}]}
+  → 200 {"commits":[{"sha":"<40>","message":"...","author":"XWiki","date":"2026-08-02T..."}]}
 
 GET /api/v1/projects/{id}/commits/{sha}
   → 200 {"commit":{"sha","message","author","date",

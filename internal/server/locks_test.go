@@ -37,7 +37,7 @@ func loginCookie(t *testing.T, h http.Handler, username, password string) string
 		t.Fatalf("login %s: %d %s", username, rec.Code, rec.Body.String())
 	}
 	for _, c := range rec.Result().Cookies() {
-		if c.Name == "agentdocs_session" {
+		if c.Name == "xwiki_session" {
 			return c.Value
 		}
 	}
