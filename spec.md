@@ -21,7 +21,7 @@
   - `cli`：参数解析、表格/JSON 输出和退出码。
 - 使用 `gpui-component` 的 Theme、Editor、Markdown、Dialog、Sidebar、Table、Notification、Dock 等组件；普通界面全部原生 GPUI。
 - Mermaid、KaTeX、复杂 HTML 预览和 Scalar API Reference 使用受限 WebView 渲染；导航、编辑和权限操作仍由原生 GPUI 控制。
-- 将 GPUI、`gpui-component` 固定到验证过的兼容 commit，并提交 `Cargo.lock`。GPUI 仍处于 pre-1.0，不能继续使用浮动 Git HEAD 依赖。[GPUI README](https://github.com/zed-industries/zed/blob/main/crates/gpui/README.md)
+- GPUI 与 `gpui-component` 的漂移控制依赖提交的 `Cargo.lock` + `--locked` CI：`gpui-component` 的 manifest 对 zed 依赖未固定 rev，固定 zed 会分裂出第二个 gpui 源导致类型冲突（已实证），故 zed 系依赖保持锁文件固定、禁止 `cargo update` 盲升；升级时同步升级 `gpui-component` 与 zed 并重新验证。[GPUI README](https://github.com/zed-industries/zed/blob/main/crates/gpui/README.md)
 - 单一客户端配置保存服务地址、语言、主题和窗口布局；凭据不写入配置文件：
   - Windows 使用 Credential Manager。
   - Linux 开发环境使用 Secret Service。

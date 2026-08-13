@@ -1825,10 +1825,34 @@ impl XWikiApp {
         self.history_error = None;
         cx.notify();
         cx.spawn(async move |this, cx| {
-            match client
-                .commits_search_page(&project, &query, HISTORY_PAGE_SIZE, offset)
-                .await
-            {
+            let page = if path.is_empty() {
+                // 项目级历史：服务端搜索 + 分页
+                client
+                    .commits_search_page(&project, &query, HISTORY_PAGE_SIZE, offset)
+                    .await
+            } else {
+                // 文件历史：服务端返回该路径全部提交（--follow），客户端过滤 + 分页
+                client.file_history(&project, &path).await.map(|commits| {
+                    let q = query.to_lowercase();
+                    let mut filtered: Vec<_> = if q.is_empty() {
+                        commits
+                    } else {
+                        commits
+                            .into_iter()
+                            .filter(|c| c.message.to_lowercase().contains(&q))
+                            .collect()
+                    };
+                    let start = (offset as usize).min(filtered.len());
+                    let has_more = filtered.len() > start + HISTORY_PAGE_SIZE as usize;
+                    filtered.drain(..start);
+                    filtered.truncate(HISTORY_PAGE_SIZE as usize);
+                    dto::CommitListResponse {
+                        commits: filtered,
+                        has_more,
+                    }
+                })
+            };
+            match page {
                 Ok(page) => {
                     let _ = this.update(cx, |app, cx| {
                         if !app.history_open

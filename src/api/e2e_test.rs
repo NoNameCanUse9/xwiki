@@ -174,6 +174,10 @@ fn e2e_contracts() {
         let ro = Client::with_token(&server, Some(secret.clone()));
         let visible = ro.projects().await.expect("ro project list");
         assert!(
+            visible.iter().any(|p| p.id == pid),
+            "read token must see its bound project"
+        );
+        assert!(
             visible.iter().all(|p| p.id == pid),
             "read token must only see its bound project"
         );
