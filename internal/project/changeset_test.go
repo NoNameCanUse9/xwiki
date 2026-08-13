@@ -24,6 +24,29 @@ func newServiceWithRepo(t *testing.T) (*Service, string, *Repo) {
 	return svc, p.ID, repo
 }
 
+func TestLockProjectWriteSerializesSameProject(t *testing.T) {
+	firstUnlock := LockProjectWrite("prj_same")
+	acquired := make(chan struct{})
+	go func() {
+		secondUnlock := LockProjectWrite("prj_same")
+		close(acquired)
+		secondUnlock()
+	}()
+
+	select {
+	case <-acquired:
+		t.Fatal("same-project mutation acquired the lock concurrently")
+	case <-time.After(25 * time.Millisecond):
+	}
+
+	firstUnlock()
+	select {
+	case <-acquired:
+	case <-time.After(time.Second):
+		t.Fatal("same-project mutation did not acquire after unlock")
+	}
+}
+
 func headOf(t *testing.T, r *Repo) string {
 	t.Helper()
 	head, err := gitOutput(context.Background(), r.Dir, "rev-parse", "HEAD")

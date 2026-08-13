@@ -259,9 +259,10 @@ func (s *Service) RevertCommit(ctx context.Context, projectID, sha, message stri
 	if p.IsArchived() {
 		return nil, ErrArchived
 	}
-	mu := lockFor(p.ID)
-	mu.Lock()
-	defer mu.Unlock()
+	// Revert must share the same project mutation coordinator as changesets and
+	// the other Git-writing operations.
+	unlock := LockProjectWrite(p.ID)
+	defer unlock()
 
 	repo := &Repo{Dir: filepath.Join(s.reposRoot, p.ID, "repo.git")}
 	branch, err := repo.DefaultBranch(ctx)

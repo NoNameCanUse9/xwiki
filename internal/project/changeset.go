@@ -64,24 +64,28 @@ const MaxChangesetFiles = 100
 // MaxDocBlobBytes caps the size of a single document (read and write).
 const MaxDocBlobBytes = 2 << 20 // 2 MiB
 
-// projectLocks serializes writes per project within this process. A striped
-// pool instead of a grow-only map: bounded memory no matter how many projects
-// are created and deleted over the process lifetime.
-var projectLocks [64]sync.Mutex
+// mutationCoordinator serializes project mutations within this process. A
+// striped pool instead of a grow-only map keeps memory bounded no matter how
+// many projects are created and deleted over the process lifetime.
+type mutationCoordinator struct {
+	locks [64]sync.Mutex
+}
 
-func lockFor(projectID string) *sync.Mutex {
+func (c *mutationCoordinator) lockFor(projectID string) *sync.Mutex {
 	h := fnv.New32a()
 	h.Write([]byte(projectID))
-	return &projectLocks[h.Sum32()%uint32(len(projectLocks))]
+	return &c.locks[h.Sum32()%uint32(len(c.locks))]
 }
 
 // LockProjectWrite serializes all operations that can move a project's Git
 // refs. Callers must defer the returned unlock function.
 func LockProjectWrite(projectID string) func() {
-	mu := lockFor(projectID)
+	mu := projectMutationCoordinator.lockFor(projectID)
 	mu.Lock()
 	return mu.Unlock
 }
+
+var projectMutationCoordinator mutationCoordinator
 
 // ErrArchived reports writes to an archived project.
 var ErrArchived = errors.New("project is archived")
@@ -110,9 +114,10 @@ func (s *Service) ApplyChangeset(ctx context.Context, projectID string, input Ch
 		return nil, ErrArchived
 	}
 
-	mu := lockFor(p.ID)
-	mu.Lock()
-	defer mu.Unlock()
+	// Route every project Git mutation through the shared coordinator. This
+	// keeps changesets serialized with rename, purge, push, and revert.
+	unlock := LockProjectWrite(p.ID)
+	defer unlock()
 
 	repo := &Repo{Dir: filepath.Join(s.reposRoot, p.ID, "repo.git")}
 	branch, err := repo.DefaultBranch(ctx)

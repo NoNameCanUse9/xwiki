@@ -655,10 +655,13 @@ export default function DocsViewerPage() {
 			// Keep the draft so a failed save (e.g. a 409 conflict) never
 			// loses the in-progress edits.
 			try {
-				localStorage.setItem(draftKey(id, filePath), JSON.stringify({
-					content: draftRef.current,
-					baseRevision: editBaseRevision,
-				}));
+				localStorage.setItem(
+					draftKey(id, filePath),
+					JSON.stringify({
+						content: draftRef.current,
+						baseRevision: editBaseRevision,
+					}),
+				);
 			} catch {
 				// quota exceeded — the in-memory draft still exists
 			}
