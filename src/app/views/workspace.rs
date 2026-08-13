@@ -52,6 +52,7 @@ impl XWikiApp {
             };
             let empty = div()
                 .flex_1()
+                .w_full()
                 .flex()
                 .flex_col()
                 .items_center()
@@ -430,9 +431,22 @@ impl XWikiApp {
                                     .secondary()
                                     .outline()
                                     .compact()
+                                    .rounded(px(tokens::RADIUS))
                                     .w_full()
-                                    .icon(IconName::File)
+                                    .icon(
+                                        Icon::new(IconName::BookOpen)
+                                            .with_size(px(16.0))
+                                            .text_color(theme.accent),
+                                    )
                                     .label("API Reference")
+                                    .tooltip("查看服务器 API 接口定义")
+                                    .child(
+                                        div().flex_1().flex().justify_end().child(
+                                            Icon::new(IconName::ChevronRight)
+                                                .with_size(px(14.0))
+                                                .text_color(theme.muted_foreground),
+                                        ),
+                                    )
                                     .on_click(
                                         cx.listener(|this, _, _, cx| this.open_api_reference(cx)),
                                     ),
@@ -442,9 +456,22 @@ impl XWikiApp {
                                     .secondary()
                                     .outline()
                                     .compact()
+                                    .rounded(px(tokens::RADIUS))
                                     .w_full()
-                                    .icon(IconName::Inbox)
+                                    .icon(
+                                        Icon::new(IconName::Inbox)
+                                            .with_size(px(16.0))
+                                            .text_color(theme.accent),
+                                    )
                                     .label("Audit Log")
+                                    .tooltip("查看项目操作审计记录")
+                                    .child(
+                                        div().flex_1().flex().justify_end().child(
+                                            Icon::new(IconName::ChevronRight)
+                                                .with_size(px(14.0))
+                                                .text_color(theme.muted_foreground),
+                                        ),
+                                    )
                                     .on_click(cx.listener(|this, _, _, cx| this.open_audit(cx))),
                             ),
                     ),
@@ -664,6 +691,8 @@ impl XWikiApp {
                         div()
                             .flex_1()
                             .min_h(px(0.0))
+                            .flex()
+                            .flex_col()
                             .overflow_y_scrollbar()
                             .child(self.render_project_cards(card_width, cx))
                             .into_any_element()

@@ -147,6 +147,8 @@ impl XWikiApp {
                     )
                     .child(
                         Button::new("empty-tree-back")
+                            .ghost()
+                            .compact()
                             .rounded(px(tokens::RADIUS))
                             .icon(IconName::ArrowLeft)
                             .label("返回项目")
@@ -812,6 +814,8 @@ impl XWikiApp {
                     .bg(theme.sidebar)
                     .child(
                         Button::new("back-projects-browser")
+                            .ghost()
+                            .compact()
                             .rounded(px(tokens::RADIUS))
                             .icon(IconName::ArrowLeft)
                             .label("项目")
@@ -838,36 +842,38 @@ impl XWikiApp {
                     ),
             )
             .child(
-                div()
-                    .px_4()
-                    .py_2()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .justify_end()
-                    .bg(theme.background)
-                    .child(
-                        Button::new("doc-import-folder")
-                            .secondary()
-                            .outline()
-                            .compact()
-                            .rounded(px(tokens::RADIUS))
-                            .label("导入文件夹")
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.open_document_folder_import_dialog(window, cx)
-                            })),
-                    )
-                    .child(
-                        Button::new("doc-import-markdown")
-                            .secondary()
-                            .outline()
-                            .compact()
-                            .rounded(px(tokens::RADIUS))
-                            .label("导入 Markdown")
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.open_document_markdown_import_dialog(window, cx)
-                            })),
-                    ),
+                div().px_4().py_2().bg(theme.background).child(
+                    div()
+                        .w(px(tokens::MEASURE))
+                        .max_w_full()
+                        .mx_auto()
+                        .flex()
+                        .items_center()
+                        .justify_end()
+                        .gap_2()
+                        .child(
+                            Button::new("doc-import-folder")
+                                .secondary()
+                                .outline()
+                                .compact()
+                                .rounded(px(tokens::RADIUS))
+                                .label("导入文件夹")
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.open_document_folder_import_dialog(window, cx)
+                                })),
+                        )
+                        .child(
+                            Button::new("doc-import-markdown")
+                                .secondary()
+                                .outline()
+                                .compact()
+                                .rounded(px(tokens::RADIUS))
+                                .label("导入 Markdown")
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.open_document_markdown_import_dialog(window, cx)
+                                })),
+                        ),
+                ),
             )
             .child(content)
     }
@@ -890,6 +896,8 @@ impl XWikiApp {
                     .gap_3()
                     .child(
                         Button::new("back-document-browser")
+                            .ghost()
+                            .compact()
                             .rounded(px(tokens::RADIUS))
                             .icon(IconName::ArrowLeft)
                             .label("返回文件列表")

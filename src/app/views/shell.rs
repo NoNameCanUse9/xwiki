@@ -667,51 +667,16 @@ impl XWikiApp {
                                 .text_sm()
                                 .text_color(theme.muted_foreground)
                                 .child(schema_description),
+                        )
+                        .child(
+                            div()
+                                .font_family(tokens::FONT_MONO)
+                                .text_xs()
+                                .text_color(theme.muted_foreground)
+                                .child(format!(
+                                    "OpenAPI {schema_version} · {endpoint_count} 个接口"
+                                )),
                         ),
-                )
-                .child(
-                    div()
-                        .flex()
-                        .gap_3()
-                        .children([
-                            div()
-                                .flex_none()
-                                .min_w(px(150.0))
-                                .px_3()
-                                .py_3()
-                                .border_1()
-                                .border_color(theme.border)
-                                .bg(theme.sidebar)
-                                .v_flex()
-                                .gap_1()
-                                .child(
-                                    div()
-                                        .font_family(tokens::FONT_MONO)
-                                        .text_lg()
-                                        .text_color(theme.foreground)
-                                        .child(schema_version),
-                                )
-                                .child(mono_label("VERSION").text_color(theme.muted_foreground)),
-                            div()
-                                .flex_none()
-                                .min_w(px(150.0))
-                                .px_3()
-                                .py_3()
-                                .border_1()
-                                .border_color(theme.border)
-                                .bg(theme.sidebar)
-                                .v_flex()
-                                .gap_1()
-                                .child(
-                                    div()
-                                        .font_family(tokens::FONT_MONO)
-                                        .text_lg()
-                                        .text_color(theme.foreground)
-                                        .child(format!("{endpoint_count}")),
-                                )
-                                .child(mono_label("ENDPOINTS").text_color(theme.muted_foreground)),
-                        ])
-                        .into_any_element(),
                 )
                 .child(
                     div()
