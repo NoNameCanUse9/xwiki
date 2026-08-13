@@ -1,10 +1,10 @@
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use std::cell::RefCell;
 use std::collections::BTreeSet;
 use std::io::Read;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use gpui::StatefulInteractiveElement;
@@ -19,7 +19,7 @@ use gpui_component::{
     *,
 };
 
-use crate::api::{dto, Client};
+use crate::api::{Client, dto};
 use crate::config;
 mod outline;
 pub mod views;
@@ -43,11 +43,7 @@ struct TokenDraft {
 
 impl TokenDraft {
     fn scope(&self) -> &'static str {
-        if self.write {
-            "write"
-        } else {
-            "read"
-        }
+        if self.write { "write" } else { "read" }
     }
 
     fn set_scope(&mut self, scope: &str) {
@@ -72,11 +68,7 @@ impl TokenDraft {
 }
 
 fn history_page_offset(reset: bool, loaded: usize) -> u32 {
-    if reset {
-        0
-    } else {
-        loaded as u32
-    }
+    if reset { 0 } else { loaded as u32 }
 }
 
 fn merge_history_page(
@@ -1415,25 +1407,25 @@ impl XWikiApp {
         let title = self.editor_title_input.clone();
         let mut filename = path.rsplit('/').next().unwrap_or(path).to_string();
         let mut message = String::new();
-        if let Some(project) = self.selected_project.as_ref() {
-            if let Some(draft) = config::load_drafts().into_iter().find(|d| {
+        if let Some(project) = self.selected_project.as_ref()
+            && let Some(draft) = config::load_drafts().into_iter().find(|d| {
                 d.server == self.server_url
                     && d.username == self.username
                     && d.project == *project
                     && d.original_path == path
-            }) {
-                content = draft.content;
-                if !draft.target_path.is_empty() {
-                    filename = draft.target_path;
-                }
-                message = draft.message;
-                let server_revision = self.current_revision.as_deref().unwrap_or_default();
-                let base_revision = draft_base_revision(server_revision, &draft.base_revision);
-                if !base_revision.is_empty() {
-                    self.edit_base_revision = Some(base_revision);
-                }
-                self.status_msg = Some("已恢复本地草稿".into());
+            })
+        {
+            content = draft.content;
+            if !draft.target_path.is_empty() {
+                filename = draft.target_path;
             }
+            message = draft.message;
+            let server_revision = self.current_revision.as_deref().unwrap_or_default();
+            let base_revision = draft_base_revision(server_revision, &draft.base_revision);
+            if !base_revision.is_empty() {
+                self.edit_base_revision = Some(base_revision);
+            }
+            self.status_msg = Some("已恢复本地草稿".into());
         }
         if let Some(handle) = cx.active_window() {
             let _ = cx.update_window(handle, |_view, window, cx| {
@@ -1489,26 +1481,28 @@ impl XWikiApp {
             return;
         };
         let generation = self.heartbeat_generation.clone();
-        let gen = generation.fetch_add(1, Ordering::Relaxed) + 1;
-        cx.spawn(async move |this, cx| loop {
-            if generation.load(Ordering::Relaxed) != gen {
-                break;
-            }
-            cx.background_executor()
-                .timer(Duration::from_secs(25))
-                .await;
-            if generation.load(Ordering::Relaxed) != gen {
-                break;
-            }
-            if client.heartbeat_lock(&project, &path).await.is_err() {
-                let _ = this.update(cx, |app, cx| {
-                    // The lock is gone: stop pretending we hold it, or the
-                    // status bar lies and saves keep firing with a dead lock.
-                    app.lock_held = false;
-                    app.status_msg = Some("锁续租失败，请取消编辑后重新编辑。".into());
-                    cx.notify();
-                });
-                break;
+        let gen_id = generation.fetch_add(1, Ordering::Relaxed) + 1;
+        cx.spawn(async move |this, cx| {
+            loop {
+                if generation.load(Ordering::Relaxed) != gen_id {
+                    break;
+                }
+                cx.background_executor()
+                    .timer(Duration::from_secs(25))
+                    .await;
+                if generation.load(Ordering::Relaxed) != gen_id {
+                    break;
+                }
+                if client.heartbeat_lock(&project, &path).await.is_err() {
+                    let _ = this.update(cx, |app, cx| {
+                        // The lock is gone: stop pretending we hold it, or the
+                        // status bar lies and saves keep firing with a dead lock.
+                        app.lock_held = false;
+                        app.status_msg = Some("锁续租失败，请取消编辑后重新编辑。".into());
+                        cx.notify();
+                    });
+                    break;
+                }
             }
         })
         .detach();
@@ -3705,12 +3699,10 @@ impl XWikiApp {
             .border_1()
             .border_color(theme.border)
             .bg(theme.sidebar)
-            .shadow(vec![BoxShadow::new(
-                px(0.0),
-                px(4.0),
-                theme.foreground.opacity(0.15),
-            )
-            .blur_radius(px(16.0))])
+            .shadow(vec![
+                BoxShadow::new(px(0.0), px(4.0), theme.foreground.opacity(0.15))
+                    .blur_radius(px(16.0)),
+            ])
             .v_flex()
             .child(
                 div()
@@ -3804,12 +3796,10 @@ impl XWikiApp {
                     .border_1()
                     .border_color(theme.border)
                     .bg(theme.popover)
-                    .shadow(vec![BoxShadow::new(
-                        px(0.0),
-                        px(8.0),
-                        theme.foreground.opacity(0.14),
-                    )
-                    .blur_radius(px(24.0))])
+                    .shadow(vec![
+                        BoxShadow::new(px(0.0), px(8.0), theme.foreground.opacity(0.14))
+                            .blur_radius(px(24.0)),
+                    ])
                     .v_flex()
                     .child(
                         div()
@@ -5862,8 +5852,8 @@ mod import_path_prompt_tests {
     #[cfg(unix)]
     use super::collect_import_files;
     use super::{
-        draft_base_revision, folder_path_prompt_options, history_page_offset, merge_history_page,
-        read_file_limited, TokenDraft,
+        TokenDraft, draft_base_revision, folder_path_prompt_options, history_page_offset,
+        merge_history_page, read_file_limited,
     };
     use crate::api::dto::{Commit, CommitListResponse};
 

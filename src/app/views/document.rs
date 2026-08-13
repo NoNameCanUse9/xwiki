@@ -1136,7 +1136,7 @@ impl XWikiApp {
         &self,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> impl IntoElement {
+    ) -> impl IntoElement + use<> {
         let theme = cx.theme().clone();
         let main = div()
             .flex_1()

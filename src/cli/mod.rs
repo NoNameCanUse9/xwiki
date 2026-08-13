@@ -46,12 +46,12 @@ fn token_projects(args: &[String]) -> Vec<String> {
     let mut out = Vec::new();
     let mut i = 0;
     while i < args.len() {
-        if args[i] == "--project" {
-            if let Some(p) = args.get(i + 1) {
-                out.push(p.clone());
-                i += 2;
-                continue;
-            }
+        if args[i] == "--project"
+            && let Some(p) = args.get(i + 1)
+        {
+            out.push(p.clone());
+            i += 2;
+            continue;
         }
         i += 1;
     }
@@ -512,11 +512,11 @@ async fn cmd_doc(args: &[String]) -> i32 {
 /// that cannot be read is an error — silently falling back to empty content
 /// would let `doc update` wipe the page.
 fn read_stdin_or_file(args: &[String]) -> Result<String, String> {
-    if let Some(i) = args.iter().position(|a| a == "--file") {
-        if let Some(path) = args.get(i + 1) {
-            return std::fs::read_to_string(path)
-                .map_err(|e| format!("cannot read --file {path}: {e}"));
-        }
+    if let Some(i) = args.iter().position(|a| a == "--file")
+        && let Some(path) = args.get(i + 1)
+    {
+        return std::fs::read_to_string(path)
+            .map_err(|e| format!("cannot read --file {path}: {e}"));
     }
     let mut buf = String::new();
     std::io::Read::read_to_string(&mut std::io::stdin(), &mut buf)

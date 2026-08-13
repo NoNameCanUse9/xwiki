@@ -5,7 +5,7 @@
 //! exposed through `gpui_component::Theme` slots (see `themes/cobalt.json`)
 //! plus the semantic accessors below for the few tokens that have no slot.
 
-use gpui::{rgb, rgba, Hsla, Rgba};
+use gpui::{Hsla, Rgba, rgb, rgba};
 use gpui_component::Theme;
 
 // ---- Radius (ruler-drawn, never pills) ----

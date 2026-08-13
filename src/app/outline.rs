@@ -1,6 +1,6 @@
 //! Markdown outline extraction for the read-only document view.
 
-use markdown::{mdast::Node, to_mdast, ParseOptions};
+use markdown::{ParseOptions, mdast::Node, to_mdast};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct OutlineEntry {
@@ -67,12 +67,12 @@ pub(crate) fn parse_document(source: &str) -> ParsedDocument {
 
     let mut sections = Vec::with_capacity(headings.len() + 1);
     let mut entries = Vec::with_capacity(headings.len());
-    if let Some(first) = headings.first().map(|(offset, _, _)| *offset) {
-        if first > 0 {
-            sections.push(MarkdownSection {
-                source: source[..first].to_string(),
-            });
-        }
+    if let Some(first) = headings.first().map(|(offset, _, _)| *offset)
+        && first > 0
+    {
+        sections.push(MarkdownSection {
+            source: source[..first].to_string(),
+        });
     }
 
     for (outline_index, (offset, level, text)) in headings.iter().enumerate() {
@@ -203,9 +203,11 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["资讯管理", "创建资讯"]
         );
-        assert!(parsed.sections[0]
-            .source
-            .starts_with("---\ntitle: 资讯管理"));
+        assert!(
+            parsed.sections[0]
+                .source
+                .starts_with("---\ntitle: 资讯管理")
+        );
     }
 
     #[test]

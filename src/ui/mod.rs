@@ -9,13 +9,13 @@ pub mod tokens;
 use std::sync::{Arc, OnceLock};
 
 use gpui::{
-    div, img, px, Div, ElementId, Entity, EntityId, Image, ImageFormat, Img, IntoElement,
-    ParentElement as _, Styled as _,
+    Div, ElementId, Entity, EntityId, Image, ImageFormat, Img, IntoElement, ParentElement as _,
+    Styled as _, div, img, px,
 };
+use gpui_component::IconName;
 use gpui_component::button::Button;
 use gpui_component::input::InputState;
 use gpui_component::text::TextView;
-use gpui_component::IconName;
 
 const APP_ICON_SVG: &[u8] = include_bytes!("../../assets/xwiki-icon.svg");
 const REFRESH_ICON_SVG: &[u8] = include_bytes!("../../assets/refresh.svg");
@@ -132,10 +132,10 @@ pub fn clear_search_button(
 #[cfg(test)]
 mod tests {
     use gpui_component::{
-        highlighter::{HighlightTheme, LanguageRegistry, SyntaxHighlighter},
         Rope,
+        highlighter::{HighlightTheme, LanguageRegistry, SyntaxHighlighter},
     };
-    use markdown::{mdast::Node, ParseOptions};
+    use markdown::{ParseOptions, mdast::Node};
 
     fn fenced_code(source: &str) -> (String, String) {
         let Node::Root(root) = markdown::to_mdast(source, &ParseOptions::default())

@@ -228,7 +228,8 @@ mod tests {
     fn layout_roundtrip_and_corrupt_defaults() {
         let _lock = TEST_HOME_LOCK.lock().unwrap();
         let home = tempfile::tempdir().unwrap();
-        std::env::set_var("HOME", home.path());
+        // SAFETY: single-threaded test under TEST_HOME_LOCK (see config::tests).
+        unsafe { std::env::set_var("HOME", home.path()) };
         let l = Layout {
             projects_rail: 300.0,
             doc_rail: 340.0,
@@ -263,7 +264,8 @@ mod tests {
     fn draft_roundtrip_preserves_base_revision() {
         let _lock = TEST_HOME_LOCK.lock().unwrap();
         let home = tempfile::tempdir().unwrap();
-        std::env::set_var("HOME", home.path());
+        // SAFETY: single-threaded test under TEST_HOME_LOCK (see config::tests).
+        unsafe { std::env::set_var("HOME", home.path()) };
         let draft = Draft {
             server: "http://server".into(),
             username: "alice".into(),

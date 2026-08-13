@@ -167,10 +167,10 @@ impl Client {
                 headers.insert(reqwest::header::AUTHORIZATION, value);
             }
         }
-        if let Some(c) = cookie {
-            if let Ok(value) = reqwest::header::HeaderValue::from_str(&c) {
-                headers.insert(reqwest::header::COOKIE, value);
-            }
+        if let Some(c) = cookie
+            && let Ok(value) = reqwest::header::HeaderValue::from_str(&c)
+        {
+            headers.insert(reqwest::header::COOKIE, value);
         }
         if !headers.is_empty() {
             builder = builder.default_headers(headers);

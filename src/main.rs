@@ -24,7 +24,8 @@ fn main() {
     // a config knob — flip it if a real Wayland desktop regresses.
     #[cfg(target_os = "linux")]
     if std::env::var_os("DISPLAY").is_some_and(|d| !d.is_empty()) {
-        std::env::remove_var("WAYLAND_DISPLAY");
+        // SAFETY: single-threaded startup, before any other env reads.
+        unsafe { std::env::remove_var("WAYLAND_DISPLAY") };
     }
 
     // Crash visibility: a panic in the UI thread would otherwise vanish with

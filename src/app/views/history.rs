@@ -263,11 +263,11 @@ impl XWikiApp {
                 };
                 let index = keyboard_indices[next_position];
                 this.history_focus = Some(index);
-                if event.keystroke.key == "enter" {
-                    if let Some(commit) = this.commits.get(index) {
-                        let sha = commit.sha.clone();
-                        this.select_commit(&sha, cx);
-                    }
+                if event.keystroke.key == "enter"
+                    && let Some(commit) = this.commits.get(index)
+                {
+                    let sha = commit.sha.clone();
+                    this.select_commit(&sha, cx);
                 }
                 cx.notify();
             }))

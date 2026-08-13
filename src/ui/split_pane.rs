@@ -7,8 +7,8 @@
 use std::sync::Arc;
 
 use gpui::{
-    div, px, App, AppContext, ClickEvent, Context, CursorStyle, Div, Hsla, InteractiveElement,
-    IntoElement, MouseButton, ParentElement, Render, StatefulInteractiveElement, Styled, Window,
+    App, AppContext, ClickEvent, Context, CursorStyle, Div, Hsla, InteractiveElement, IntoElement,
+    MouseButton, ParentElement, Render, StatefulInteractiveElement, Styled, Window, div, px,
 };
 
 use crate::ui::tokens;

@@ -14,7 +14,8 @@ struct IsolatedHome {
 fn isolated_home() -> IsolatedHome {
     let lock = crate::config::TEST_HOME_LOCK.lock().unwrap();
     let dir = tempfile::tempdir().unwrap();
-    std::env::set_var("HOME", dir.path());
+    // SAFETY: tests run under the shared TEST_HOME_LOCK, serializing env writes.
+    unsafe { std::env::set_var("HOME", dir.path()) };
     IsolatedHome {
         _dir: dir,
         _lock: lock,

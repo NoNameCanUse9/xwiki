@@ -487,11 +487,7 @@ impl XWikiApp {
                                     this.set_user_enabled(&id, true, cx);
                                 }
                             }));
-                        if !enabled {
-                            button.ghost()
-                        } else {
-                            button
-                        }
+                        if !enabled { button.ghost() } else { button }
                     })
                     .into_any_element()
             })

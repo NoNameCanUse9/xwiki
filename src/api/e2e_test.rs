@@ -7,7 +7,7 @@
 //! The same suite runs in CI on both branches: the server is built from
 //! `main`, the tests run from the `app` checkout.
 
-use super::{dto, Client};
+use super::{Client, dto};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -129,20 +129,26 @@ fn e2e_contracts() {
             .await
             .expect("acquire lock");
         assert_eq!(lock.path, "guide.md");
-        assert!(admin
-            .lock_status(&pid, "guide.md")
-            .await
-            .expect("locked status")
-            .is_some());
-        assert!(admin
-            .release_lock(&pid, "guide.md")
-            .await
-            .expect("release lock"));
-        assert!(admin
-            .lock_status(&pid, "guide.md")
-            .await
-            .expect("unlocked again")
-            .is_none());
+        assert!(
+            admin
+                .lock_status(&pid, "guide.md")
+                .await
+                .expect("locked status")
+                .is_some()
+        );
+        assert!(
+            admin
+                .release_lock(&pid, "guide.md")
+                .await
+                .expect("release lock")
+        );
+        assert!(
+            admin
+                .lock_status(&pid, "guide.md")
+                .await
+                .expect("unlocked again")
+                .is_none()
+        );
 
         // ---- changeset 409: 过期 base revision ----
         let stale = admin

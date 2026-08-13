@@ -130,12 +130,10 @@ impl XWikiApp {
                 .border_color(theme.border)
                 .bg(theme.background)
                 .hover(|s| {
-                    s.bg(theme.list_hover).shadow(vec![BoxShadow::new(
-                        px(0.0),
-                        px(2.0),
-                        theme.foreground.opacity(0.1),
-                    )
-                    .blur_radius(px(8.0))])
+                    s.bg(theme.list_hover).shadow(vec![
+                        BoxShadow::new(px(0.0), px(2.0), theme.foreground.opacity(0.1))
+                            .blur_radius(px(8.0)),
+                    ])
                 })
                 .cursor_pointer()
                 .v_flex()
