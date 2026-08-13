@@ -1,16 +1,20 @@
 //! Login and password-reset view.
 //! State and network operations stay in `crate::app` (mod.rs).
 
+use gpui::prelude::*;
 use gpui::*;
-use gpui_component::{button::*, input::Input, scroll::ScrollableElement as _, *};
+use guise::{Button, ColorName, Icon, IconName, Size, Variant, theme};
 
 use crate::app::XWikiApp;
+use crate::ui::tokens::Cobalt;
 use crate::ui::{app_icon, body, mono_label, tokens};
 
 impl XWikiApp {
     pub(crate) fn render_login(&self, cx: &mut Context<Self>) -> Div {
-        let theme = cx.theme().clone();
-        let server = self.server_input.read(cx).value().to_string();
+        let t = theme(cx);
+        let cobalt = Cobalt::from_theme(t);
+        let success = t.success().hsla();
+        let server = self.server_input.read(cx).text();
         let reset_failed = self
             .reset_status
             .as_ref()
@@ -24,11 +28,11 @@ impl XWikiApp {
             "待连接 · 登录以继续"
         };
         let status_color = if self.loading {
-            theme.accent
+            cobalt.accent
         } else if self.login_error.is_some() || reset_failed {
-            theme.danger
+            cobalt.danger
         } else {
-            theme.muted_foreground
+            cobalt.ink_3
         };
 
         let login_feedback = if let Some(err) = &self.login_error {
@@ -40,16 +44,20 @@ impl XWikiApp {
                 .p_3()
                 .rounded(px(tokens::RADIUS_SMALL))
                 .border_1()
-                .border_color(theme.danger)
-                .bg(theme.danger.opacity(0.1))
-                .child(Icon::new(IconName::CircleX).text_color(theme.danger))
+                .border_color(cobalt.danger)
+                .bg(cobalt.danger.opacity(0.1))
+                .child(
+                    Icon::new(IconName::CircleX)
+                        .size(Size::Sm)
+                        .color(ColorName::Red),
+                )
                 .child(
                     div()
                         .flex_1()
                         .min_w(px(0.0))
                         .whitespace_normal()
                         .text_xs()
-                        .text_color(theme.danger)
+                        .text_color(cobalt.danger)
                         .child(err.clone()),
                 )
         } else if let Some((true, msg)) = &self.reset_status {
@@ -61,16 +69,20 @@ impl XWikiApp {
                 .p_3()
                 .rounded(px(tokens::RADIUS_SMALL))
                 .border_1()
-                .border_color(theme.success)
-                .bg(theme.success.opacity(0.1))
-                .child(Icon::new(IconName::CircleCheck).text_color(theme.success))
+                .border_color(success)
+                .bg(success.opacity(0.1))
+                .child(
+                    Icon::new(IconName::CircleCheck)
+                        .size(Size::Sm)
+                        .color(ColorName::Green),
+                )
                 .child(
                     div()
                         .flex_1()
                         .min_w(px(0.0))
                         .whitespace_normal()
                         .text_xs()
-                        .text_color(theme.success)
+                        .text_color(success)
                         .child(msg.clone()),
                 )
         } else {
@@ -78,7 +90,7 @@ impl XWikiApp {
         };
 
         let reset_feedback = if let Some((ok, msg)) = &self.reset_status {
-            let color = if *ok { theme.success } else { theme.danger };
+            let color = if *ok { success } else { cobalt.danger };
             div()
                 .w_full()
                 .flex()
@@ -95,7 +107,12 @@ impl XWikiApp {
                     } else {
                         IconName::CircleX
                     })
-                    .text_color(color),
+                    .size(Size::Sm)
+                    .color(if *ok {
+                        ColorName::Green
+                    } else {
+                        ColorName::Red
+                    }),
                 )
                 .child(
                     div()
@@ -113,106 +130,117 @@ impl XWikiApp {
         let form = if self.reset_mode {
             div()
                 .w_full()
-                .v_flex()
+                .flex()
+                .flex_col()
                 .gap_3()
-                .child(mono_label("步骤 1 · 请求一次性 token").text_color(theme.muted_foreground))
+                .child(mono_label("步骤 1 · 请求一次性 token").text_color(cobalt.ink_3))
                 .child(
-                    Button::new("request-reset")
-                        .secondary()
-                        .w_full()
-                        .rounded(px(tokens::RADIUS))
-                        .icon(IconName::ArrowRight)
-                        .label(if self.loading {
+                    Button::new(
+                        "request-reset",
+                        if self.loading {
                             "请求中…"
                         } else {
                             "请求 token"
-                        })
-                        .loading(self.loading)
-                        .disabled(self.loading)
-                        .on_click(cx.listener(|this, _, _, cx| this.request_reset(cx))),
+                        },
+                    )
+                    .variant(Variant::Outline)
+                    .radius(Size::Sm)
+                    .full_width(true)
+                    .left_section(Icon::new(IconName::ArrowRight).size(Size::Sm))
+                    .disabled(self.loading)
+                    .on_click(cx.listener(|this, _, _, cx| this.request_reset(cx))),
                 )
                 .child(reset_feedback)
                 .child(
                     div()
-                        .v_flex()
+                        .flex()
+                        .flex_col()
                         .gap_1()
-                        .child(mono_label("一次性 token").text_color(theme.muted_foreground))
-                        .child(Input::new(&self.reset_token_input).w_full()),
+                        .child(mono_label("一次性 token").text_color(cobalt.ink_3))
+                        .child(self.reset_token_input.clone()),
                 )
                 .child(
                     div()
-                        .v_flex()
+                        .flex()
+                        .flex_col()
                         .gap_1()
-                        .child(mono_label("新密码（至少 8 位）").text_color(theme.muted_foreground))
-                        .child(Input::new(&self.reset_password_input).w_full()),
+                        .child(mono_label("新密码（至少 8 位）").text_color(cobalt.ink_3))
+                        .child(self.reset_password_input.clone()),
                 )
                 .child(
-                    Button::new("submit-reset")
-                        .primary()
-                        .w_full()
-                        .rounded(px(tokens::RADIUS))
-                        .icon(IconName::Check)
-                        .label(if self.loading {
+                    Button::new(
+                        "submit-reset",
+                        if self.loading {
                             "提交中…"
                         } else {
                             "重置密码"
-                        })
-                        .loading(self.loading)
-                        .disabled(self.loading)
-                        .on_click(cx.listener(|this, _, _, cx| this.submit_reset(cx))),
+                        },
+                    )
+                    .variant(Variant::Filled)
+                    .color(cobalt.accent)
+                    .radius(Size::Sm)
+                    .full_width(true)
+                    .left_section(Icon::new(IconName::Check).size(Size::Sm))
+                    .disabled(self.loading)
+                    .on_click(cx.listener(|this, _, _, cx| this.submit_reset(cx))),
                 )
                 .child(
                     div().w_full().flex().child(
-                        Button::new("back-to-login")
-                            .ghost()
-                            .compact()
-                            .rounded(px(tokens::RADIUS))
-                            .icon(IconName::ArrowLeft)
-                            .label("返回登录")
+                        Button::new("back-to-login", "返回登录")
+                            .variant(Variant::Subtle)
+                            .size(Size::Xs)
+                            .radius(Size::Sm)
+                            .left_section(Icon::new(IconName::ArrowLeft).size(Size::Xs))
                             .on_click(cx.listener(|this, _, _, cx| this.toggle_reset_mode(cx))),
                     ),
                 )
         } else {
             div()
                 .w_full()
-                .v_flex()
+                .flex()
+                .flex_col()
                 .gap_4()
                 .child(
                     div()
-                        .v_flex()
+                        .flex()
+                        .flex_col()
                         .gap_1()
-                        .child(mono_label("服务地址").text_color(theme.muted_foreground))
-                        .child(Input::new(&self.server_input).w_full()),
+                        .child(mono_label("服务地址").text_color(cobalt.ink_3))
+                        .child(self.server_input.clone()),
                 )
                 .child(
                     div()
-                        .v_flex()
+                        .flex()
+                        .flex_col()
                         .gap_1()
-                        .child(mono_label("用户名").text_color(theme.muted_foreground))
-                        .child(Input::new(&self.user_input).w_full()),
+                        .child(mono_label("用户名").text_color(cobalt.ink_3))
+                        .child(self.user_input.clone()),
                 )
                 .child(
                     div()
                         .w_full()
-                        .v_flex()
+                        .flex()
+                        .flex_col()
                         .gap_1()
-                        .child(mono_label("密码").text_color(theme.muted_foreground))
-                        .child(Input::new(&self.password_input).w_full()),
+                        .child(mono_label("密码").text_color(cobalt.ink_3))
+                        .child(self.password_input.clone()),
                 )
                 .child(login_feedback)
                 .child(
-                    Button::new("login")
-                        .primary()
-                        .w_full()
-                        .rounded(px(tokens::RADIUS))
-                        .label(if self.loading {
+                    Button::new(
+                        "login",
+                        if self.loading {
                             "登录中…"
                         } else {
                             "登录"
-                        })
-                        .loading(self.loading)
-                        .disabled(self.loading)
-                        .on_click(cx.listener(|this, _, window, cx| this.do_login(window, cx))),
+                        },
+                    )
+                    .variant(Variant::Filled)
+                    .color(cobalt.accent)
+                    .radius(Size::Sm)
+                    .full_width(true)
+                    .disabled(self.loading)
+                    .on_click(cx.listener(|this, _, window, cx| this.do_login(window, cx))),
                 )
         };
 
@@ -220,13 +248,14 @@ impl XWikiApp {
             .size_full()
             .flex()
             .flex_col()
-            .bg(theme.background)
+            .bg(cobalt.paper)
             .child(
                 div()
+                    .id("login-scroll")
                     .flex_1()
                     .min_h(px(0.0))
                     .w_full()
-                    .overflow_y_scrollbar()
+                    .overflow_y_scroll()
                     .flex()
                     .items_center()
                     .justify_center()
@@ -236,7 +265,9 @@ impl XWikiApp {
                         div()
                             .w_full()
                             .max_w(px(tokens::LOGIN_PANEL + 56.0))
-                            .v_flex()
+                            .flex()
+                            .flex_col()
+                            .items_center()
                             .gap_4()
                             .child(
                                 div()
@@ -254,7 +285,7 @@ impl XWikiApp {
                                                 div()
                                                     .font_family(tokens::FONT_MONO)
                                                     .text_xs()
-                                                    .text_color(theme.accent)
+                                                    .text_color(cobalt.accent)
                                                     .child("XWIKI"),
                                             ),
                                     )
@@ -262,7 +293,7 @@ impl XWikiApp {
                                         div()
                                             .font_family(tokens::FONT_MONO)
                                             .text_xs()
-                                            .text_color(theme.muted_foreground)
+                                            .text_color(cobalt.ink_3)
                                             .child(if self.reset_mode {
                                                 "PASSWORD RESET"
                                             } else {
@@ -274,25 +305,26 @@ impl XWikiApp {
                                 div()
                                     .w_full()
                                     .max_w(px(tokens::LOGIN_PANEL))
-                                    .self_center()
                                     .p_8()
                                     .rounded(px(tokens::RADIUS))
                                     .border_1()
-                                    .border_color(theme.border)
-                                    .bg(theme.sidebar)
-                                    .v_flex()
+                                    .border_color(cobalt.rule)
+                                    .bg(cobalt.paper_2)
+                                    .flex()
+                                    .flex_col()
                                     .gap_5()
                                     .child(
                                         div()
                                             .w_full()
-                                            .v_flex()
+                                            .flex()
+                                            .flex_col()
                                             .gap_1()
                                             .child(
                                                 div()
                                                     .text_2xl()
                                                     .font_weight(FontWeight::SEMIBOLD)
                                                     .font_family(tokens::FONT_DISPLAY)
-                                                    .text_color(theme.foreground)
+                                                    .text_color(cobalt.ink)
                                                     .child(if self.reset_mode {
                                                         "重置密码"
                                                     } else {
@@ -305,7 +337,7 @@ impl XWikiApp {
                                                 } else {
                                                     "使用管理员账号访问你的文档工作台"
                                                 })
-                                                .text_color(theme.muted_foreground),
+                                                .text_color(cobalt.ink_3),
                                             ),
                                     )
                                     .child(form),
@@ -320,8 +352,8 @@ impl XWikiApp {
                     .items_center()
                     .gap_2()
                     .border_t_1()
-                    .border_color(theme.border)
-                    .bg(theme.sidebar)
+                    .border_color(cobalt.rule)
+                    .bg(cobalt.paper_2)
                     .child(div().size_2().rounded_full().bg(status_color))
                     .child(
                         div()
@@ -339,7 +371,7 @@ impl XWikiApp {
                             .whitespace_nowrap()
                             .font_family(tokens::FONT_MONO)
                             .text_xs()
-                            .text_color(theme.muted_foreground)
+                            .text_color(cobalt.ink_3)
                             .child(if server.trim().is_empty() {
                                 "未设置服务地址".to_string()
                             } else {

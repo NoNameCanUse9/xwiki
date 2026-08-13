@@ -1,7 +1,6 @@
 #![cfg_attr(target_family = "wasm", no_main)]
 
 use gpui::*;
-use gpui_component::*;
 
 mod api;
 mod app;
@@ -51,30 +50,14 @@ fn main() {
             std::process::exit(cli::run(args));
         }
     }
-    let app = gpui_platform::application().with_assets(gpui_component_assets::Assets);
-    app.run(move |cx| {
-        // Must be called before any GPUI Component features are used.
-        gpui_component::init(cx);
-
-        // Load the Cobalt theme (cool engineered paper, one electric-blue
-        // signal accent, hairlines over shadows) for both modes.
-        let (light, dark) = {
-            let registry = ThemeRegistry::global_mut(cx);
-            if let Err(err) = registry.load_themes_from_str(include_str!("themes/cobalt.json")) {
-                eprintln!("cobalt theme failed to load: {err}");
-            }
-            let light = registry.themes().get("Cobalt Light").cloned();
-            let dark = registry.themes().get("Cobalt Dark").cloned();
-            (light, dark)
-        };
-        let global = Theme::global_mut(cx);
-        if let Some(cobalt) = light {
-            global.light_theme = cobalt;
+    gpui::Application::new().run(move |cx: &mut App| {
+        // Install the Cobalt theme before any window opens: every guise
+        // component reads it from the gpui global during render.
+        // (theme = config::load_theme(), Cobalt built in ui::tokens)
+        match config::load_theme() {
+            config::ThemeMode::Light => ui::tokens::cobalt_light().init(cx),
+            config::ThemeMode::Dark => ui::tokens::cobalt_dark().init(cx),
         }
-        if let Some(cobalt) = dark {
-            global.dark_theme = cobalt;
-        }
-        Theme::change(config::load_theme(), None, cx);
 
         cx.bind_keys([
             KeyBinding::new("cmd-k", TogglePalette, None),
@@ -88,8 +71,9 @@ fn main() {
         ]);
 
         cx.spawn(async move |cx| {
-            let start_bounds =
-                cx.update(|cx| Bounds::centered(None, size(px(1024.0), px(680.0)), cx));
+            let start_bounds = cx
+                .update(|cx| Bounds::centered(None, size(px(1024.0), px(680.0)), cx))
+                .expect("app was released");
             cx.open_window(
                 WindowOptions {
                     titlebar: Some(TitlebarOptions {
@@ -100,21 +84,18 @@ fn main() {
                     // 960×640 so panels + main content stay usable. The
                     // default gpui size is far larger, so pin a modest
                     // starting size.
-                    icon: Some(crate::ui::app_icon_rgba()),
+                    // (gpui 0.2.2 WindowOptions has no `icon` field; Windows
+                    // uses the resource embedded by build.rs, X11 falls back
+                    // to the platform default.)
                     window_bounds: Some(WindowBounds::Windowed(start_bounds)),
                     window_min_size: Some(size(px(960.0), px(640.0))),
                     ..Default::default()
                 },
-                |window, cx| {
-                    let view = cx.new(|cx| XWikiApp::new(window, cx));
-                    // The first level on the window must be a Root.
-                    // Root paints the active theme background dynamically. Do
-                    // not capture a one-time color here, otherwise switching
-                    // between light and dark modes leaves the surface stale.
-                    cx.new(|cx| Root::new(view, window, cx))
-                },
+                |window, cx| cx.new(|cx| XWikiApp::new(window, cx)),
             )
-            .expect("Failed to open window");
+            .expect("Failed to open window")
+            .update(cx, |_, window, _| window.activate_window())
+            .ok();
         })
         .detach();
     });

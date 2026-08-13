@@ -4,34 +4,12 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-# All zed crates unpinned so cargo resolves a single gpui for us and for
-# gpui-component (which also depends on zed main). Reproducibility comes
-# from Cargo.lock.
-gpui = { git = "https://github.com/zed-industries/zed.git" }
-gpui_platform = { git = "https://github.com/zed-industries/zed.git", features = [
-  "font-kit",
-  "x11",
-  "wayland",
-  "runtime_shaders",
-] }
-gpui-component = { git = "https://github.com/longbridge/gpui-component", features = [
-  "tree-sitter-bash",
-  "tree-sitter-c",
-  "tree-sitter-cpp",
-  "tree-sitter-css",
-  "tree-sitter-go",
-  "tree-sitter-html",
-  "tree-sitter-java",
-  "tree-sitter-javascript",
-  "tree-sitter-markdown",
-  "tree-sitter-python",
-  "tree-sitter-rust",
-  "tree-sitter-toml",
-  "tree-sitter-tsx",
-  "tree-sitter-typescript",
-  "tree-sitter-yaml",
-] }
-gpui-component-assets = { git = "https://github.com/longbridge/gpui-component" }
+# Spike: crates.io gpui 0.2.x (platform features merged into the single
+# gpui crate: default = font-kit + wayland + x11 + windows-manifest) and
+# guise-ui (Mantine-inspired component library built on gpui, ships its
+# own Lucide icons so no separate asset crate is needed).
+gpui = { version = "0.2.2", features = ["runtime_shaders"] }
+guise-ui = "0.10"
 markdown = "1"
 base64 = "0.22"
 reqwest = { version = "0.12", default-features = false, features = [

@@ -1,12 +1,13 @@
 //! Cobalt design tokens for the desktop app.
 //!
 //! Source of truth: `web/src/index.css` (Hallmark · Cobalt). Primitive oklch
-//! values from the web are converted to sRGB hex (`scripts` / one-off) and
-//! exposed through `gpui_component::Theme` slots (see `themes/cobalt.json`)
-//! plus the semantic accessors below for the few tokens that have no slot.
+//! values from the web are converted to sRGB hex and exposed through
+//! [`guise::theme::Theme`] semantic colors (see [`cobalt_light`] /
+//! [`cobalt_dark`]) plus the semantic accessors below for the few tokens
+//! that have no slot.
 
-use gpui::{Hsla, Rgba, rgb, rgba};
-use gpui_component::Theme;
+use gpui::{rgb, rgba, Hsla, Rgba};
+use guise::theme::{rgb as theme_rgb, Theme};
 
 // ---- Radius (ruler-drawn, never pills) ----
 pub const RADIUS_SMALL: f32 = 4.0;
@@ -105,10 +106,40 @@ pub fn truncate(text: &str, max_chars: usize) -> String {
 // ---- Login geometry ----
 pub const LOGIN_PANEL: f32 = 380.0;
 
-/// Semantic Cobalt palette mapped from the active gpui-component theme.
+/// The Cobalt light theme (web `paper` / `ink` / electric cobalt accent).
+/// Installed once at startup with `Theme::init`; views read it via
+/// `guise::theme::theme(cx)`.
+pub fn cobalt_light() -> Theme {
+    Theme::light()
+        .with_primary(theme_rgb(0x00, 0x76, 0xed))
+        .with_body(theme_rgb(0xf8, 0xfa, 0xfd))
+        .with_surface(theme_rgb(0xef, 0xf3, 0xf6))
+        .with_surface_hover(theme_rgb(0xed, 0xf4, 0xfd))
+        .with_text(theme_rgb(0x19, 0x20, 0x29))
+        .with_dimmed(theme_rgb(0x70, 0x75, 0x7c))
+        .with_border(theme_rgb(0xdc, 0xe0, 0xe5))
+        .with_danger(theme_rgb(0xcc, 0x27, 0x2e))
+        .with_success(theme_rgb(0x2d, 0xa4, 0x4e))
+}
+
+/// The Cobalt dark theme (web graphite register).
+pub fn cobalt_dark() -> Theme {
+    Theme::dark()
+        .with_primary(theme_rgb(0x49, 0x92, 0xf2))
+        .with_body(theme_rgb(0x06, 0x09, 0x0e))
+        .with_surface(theme_rgb(0x0d, 0x11, 0x17))
+        .with_surface_hover(theme_rgb(0x12, 0x19, 0x22))
+        .with_text(theme_rgb(0xe8, 0xeb, 0xf1))
+        .with_dimmed(theme_rgb(0x8d, 0x93, 0x9a))
+        .with_border(theme_rgb(0x20, 0x24, 0x2b))
+        .with_danger(theme_rgb(0xe5, 0x55, 0x51))
+        .with_success(theme_rgb(0x3f, 0xb9, 0x50))
+}
+
+/// Semantic Cobalt palette mapped from the active guise theme.
 ///
-/// Most slots are already backed by `themes/cobalt.json`; `graphite` (the
-/// code-card surface) and friends have no slot and live here.
+/// `graphite` (the code-card surface) and friends have no theme slot and
+/// live here.
 ///
 /// `#[allow(dead_code)]`: only `graphite`/`graphite_soft` are consumed so
 /// far; views still read `theme.*` directly. The remaining fields are the
@@ -142,12 +173,16 @@ pub struct Cobalt {
     pub danger: Hsla,
     /// Text on danger surfaces.
     pub danger_ink: Hsla,
+    /// Success / connected.
+    pub success: Hsla,
+    /// Floating surface (popover / overlay).
+    pub popover: Hsla,
 }
 
 #[allow(dead_code)]
 impl Cobalt {
     pub fn from_theme(theme: &Theme) -> Self {
-        let dark = theme.is_dark();
+        let dark = theme.scheme.is_dark();
         // Web graphite: light oklch(22% 0.016 260) / dark oklch(18% 0.016 258).
         let (graphite, graphite_2) = if dark {
             (rgb(0x0d1219), rgb(0x151b23))
@@ -155,17 +190,19 @@ impl Cobalt {
             (rgb(0x161b22), rgb(0x21272f))
         };
         Self {
-            paper: theme.background,
-            paper_2: theme.sidebar,
-            rule: theme.border,
-            ink: theme.foreground,
-            ink_2: theme.sidebar_foreground,
-            ink_3: theme.muted_foreground,
-            accent: theme.accent,
-            accent_ink: theme.accent_foreground,
-            surface_accent: theme.list_hover,
-            danger: theme.danger,
-            danger_ink: theme.danger_foreground,
+            paper: theme.body().hsla(),
+            paper_2: theme.surface().hsla(),
+            rule: theme.border().hsla(),
+            ink: theme.text().hsla(),
+            ink_2: theme.text().hsla(),
+            ink_3: theme.dimmed().hsla(),
+            accent: theme.primary().hsla(),
+            accent_ink: theme.primary().contrasting().hsla(),
+            surface_accent: theme.surface_hover().hsla(),
+            danger: theme.danger().hsla(),
+            danger_ink: theme.danger().contrasting().hsla(),
+            success: theme.success().hsla(),
+            popover: theme.surface().hsla(),
             graphite: graphite.into(),
             graphite_soft: graphite_2.into(),
         }

@@ -9,13 +9,13 @@ pub mod tokens;
 use std::sync::{Arc, OnceLock};
 
 use gpui::{
-    Div, ElementId, Entity, EntityId, Image, ImageFormat, Img, IntoElement, ParentElement as _,
-    Styled as _, div, img, px,
+    div, img, px, App, AppContext, Div, ElementId, Entity, EntityId, Image, ImageFormat, Img,
+    IntoElement, ParentElement as _, Styled as _,
 };
-use gpui_component::IconName;
-use gpui_component::button::Button;
-use gpui_component::input::InputState;
-use gpui_component::text::TextView;
+use guise::input::TextInput;
+use guise::markdown::MarkdownEditor;
+use guise::Button;
+use guise::{Icon, IconName};
 
 const APP_ICON_SVG: &[u8] = include_bytes!("../../assets/xwiki-icon.svg");
 const REFRESH_ICON_SVG: &[u8] = include_bytes!("../../assets/refresh.svg");
@@ -48,6 +48,10 @@ pub fn refresh_icon() -> Img {
 /// Windows uses the executable resource embedded by `build.rs` instead.
 /// Rendered once via resvg at 256×256; the PNG round-trip unpacks tiny_skia's
 /// premultiplied pixels into plain RGBA, which the windowing system expects.
+///
+/// gpui 0.2.2 removed `WindowOptions.icon`, so nothing calls this today;
+/// kept for when the platform API returns or for future window icon needs.
+#[allow(dead_code)]
 pub fn app_icon_rgba() -> Arc<image::RgbaImage> {
     static ICON: OnceLock<Arc<image::RgbaImage>> = OnceLock::new();
     ICON.get_or_init(|| {
@@ -104,9 +108,15 @@ pub fn display(text: impl IntoElement) -> Div {
         .child(text)
 }
 
-/// Markdown rendered at the reading measure (web `TextView::markdown`).
-pub fn markdown(id: impl Into<ElementId>, content: String) -> TextView {
-    TextView::markdown(id, content).w_full()
+/// Markdown rendered at the reading measure. Creates a read-only
+/// [`MarkdownEditor`] entity (guise) wrapped in a full-width `Div`.
+///
+/// NOTE: the signature changed from gpui-component's stateless
+/// `markdown(id, content) -> TextView` — it now needs `cx` to spawn the
+/// editor entity. Callers pass their render `Context` (derefs to `&mut App`).
+pub fn markdown(cx: &mut App, content: String) -> Div {
+    let editor = cx.new(|cx| MarkdownEditor::new(cx).value(&content).read_only(true));
+    div().w_full().child(editor)
 }
 
 /// The "清空搜索" empty-state button shared by the project grid and the
@@ -114,28 +124,20 @@ pub fn markdown(id: impl Into<ElementId>, content: String) -> TextView {
 /// (the owning view entity, since plain `App` has no no-arg `notify`).
 pub fn clear_search_button(
     id: impl Into<ElementId>,
-    input: Entity<InputState>,
+    input: Entity<TextInput>,
     app_id: EntityId,
 ) -> Button {
-    Button::new(id)
-        .rounded(px(tokens::RADIUS))
-        .icon(IconName::Close)
-        .label("清空搜索")
-        .on_click(move |_, window, cx| {
-            input.update(cx, |state, cx| {
-                state.set_value(String::new(), window, cx);
-            });
+    Button::new(id, "清空搜索")
+        .left_section(Icon::new(IconName::Close))
+        .on_click(move |_, _window, cx| {
+            input.update(cx, |state, cx| state.set_text("", cx));
             cx.notify(app_id);
         })
 }
 
 #[cfg(test)]
 mod tests {
-    use gpui_component::{
-        Rope,
-        highlighter::{HighlightTheme, LanguageRegistry, SyntaxHighlighter},
-    };
-    use markdown::{ParseOptions, mdast::Node};
+    use markdown::{mdast::Node, ParseOptions};
 
     fn fenced_code(source: &str) -> (String, String) {
         let Node::Root(root) = markdown::to_mdast(source, &ParseOptions::default())
@@ -156,72 +158,10 @@ mod tests {
         )
     }
 
-    fn assert_fenced_code_highlights(source: &str) {
-        let (language, code) = fenced_code(source);
-        let config = LanguageRegistry::singleton()
-            .language(&language)
-            .unwrap_or_else(|| panic!("language {language:?} should be registered"));
-        assert!(
-            config.has_grammar(),
-            "language {language:?} should have a tree-sitter grammar"
-        );
-
-        let mut highlighter = SyntaxHighlighter::new(&language);
-        let rope = Rope::from_str(&code);
-        assert!(highlighter.update(None, &rope, None));
-
-        for theme in [
-            HighlightTheme::default_light(),
-            HighlightTheme::default_dark(),
-        ] {
-            let styles = highlighter.styles(&(0..code.len()), &theme);
-            assert!(
-                styles.iter().any(|(_, style)| style.color.is_some()),
-                "{language} fenced code should contain colored syntax spans in {}",
-                theme.name
-            );
-        }
-    }
-
-    fn contrast_ratio(foreground: &str, background: &str) -> f32 {
-        fn luminance(hex: &str) -> f32 {
-            let channels = [1, 3, 5].map(|offset| {
-                let value = u8::from_str_radix(&hex[offset..offset + 2], 16).unwrap() as f32 / 255.;
-                if value <= 0.03928 {
-                    value / 12.92
-                } else {
-                    ((value + 0.055) / 1.055).powf(2.4)
-                }
-            });
-            0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2]
-        }
-
-        let foreground = luminance(foreground);
-        let background = luminance(background);
-        (foreground.max(background) + 0.05) / (foreground.min(background) + 0.05)
-    }
-
     #[test]
-    fn fenced_rust_and_javascript_code_have_light_and_dark_highlight_spans() {
-        assert_fenced_code_highlights("```rust\nfn main() {\n    let answer = 42;\n}\n```");
-        assert_fenced_code_highlights("```javascript\nconst answer = \"ok\";\n```");
-    }
-
-    #[test]
-    fn light_code_highlight_colors_are_readable_on_the_code_block_surface() {
-        let theme: serde_json::Value =
-            serde_json::from_str(include_str!("../themes/cobalt.json")).unwrap();
-        let light = &theme["themes"][0];
-        let background = light["colors"]["muted.background"].as_str().unwrap();
-
-        for token in ["variable", "string", "keyword", "function", "type"] {
-            let color = light["highlight"]["syntax"][token]["color"]
-                .as_str()
-                .unwrap_or_else(|| panic!("missing Light syntax color for {token}"));
-            assert!(
-                contrast_ratio(color, background) >= 4.5,
-                "Light {token} color {color} is not readable on {background}"
-            );
-        }
+    fn markdown_fenced_code_block_keeps_language_and_body() {
+        let (language, code) = fenced_code("```rust\nfn main() {}\n```");
+        assert_eq!(language, "rust");
+        assert_eq!(code, "fn main() {}");
     }
 }

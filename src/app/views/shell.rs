@@ -1,10 +1,16 @@
 //! Persistent authenticated desktop shell: topbar, content and status area.
 
+use gpui::prelude::*;
 use gpui::*;
-use gpui_component::scroll::ScrollableElement as _;
-use gpui_component::{button::*, tooltip::Tooltip, *};
+use guise::{
+    ActionIcon, Button, Icon, IconName,
+    overlay::tooltip as guise_tooltip,
+    style::Variant,
+    theme::{Size as GuiseSize, Theme, theme},
+};
 
 use crate::app::{Screen, XWikiApp};
+use crate::ui::tokens::Cobalt;
 use crate::ui::{app_icon, mono_label, refresh_icon, tokens};
 
 #[derive(Clone)]
@@ -60,12 +66,12 @@ mod audit_time_tests {
 }
 
 /// HTTP method → accent color for the API reference rows.
-fn method_color(theme: &Theme, method: &str) -> Hsla {
+fn method_color(cobalt: &Cobalt, t: &Theme, method: &str) -> Hsla {
     match method {
-        "GET" => theme.accent,
-        "POST" | "PUT" | "PATCH" => theme.success,
-        "DELETE" => theme.danger,
-        _ => theme.muted_foreground,
+        "GET" => cobalt.accent,
+        "POST" | "PUT" | "PATCH" => t.success().hsla(),
+        "DELETE" => cobalt.danger,
+        _ => cobalt.ink_3,
     }
 }
 
@@ -151,7 +157,8 @@ impl XWikiApp {
     }
 
     pub(crate) fn render_api_reference(&self, cx: &mut Context<Self>) -> Div {
-        let theme = cx.theme().clone();
+        let t = theme(cx);
+        let cobalt = Cobalt::from_theme(t);
         let spec = self.api_reference.as_ref();
         let schema_version = spec
             .and_then(|value| value.get("openapi"))
@@ -261,77 +268,72 @@ impl XWikiApp {
             .map(|operation| operation.summary.clone())
             .unwrap_or_else(|| "选择左侧接口查看详情".into());
 
-        let page = div()
-            .size_full()
-            .flex()
-            .flex_col()
-            .bg(theme.background)
-            .child(
-                div()
-                    .w_full()
-                    .max_w(px(1200.0))
-                    .mx_auto()
-                    .px_6()
-                    .py_4()
-                    .border_b_1()
-                    .border_color(theme.border)
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .gap_4()
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap_3()
-                                    .child(
-                                        Button::new("close-openapi")
-                                            .ghost()
-                                            .compact()
-                                            .icon(IconName::ArrowLeft)
-                                            .label("返回工作区")
-                                            .on_click(cx.listener(|this, _, _, cx| {
-                                                this.screen = Screen::Workspace;
-                                                cx.notify();
-                                            })),
-                                    )
-                                    .child(div().w(px(1.0)).h(px(20.0)).bg(theme.border))
-                                    .child(
-                                        div()
-                                            .v_flex()
-                                            .gap_1()
-                                            .child(
-                                                mono_label("DEVELOPER / REFERENCE")
-                                                    .text_color(theme.accent),
-                                            )
-                                            .child(
-                                                crate::ui::display("OpenAPI Reference")
-                                                    .text_lg()
-                                                    .font_weight(FontWeight::SEMIBOLD)
-                                                    .text_color(theme.foreground),
-                                            ),
-                                    ),
-                            )
-                            .child(
-                                Button::new("copy-openapi-json")
-                                    .secondary()
-                                    .outline()
-                                    .compact()
-                                    .label("复制 JSON")
-                                    .disabled(self.api_reference.is_none())
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        if let Some(spec) = this.api_reference.clone() {
-                                            let text = serde_json::to_string_pretty(&spec)
-                                                .unwrap_or_else(|_| "{}".into());
-                                            cx.write_to_clipboard(ClipboardItem::new_string(text));
-                                            this.notify("OpenAPI JSON 已复制".into(), cx);
-                                        }
-                                    })),
-                            ),
-                    ),
-            );
+        let page = div().size_full().flex().flex_col().bg(cobalt.paper).child(
+            div()
+                .w_full()
+                .max_w(px(1200.0))
+                .mx_auto()
+                .px_6()
+                .py_4()
+                .border_b_1()
+                .border_color(cobalt.rule)
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .gap_4()
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap_3()
+                                .child(
+                                    Button::new("close-openapi", "返回工作区")
+                                        .variant(Variant::Subtle)
+                                        .size(GuiseSize::Xs)
+                                        .left_section(
+                                            Icon::new(IconName::ArrowLeft).size(GuiseSize::Xs),
+                                        )
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            this.screen = Screen::Workspace;
+                                            cx.notify();
+                                        })),
+                                )
+                                .child(div().w(px(1.0)).h(px(20.0)).bg(cobalt.rule))
+                                .child(
+                                    div()
+                                        .flex()
+                                        .flex_col()
+                                        .gap_1()
+                                        .child(
+                                            mono_label("DEVELOPER / REFERENCE")
+                                                .text_color(cobalt.accent),
+                                        )
+                                        .child(
+                                            crate::ui::display("OpenAPI Reference")
+                                                .text_lg()
+                                                .font_weight(FontWeight::SEMIBOLD)
+                                                .text_color(cobalt.ink),
+                                        ),
+                                ),
+                        )
+                        .child(
+                            Button::new("copy-openapi-json", "复制 JSON")
+                                .variant(Variant::Outline)
+                                .size(GuiseSize::Xs)
+                                .disabled(self.api_reference.is_none())
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    if let Some(spec) = this.api_reference.clone() {
+                                        let text = serde_json::to_string_pretty(&spec)
+                                            .unwrap_or_else(|_| "{}".into());
+                                        cx.write_to_clipboard(ClipboardItem::new_string(text));
+                                        this.notify("OpenAPI JSON 已复制".into(), cx);
+                                    }
+                                })),
+                        ),
+                ),
+        );
         if self.api_reference_loading {
             return page.child(
                 div()
@@ -340,7 +342,7 @@ impl XWikiApp {
                     .items_center()
                     .justify_center()
                     .text_sm()
-                    .text_color(theme.muted_foreground)
+                    .text_color(cobalt.ink_3)
                     .child("正在加载 OpenAPI schema…"),
             );
         }
@@ -354,12 +356,12 @@ impl XWikiApp {
                     .justify_center()
                     .gap_3()
                     .text_sm()
-                    .text_color(theme.danger)
+                    .text_color(cobalt.danger)
                     .child(error.clone())
                     .child(
-                        Button::new("retry-openapi")
-                            .rounded(px(tokens::RADIUS))
-                            .label("重试")
+                        Button::new("retry-openapi", "重试")
+                            .variant(Variant::Default)
+                            .size(GuiseSize::Xs)
                             .on_click(cx.listener(|this, _, _, cx| this.open_api_reference(cx))),
                     ),
             );
@@ -401,7 +403,10 @@ impl XWikiApp {
                         let path_owned = path.clone();
                         let is_selected = selected_path.as_ref() == Some(path);
                         let mut row = div()
-                            .id(format!("api-nav-{}", path.replace('/', "-")))
+                            .id(SharedString::from(format!(
+                                "api-nav-{}",
+                                path.replace('/', "-")
+                            )))
                             .flex()
                             .flex_col()
                             .gap_2()
@@ -413,18 +418,18 @@ impl XWikiApp {
                                     .font_family(tokens::FONT_MONO)
                                     .text_xs()
                                     .text_color(if is_selected {
-                                        theme.foreground
+                                        cobalt.ink
                                     } else {
-                                        theme.muted_foreground
+                                        cobalt.ink_3
                                     })
                                     .child(path.clone()),
                             )
                             .child(div().flex().gap_1().children(methods.iter().map(|method| {
                                 mono_label(method.clone())
                                     .text_color(if is_selected {
-                                        theme.accent
+                                        cobalt.accent
                                     } else {
-                                        theme.muted_foreground
+                                        cobalt.ink_3
                                     })
                                     .into_any_element()
                             })))
@@ -434,22 +439,23 @@ impl XWikiApp {
                                 cx.notify();
                             }));
                         row = if is_selected {
-                            row.bg(theme.list_active)
+                            row.bg(cobalt.accent.opacity(0.08))
                         } else {
-                            row.hover(|style| style.bg(theme.list_hover))
+                            row.hover(|style| style.bg(cobalt.surface_accent))
                         };
                         row.into_any_element()
                     })
                     .collect();
                 div()
-                    .v_flex()
+                    .flex()
+                    .flex_col()
                     .child(
                         div()
                             .px_3()
                             .py_3()
                             .border_b_1()
-                            .border_color(theme.border)
-                            .child(mono_label(api_tag_label(tag)).text_color(theme.accent)),
+                            .border_color(cobalt.rule)
+                            .child(mono_label(api_tag_label(tag)).text_color(cobalt.accent)),
                     )
                     .children(rows)
                     .into_any_element()
@@ -457,7 +463,7 @@ impl XWikiApp {
             .collect();
 
         let detail = if let (Some(path), Some(method)) = (selected_path.clone(), selected_method) {
-            let detail_color = method_color(&theme, &method);
+            let detail_color = method_color(&cobalt, t, &method);
             let copy_path = path.clone();
             let copy_method = method.clone();
             let method_rows: Vec<AnyElement> = selected_operations
@@ -466,9 +472,12 @@ impl XWikiApp {
                     let active = operation.method == method;
                     let row_path = path.clone();
                     let row_method = operation.method.clone();
-                    let row_color = method_color(&theme, &operation.method);
+                    let row_color = method_color(&cobalt, t, &operation.method);
                     let mut row = div()
-                        .id(format!("api-method-{}", operation.method))
+                        .id(SharedString::from(format!(
+                            "api-method-{}",
+                            operation.method
+                        )))
                         .flex()
                         .items_center()
                         .gap_3()
@@ -495,7 +504,7 @@ impl XWikiApp {
                                 .flex_1()
                                 .min_w(px(0.0))
                                 .text_sm()
-                                .text_color(theme.foreground)
+                                .text_color(cobalt.ink)
                                 .child(operation.summary.clone()),
                         )
                         .on_click(cx.listener(move |this, _, _, cx| {
@@ -504,22 +513,23 @@ impl XWikiApp {
                             cx.notify();
                         }));
                     row = if active {
-                        row.bg(theme.list_active)
+                        row.bg(cobalt.accent.opacity(0.08))
                     } else {
-                        row.hover(|style| style.bg(theme.list_hover))
+                        row.hover(|style| style.bg(cobalt.surface_accent))
                     };
                     row.into_any_element()
                 })
                 .collect();
             div()
+                .id("api-detail")
                 .flex_1()
                 .min_w(px(0.0))
                 .h_full()
-                .overflow_y_scrollbar()
+                .overflow_y_scroll()
                 .border_1()
-                .border_color(theme.border)
+                .border_color(cobalt.rule)
                 .rounded(px(tokens::RADIUS))
-                .bg(theme.sidebar)
+                .bg(cobalt.paper_2)
                 .child(
                     div()
                         .flex()
@@ -528,7 +538,7 @@ impl XWikiApp {
                         .px_5()
                         .py_4()
                         .border_b_1()
-                        .border_color(theme.border)
+                        .border_color(cobalt.rule)
                         .child(
                             div()
                                 .px_2()
@@ -547,38 +557,40 @@ impl XWikiApp {
                                 .min_w(px(0.0))
                                 .font_family(tokens::FONT_MONO)
                                 .text_sm()
-                                .text_color(theme.foreground)
+                                .text_color(cobalt.ink)
                                 .child(path.clone()),
                         )
-                        .child(mono_label("READ ONLY").text_color(theme.muted_foreground)),
+                        .child(mono_label("READ ONLY").text_color(cobalt.ink_3)),
                 )
                 .child(
                     div()
-                        .v_flex()
+                        .flex()
+                        .flex_col()
                         .gap_4()
                         .p_5()
                         .child(
                             div()
                                 .text_lg()
                                 .font_weight(FontWeight::SEMIBOLD)
-                                .text_color(theme.foreground)
+                                .text_color(cobalt.ink)
                                 .child(selected_summary),
                         )
                         .child(
                             div()
-                                .v_flex()
+                                .flex()
+                                .flex_col()
                                 .gap_2()
-                                .child(mono_label("REQUEST").text_color(theme.muted_foreground))
+                                .child(mono_label("REQUEST").text_color(cobalt.ink_3))
                                 .child(
                                     div()
                                         .w_full()
                                         .px_3()
                                         .py_3()
                                         .rounded(px(tokens::RADIUS_SMALL))
-                                        .bg(theme.background)
+                                        .bg(cobalt.paper)
                                         .font_family(tokens::FONT_MONO)
                                         .text_sm()
-                                        .text_color(theme.foreground)
+                                        .text_color(cobalt.ink)
                                         .child(format!("{method} {path}")),
                                 ),
                         )
@@ -591,15 +603,13 @@ impl XWikiApp {
                                 .child(
                                     div()
                                         .text_xs()
-                                        .text_color(theme.muted_foreground)
+                                        .text_color(cobalt.ink_3)
                                         .child("Try it 已关闭，仅用于查看 schema 和接口说明。"),
                                 )
                                 .child(
-                                    Button::new("copy-api-path")
-                                        .secondary()
-                                        .outline()
-                                        .compact()
-                                        .label("复制路径")
+                                    Button::new("copy-api-path", "复制路径")
+                                        .variant(Variant::Outline)
+                                        .size(GuiseSize::Xs)
                                         .on_click(cx.listener(move |this, _, _, cx| {
                                             cx.write_to_clipboard(ClipboardItem::new_string(
                                                 format!("{copy_method} {copy_path}"),
@@ -612,12 +622,12 @@ impl XWikiApp {
                 .child(
                     div()
                         .border_t_1()
-                        .border_color(theme.border)
+                        .border_color(cobalt.rule)
                         .child(
                             div()
                                 .px_5()
                                 .py_3()
-                                .child(mono_label("OPERATIONS").text_color(theme.muted_foreground)),
+                                .child(mono_label("OPERATIONS").text_color(cobalt.ink_3)),
                         )
                         .children(method_rows),
                 )
@@ -627,14 +637,14 @@ impl XWikiApp {
                 .flex_1()
                 .h_full()
                 .border_1()
-                .border_color(theme.border)
+                .border_color(cobalt.rule)
                 .rounded(px(tokens::RADIUS))
-                .bg(theme.sidebar)
+                .bg(cobalt.paper_2)
                 .flex()
                 .items_center()
                 .justify_center()
                 .text_sm()
-                .text_color(theme.muted_foreground)
+                .text_color(cobalt.ink_3)
                 .child("OpenAPI schema 中暂无可展示的接口")
                 .into_any_element()
         };
@@ -647,32 +657,34 @@ impl XWikiApp {
                 .h_full()
                 .px_6()
                 .py_6()
-                .v_flex()
+                .flex()
+                .flex_col()
                 .gap_5()
                 .child(
                     div()
-                        .v_flex()
+                        .flex()
+                        .flex_col()
                         .gap_2()
-                        .child(mono_label("SCHEMA OVERVIEW").text_color(theme.accent))
+                        .child(mono_label("SCHEMA OVERVIEW").text_color(cobalt.accent))
                         .child(
                             div()
                                 .text_lg()
                                 .font_weight(FontWeight::SEMIBOLD)
-                                .text_color(theme.foreground)
+                                .text_color(cobalt.ink)
                                 .child(schema_title),
                         )
                         .child(
                             div()
                                 .max_w(px(760.0))
                                 .text_sm()
-                                .text_color(theme.muted_foreground)
+                                .text_color(cobalt.ink_3)
                                 .child(schema_description),
                         )
                         .child(
                             div()
                                 .font_family(tokens::FONT_MONO)
                                 .text_xs()
-                                .text_color(theme.muted_foreground)
+                                .text_color(cobalt.ink_3)
                                 .child(format!(
                                     "OpenAPI {schema_version} · {endpoint_count} 个接口"
                                 )),
@@ -687,24 +699,22 @@ impl XWikiApp {
                         .gap_5()
                         .child(
                             div()
+                                .id("api-nav-scroll")
                                 .w(px(280.0))
                                 .flex_none()
                                 .h_full()
-                                .overflow_y_scrollbar()
+                                .overflow_y_scroll()
                                 .border_1()
-                                .border_color(theme.border)
+                                .border_color(cobalt.rule)
                                 .rounded(px(tokens::RADIUS))
-                                .bg(theme.sidebar)
+                                .bg(cobalt.paper_2)
                                 .child(
                                     div()
                                         .px_3()
                                         .py_3()
                                         .border_b_1()
-                                        .border_color(theme.border)
-                                        .child(
-                                            mono_label("ENDPOINTS")
-                                                .text_color(theme.muted_foreground),
-                                        ),
+                                        .border_color(cobalt.rule)
+                                        .child(mono_label("ENDPOINTS").text_color(cobalt.ink_3)),
                                 )
                                 .children(endpoint_nav),
                         )
@@ -719,81 +729,79 @@ impl XWikiApp {
     /// and `created_at`. Entry point lives next to API Reference in the
     /// sidebar DEVELOPER TOOLS block.
     pub(crate) fn render_audit(&self, cx: &mut Context<Self>) -> Div {
-        let theme = cx.theme().clone();
-        let page = div()
-            .size_full()
-            .flex()
-            .flex_col()
-            .bg(theme.background)
-            .child(
-                div()
-                    .w_full()
-                    .max_w(px(1200.0))
-                    .mx_auto()
-                    .px_6()
-                    .py_4()
-                    .border_b_1()
-                    .border_color(theme.border)
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .gap_4()
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap_3()
-                                    .child(
-                                        Button::new("close-audit")
-                                            .ghost()
-                                            .compact()
-                                            .icon(IconName::ArrowLeft)
-                                            .label("返回工作区")
-                                            .on_click(cx.listener(|this, _, _, cx| {
-                                                this.screen = Screen::Workspace;
-                                                cx.notify();
-                                            })),
-                                    )
-                                    .child(div().w(px(1.0)).h(px(20.0)).bg(theme.border))
-                                    .child(
-                                        div()
-                                            .v_flex()
-                                            .gap_1()
-                                            .child(
-                                                mono_label("DEVELOPER / AUDIT")
-                                                    .text_color(theme.accent),
-                                            )
-                                            .child(
-                                                crate::ui::display("审计日志")
-                                                    .text_lg()
-                                                    .font_weight(FontWeight::SEMIBOLD)
-                                                    .text_color(theme.foreground),
-                                            ),
-                                    ),
+        let t = theme(cx);
+        let cobalt = Cobalt::from_theme(t);
+        let page = div().size_full().flex().flex_col().bg(cobalt.paper).child(
+            div()
+                .w_full()
+                .max_w(px(1200.0))
+                .mx_auto()
+                .px_6()
+                .py_4()
+                .border_b_1()
+                .border_color(cobalt.rule)
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .gap_4()
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap_3()
+                                .child(
+                                    Button::new("close-audit", "返回工作区")
+                                        .variant(Variant::Subtle)
+                                        .size(GuiseSize::Xs)
+                                        .left_section(
+                                            Icon::new(IconName::ArrowLeft).size(GuiseSize::Xs),
+                                        )
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            this.screen = Screen::Workspace;
+                                            cx.notify();
+                                        })),
+                                )
+                                .child(div().w(px(1.0)).h(px(20.0)).bg(cobalt.rule))
+                                .child(
+                                    div()
+                                        .flex()
+                                        .flex_col()
+                                        .gap_1()
+                                        .child(
+                                            mono_label("DEVELOPER / AUDIT")
+                                                .text_color(cobalt.accent),
+                                        )
+                                        .child(
+                                            crate::ui::display("审计日志")
+                                                .text_lg()
+                                                .font_weight(FontWeight::SEMIBOLD)
+                                                .text_color(cobalt.ink),
+                                        ),
+                                ),
+                        )
+                        .child(
+                            Button::new(
+                                "refresh-audit",
+                                if self.audit_loading {
+                                    "加载中…"
+                                } else {
+                                    "刷新"
+                                },
                             )
-                            .child(
-                                Button::new("refresh-audit")
-                                    .secondary()
-                                    .outline()
-                                    .compact()
-                                    .icon(IconName::Redo2)
-                                    .label(if self.audit_loading {
-                                        "加载中…"
-                                    } else {
-                                        "刷新"
-                                    })
-                                    .loading(self.audit_loading)
-                                    .disabled(self.audit_selected_project.is_none())
-                                    .on_click(cx.listener(|this, _, _, cx| this.load_audit(cx))),
-                            ),
-                    ),
-            );
+                            .variant(Variant::Outline)
+                            .size(GuiseSize::Xs)
+                            .left_section(Icon::new(IconName::Redo2).size(GuiseSize::Xs))
+                            .disabled(self.audit_loading || self.audit_selected_project.is_none())
+                            .on_click(cx.listener(|this, _, _, cx| this.load_audit(cx))),
+                        ),
+                ),
+        );
         let picker: AnyElement = if self.audit_projects.is_empty() {
             div()
                 .text_sm()
-                .text_color(theme.muted_foreground)
+                .text_color(cobalt.ink_3)
                 .child("暂无项目，无法查看审计日志。")
                 .into_any_element()
         } else {
@@ -804,18 +812,21 @@ impl XWikiApp {
                 .children(self.audit_projects.iter().map(|p| {
                     let id = p.id.clone();
                     let selected = self.audit_selected_project.as_deref() == Some(p.id.as_str());
-                    Button::new(format!("audit-project-{}", p.id))
-                        .secondary()
-                        .outline()
-                        .compact()
-                        .label(p.name.clone())
-                        .selected(selected)
-                        .toggled(selected)
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.audit_selected_project = Some(id.clone());
-                            this.load_audit(cx);
-                        }))
-                        .into_any_element()
+                    Button::new(
+                        SharedString::from(format!("audit-project-{}", p.id)),
+                        p.name.clone(),
+                    )
+                    .variant(if selected {
+                        Variant::Light
+                    } else {
+                        Variant::Outline
+                    })
+                    .size(GuiseSize::Xs)
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.audit_selected_project = Some(id.clone());
+                        this.load_audit(cx);
+                    }))
+                    .into_any_element()
                 }))
                 .into_any_element()
         };
@@ -823,7 +834,7 @@ impl XWikiApp {
             div()
                 .py_4()
                 .text_sm()
-                .text_color(theme.danger)
+                .text_color(cobalt.danger)
                 .child(error.clone())
                 .into_any_element()
         } else if self.audit_projects.is_empty() {
@@ -833,18 +844,18 @@ impl XWikiApp {
             div()
                 .py_4()
                 .text_sm()
-                .text_color(theme.muted_foreground)
+                .text_color(cobalt.ink_3)
                 .child("正在加载审计日志…")
                 .into_any_element()
         } else if self.audit_entries.is_empty() {
             div()
                 .py_4()
                 .text_sm()
-                .text_color(theme.muted_foreground)
+                .text_color(cobalt.ink_3)
                 .child("暂无审计记录。")
                 .into_any_element()
         } else {
-            let mut rows = div().v_flex();
+            let mut rows = div().flex().flex_col();
             for e in &self.audit_entries {
                 rows = rows.child(
                     div()
@@ -853,22 +864,23 @@ impl XWikiApp {
                         .gap_3()
                         .py_3()
                         .border_b_1()
-                        .border_color(theme.border)
+                        .border_color(cobalt.rule)
                         .child(
                             div()
                                 .flex_1()
                                 .min_w(px(0.0))
-                                .v_flex()
+                                .flex()
+                                .flex_col()
                                 .gap_1()
                                 .child(
                                     div()
                                         .flex()
                                         .items_center()
                                         .gap_2()
-                                        .child(mono_label(&e.action).text_color(theme.accent))
+                                        .child(mono_label(&e.action).text_color(cobalt.accent))
                                         .child(
                                             mono_label(format!("{}:{}", e.actor_type, e.actor_id))
-                                                .text_color(theme.muted_foreground),
+                                                .text_color(cobalt.ink_3),
                                         ),
                                 )
                                 .child(
@@ -877,13 +889,13 @@ impl XWikiApp {
                                     } else {
                                         e.path.clone()
                                     })
-                                    .text_color(theme.muted_foreground),
+                                    .text_color(cobalt.ink_3),
                                 ),
                         )
                         .child(
                             mono_label(format_audit_time(&e.created_at))
                                 .flex_shrink_0()
-                                .text_color(theme.muted_foreground),
+                                .text_color(cobalt.ink_3),
                         ),
                 );
             }
@@ -891,9 +903,10 @@ impl XWikiApp {
         };
         page.child(
             div()
+                .id("audit-scroll")
                 .flex_1()
                 .min_h(px(0.0))
-                .overflow_y_scrollbar()
+                .overflow_y_scroll()
                 .flex()
                 .items_start()
                 .justify_center()
@@ -903,38 +916,40 @@ impl XWikiApp {
                         .flex_none()
                         .max_w(px(920.0))
                         .p_6()
-                        .v_flex()
+                        .flex()
+                        .flex_col()
                         .gap_4()
                         .child(
-                            div().text_sm().text_color(theme.muted_foreground).child(
+                            div().text_sm().text_color(cobalt.ink_3).child(
                                 "按项目查看操作记录：谁在什么时间对哪个文档执行了什么操作。",
                             ),
                         )
                         .child(
                             div()
-                                .v_flex()
+                                .flex()
+                                .flex_col()
                                 .gap_2()
-                                .child(mono_label("PROJECT").text_color(theme.muted_foreground))
+                                .child(mono_label("PROJECT").text_color(cobalt.ink_3))
                                 .child(picker),
                         )
                         .child(
                             div()
-                                .v_flex()
+                                .flex()
+                                .flex_col()
                                 .gap_2()
                                 .child(
                                     mono_label(format!("ENTRIES · {}", self.audit_entries.len()))
-                                        .text_color(theme.muted_foreground),
+                                        .text_color(cobalt.ink_3),
                                 )
-                                .child(
-                                    div().border_t_1().border_color(theme.border).child(entries),
-                                ),
+                                .child(div().border_t_1().border_color(cobalt.rule).child(entries)),
                         ),
                 ),
         )
     }
 
     fn render_shell_topbar(&self, cx: &Context<Self>) -> Div {
-        let theme = cx.theme().clone();
+        let t = theme(cx);
+        let cobalt = Cobalt::from_theme(t);
         let project = match &self.screen {
             Screen::Settings => "设置".to_string(),
             Screen::ApiReference => "API Reference".to_string(),
@@ -957,8 +972,8 @@ impl XWikiApp {
             .items_center()
             .justify_between()
             .border_b_1()
-            .border_color(theme.border)
-            .bg(theme.sidebar)
+            .border_color(cobalt.rule)
+            .bg(cobalt.paper_2)
             .child(
                 div()
                     .flex()
@@ -970,14 +985,14 @@ impl XWikiApp {
                             .items_center()
                             .gap_2()
                             .child(app_icon().size(px(24.0)))
-                            .child(mono_label("XWiki").text_color(theme.accent)),
+                            .child(mono_label("XWiki").text_color(cobalt.accent)),
                     )
-                    .child(div().w(px(1.0)).h(px(16.0)).bg(theme.border))
+                    .child(div().w(px(1.0)).h(px(16.0)).bg(cobalt.rule))
                     .child(
                         div()
                             .font_family(tokens::FONT_MONO)
                             .text_xs()
-                            .text_color(theme.muted_foreground)
+                            .text_color(cobalt.ink_3)
                             .child(format!("{}{}", tokens::truncate(&project, 40), document)),
                     ),
             )
@@ -995,21 +1010,24 @@ impl XWikiApp {
                             .py_1()
                             .rounded(px(tokens::RADIUS))
                             .border_1()
-                            .border_color(theme.border)
+                            .border_color(cobalt.rule)
                             .font_family(tokens::FONT_MONO)
                             .text_xs()
-                            .text_color(theme.muted_foreground)
+                            .text_color(cobalt.ink_3)
                             .child(format!("{} K", tokens::MOD_KEY)),
                     )
                     .child(
-                        Button::new("shell-quick-open")
-                            .ghost()
-                            .compact()
-                            .icon(IconName::Search)
-                            .tooltip(format!("快速打开 ({} P)", tokens::MOD_KEY))
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.toggle_quick_open(window, cx)
-                            })),
+                        div()
+                            .id("shell-quick-open-wrap")
+                            .child(
+                                ActionIcon::new("shell-quick-open", IconName::Search)
+                                    .variant(Variant::Subtle)
+                                    .size(GuiseSize::Xs)
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.toggle_quick_open(window, cx)
+                                    })),
+                            )
+                            .tooltip(guise_tooltip(format!("快速打开 ({} P)", tokens::MOD_KEY))),
                     )
                     .child(
                         div()
@@ -1020,9 +1038,9 @@ impl XWikiApp {
                             .justify_center()
                             .rounded(px(tokens::RADIUS_SMALL))
                             .cursor_pointer()
-                            .hover(|style| style.bg(theme.list_hover))
+                            .tooltip(guise_tooltip("刷新当前页面"))
+                            .hover(|style| style.bg(cobalt.surface_accent))
                             .child(refresh_icon().size(px(16.0)))
-                            .tooltip(|window, cx| Tooltip::new("刷新当前页面").build(window, cx))
                             .on_click(cx.listener(|this, _, _, cx| {
                                 if !this.editing {
                                     this.refresh_current_view(cx);
@@ -1030,37 +1048,51 @@ impl XWikiApp {
                             })),
                     )
                     .child(
-                        Button::new("shell-theme")
-                            .ghost()
-                            .compact()
-                            .icon(if cx.theme().is_dark() {
-                                IconName::Sun
-                            } else {
-                                IconName::Moon
-                            })
-                            .tooltip(format!("切换主题 ({} Shift T)", tokens::MOD_KEY))
-                            .on_click(cx.listener(|this, _, _, cx| this.toggle_theme(cx))),
+                        div()
+                            .id("shell-theme-wrap")
+                            .child(
+                                ActionIcon::new(
+                                    "shell-theme",
+                                    if t.scheme.is_dark() {
+                                        IconName::Sun
+                                    } else {
+                                        IconName::Moon
+                                    },
+                                )
+                                .variant(Variant::Subtle)
+                                .size(GuiseSize::Xs)
+                                .on_click(cx.listener(|this, _, _, cx| this.toggle_theme(cx))),
+                            )
+                            .tooltip(guise_tooltip(format!(
+                                "切换主题 ({} Shift T)",
+                                tokens::MOD_KEY
+                            ))),
                     )
                     .child(
-                        Button::new("shell-settings")
-                            .ghost()
-                            .compact()
-                            .selected(matches!(&self.screen, &Screen::Settings))
-                            .toggled(matches!(&self.screen, &Screen::Settings))
-                            .icon(IconName::Settings)
-                            .tooltip("打开设置")
-                            .disabled(self.editing)
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.screen = Screen::Settings;
-                                this.load_settings_access(cx);
-                                cx.notify();
-                            })),
+                        div()
+                            .id("shell-settings-wrap")
+                            .child(
+                                ActionIcon::new("shell-settings", IconName::Settings)
+                                    .variant(if matches!(&self.screen, &Screen::Settings) {
+                                        Variant::Light
+                                    } else {
+                                        Variant::Subtle
+                                    })
+                                    .size(GuiseSize::Xs)
+                                    .disabled(self.editing)
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.screen = Screen::Settings;
+                                        this.load_settings_access(cx);
+                                        cx.notify();
+                                    })),
+                            )
+                            .tooltip(guise_tooltip("打开设置")),
                     )
                     .child(
                         div()
                             .font_family(tokens::FONT_MONO)
                             .text_xs()
-                            .text_color(theme.muted_foreground)
+                            .text_color(cobalt.ink_3)
                             .child(self.username.clone()),
                     ),
             )

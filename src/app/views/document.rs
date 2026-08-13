@@ -3,21 +3,47 @@
 
 use gpui::InteractiveElement;
 use gpui::*;
-use gpui_component::{
-    button::*,
-    input::Input,
-    menu::{ContextMenuExt, DropdownMenu},
-    scroll::ScrollableElement as _,
-    tooltip::Tooltip,
-    *,
-};
+use guise::theme::{ColorName, Size, theme};
+use guise::{ActionIcon, Button, ContextMenu, Icon, IconName, Variant, tooltip};
 
-use crate::app::{
-    DocDeleteAction, DocRenameAction, EditDocAction, ProjectExportAction, TreeContextAction,
-    XWikiApp,
-};
+use crate::app::XWikiApp;
 use crate::config;
 use crate::ui::{mono_label, split_pane, tokens};
+
+/// Semantic colors consumed by the document views, mirroring the old
+/// `theme.*` slot reads against the Cobalt palette.
+#[derive(Clone)]
+struct DocTheme {
+    background: Hsla,
+    sidebar: Hsla,
+    foreground: Hsla,
+    muted_foreground: Hsla,
+    border: Hsla,
+    accent: Hsla,
+    danger: Hsla,
+    list_hover: Hsla,
+    list_active: Hsla,
+    skeleton: Hsla,
+}
+
+impl DocTheme {
+    fn from_cx(cx: &mut Context<XWikiApp>) -> Self {
+        let t = theme(cx);
+        let cobalt = tokens::Cobalt::from_theme(t);
+        Self {
+            background: cobalt.paper,
+            sidebar: cobalt.paper_2,
+            foreground: cobalt.ink,
+            muted_foreground: cobalt.ink_3,
+            border: cobalt.rule,
+            accent: cobalt.accent,
+            danger: cobalt.danger,
+            list_hover: cobalt.surface_accent,
+            list_active: t.primary().alpha(0.08),
+            skeleton: cobalt.rule,
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum DocumentViewMode {
@@ -37,8 +63,8 @@ fn document_view_mode(has_document: bool, editing: bool) -> DocumentViewMode {
 }
 
 impl XWikiApp {
-    pub(crate) fn render_tree(&self, cx: &mut Context<Self>) -> AnyElement {
-        let theme = cx.theme().clone();
+    pub(crate) fn render_tree(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let theme = DocTheme::from_cx(cx);
         // Owned (path, is_dir) pairs: the keyboard listener below is 'static
         // and must not borrow from `self`.
         let items: Vec<(String, bool)> = self
@@ -47,7 +73,7 @@ impl XWikiApp {
             .filter(|e| e.path != "_sidebar.md")
             .map(|e| (e.path.clone(), e.r#type == "tree"))
             .collect();
-        let mut list = div().v_flex().w_full();
+        let mut list = div().flex().flex_col().w_full();
         let count = items.len();
         let location_label = if self.tree_path.is_empty() {
             "root".to_string()
@@ -59,22 +85,25 @@ impl XWikiApp {
         let mut header_left = div().flex().items_center().gap_2();
         if !self.tree_path.is_empty() {
             header_left = header_left.child(
-                Button::new("tree-go-up")
-                    .ghost()
-                    .compact()
-                    .icon(IconName::ArrowLeft)
-                    .tooltip("返回上一级目录 (←)")
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        let parent = this.tree_path.rsplit_once('/').map(|(p, _)| p.to_string());
-                        this.load_tree(parent.as_deref().unwrap_or(""), cx);
-                    })),
+                div()
+                    .id("tree-go-up-tooltip")
+                    .tooltip(tooltip("返回上一级目录 (←)"))
+                    .child(
+                        ActionIcon::new("tree-go-up", IconName::ArrowLeft)
+                            .size(Size::Sm)
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                let parent =
+                                    this.tree_path.rsplit_once('/').map(|(p, _)| p.to_string());
+                                this.load_tree(parent.as_deref().unwrap_or(""), cx);
+                            })),
+                    ),
             );
         }
         header_left = header_left
             .child(
-                Icon::new(IconName::Folder)
-                    .with_size(px(14.0))
-                    .text_color(theme.accent),
+                div()
+                    .text_color(theme.accent)
+                    .child(Icon::new(IconName::Folder).size(Size::Xs)),
             )
             .child(
                 div()
@@ -114,7 +143,8 @@ impl XWikiApp {
                     .px_4()
                     .py_8()
                     .rounded(px(tokens::RADIUS))
-                    .v_flex()
+                    .flex()
+                    .flex_col()
                     .items_start()
                     .gap_3()
                     .text_color(theme.muted_foreground)
@@ -127,9 +157,9 @@ impl XWikiApp {
                             .items_center()
                             .justify_center()
                             .child(
-                                Icon::new(IconName::FolderOpen)
-                                    .with_size(px(22.0))
-                                    .text_color(theme.muted_foreground),
+                                div()
+                                    .text_color(theme.muted_foreground)
+                                    .child(Icon::new(IconName::FolderOpen).size(Size::Md)),
                             ),
                     )
                     .child(
@@ -146,18 +176,18 @@ impl XWikiApp {
                             .child("创建文档或导入文件来开始"),
                     )
                     .child(
-                        Button::new("empty-tree-back")
-                            .ghost()
-                            .compact()
-                            .rounded(px(tokens::RADIUS))
-                            .icon(IconName::ArrowLeft)
-                            .label("返回项目")
+                        Button::new("empty-tree-back", "返回项目")
+                            .variant(Variant::Subtle)
+                            .size(Size::Xs)
+                            .radius(Size::Sm)
+                            .left_section(Icon::new(IconName::ArrowLeft).size(Size::Xs))
                             .on_click(cx.listener(|this, _, _, cx| this.back_to_projects(cx))),
                     ),
             );
             return list.into_any_element();
         }
         let focus_bar = theme.accent;
+        let app_handle = cx.entity();
         for (i, (path, is_dir)) in items.iter().enumerate() {
             let is_selected = !is_dir && self.doc_path.as_deref() == Some(path.as_str());
             let is_focused = self.tree_focus == Some(i);
@@ -172,8 +202,138 @@ impl XWikiApp {
                     .rsplit_once('.')
                     .map(|(_, ext)| ext.to_ascii_uppercase())
             };
+            // Per-row context menus (guise entities, keyed by path so they
+            // survive re-renders): the ellipsis button opens the full menu,
+            // right-click opens the shorter one (no export).
+            let btn_path = path_owned.clone();
+            let btn_dir = is_dir_owned;
+            let btn_app = app_handle.clone();
+            let btn_menu = window.use_keyed_state(
+                SharedString::from(format!("tree-btn-menu-{path_owned}")),
+                cx,
+                move |_, cx| {
+                    let app = btn_app.clone();
+                    let path = btn_path.clone();
+                    let is_dir = btn_dir;
+                    let mut m =
+                        ContextMenu::new(cx).item(if is_dir { "进入目录" } else { "打开" }, {
+                            let app = app.clone();
+                            let path = path.clone();
+                            move |_window, cx| {
+                                app.update(cx, |app, cx| {
+                                    if is_dir {
+                                        app.load_tree(&path, cx);
+                                    } else {
+                                        app.open_doc(&path, cx);
+                                    }
+                                });
+                            }
+                        });
+                    if !is_dir {
+                        m = m
+                            .item("编辑", {
+                                let app = app.clone();
+                                let path = path.clone();
+                                move |_window, cx| {
+                                    app.update(cx, |app, cx| {
+                                        app.pending_edit = Some(path.clone());
+                                        app.open_doc(&path, cx);
+                                    });
+                                }
+                            })
+                            .item("导出项目", {
+                                let app = app.clone();
+                                move |window, cx| {
+                                    app.update(cx, |app, cx| app.open_export_dialog(window, cx));
+                                }
+                            });
+                    }
+                    m = m
+                        .item("重命名", {
+                            let app = app.clone();
+                            let path = path.clone();
+                            let is_dir = is_dir;
+                            move |window, cx| {
+                                app.update(cx, |app, cx| {
+                                    app.confirm_rename_doc(window, cx, path.clone(), is_dir)
+                                });
+                            }
+                        })
+                        .danger_item("删除", {
+                            let app = app.clone();
+                            let path = path.clone();
+                            let is_dir = is_dir;
+                            move |window, cx| {
+                                app.update(cx, |app, cx| {
+                                    app.confirm_delete_doc(window, cx, path.clone(), is_dir)
+                                });
+                            }
+                        });
+                    m
+                },
+            );
+            let ctx_path = path_owned.clone();
+            let ctx_dir = is_dir_owned;
+            let ctx_app = app_handle.clone();
+            let ctx_menu = window.use_keyed_state(
+                SharedString::from(format!("tree-ctx-menu-{path_owned}")),
+                cx,
+                move |_, cx| {
+                    let app = ctx_app.clone();
+                    let path = ctx_path.clone();
+                    let is_dir = ctx_dir;
+                    let mut m =
+                        ContextMenu::new(cx).item(if is_dir { "进入目录" } else { "打开" }, {
+                            let app = app.clone();
+                            let path = path.clone();
+                            move |_window, cx| {
+                                app.update(cx, |app, cx| {
+                                    if is_dir {
+                                        app.load_tree(&path, cx);
+                                    } else {
+                                        app.open_doc(&path, cx);
+                                    }
+                                });
+                            }
+                        });
+                    if !is_dir {
+                        m = m.item("编辑", {
+                            let app = app.clone();
+                            let path = path.clone();
+                            move |_window, cx| {
+                                app.update(cx, |app, cx| {
+                                    app.pending_edit = Some(path.clone());
+                                    app.open_doc(&path, cx);
+                                });
+                            }
+                        });
+                    }
+                    m = m
+                        .item("重命名", {
+                            let app = app.clone();
+                            let path = path.clone();
+                            let is_dir = is_dir;
+                            move |window, cx| {
+                                app.update(cx, |app, cx| {
+                                    app.confirm_rename_doc(window, cx, path.clone(), is_dir)
+                                });
+                            }
+                        })
+                        .danger_item("删除", {
+                            let app = app.clone();
+                            let path = path.clone();
+                            let is_dir = is_dir;
+                            move |window, cx| {
+                                app.update(cx, |app, cx| {
+                                    app.confirm_delete_doc(window, cx, path.clone(), is_dir)
+                                });
+                            }
+                        });
+                    m
+                },
+            );
             let row = div()
-                .id(path.clone())
+                .id(SharedString::from(path.clone()))
                 .w_full()
                 .flex()
                 .items_center()
@@ -205,17 +365,20 @@ impl XWikiApp {
                         .items_center()
                         .justify_center()
                         .child(
-                            Icon::new(if is_dir_owned {
-                                IconName::Folder
-                            } else {
-                                IconName::File
-                            })
-                            .with_size(px(15.0))
-                            .text_color(if is_dir_owned {
-                                theme.accent
-                            } else {
-                                theme.muted_foreground
-                            }),
+                            div()
+                                .text_color(if is_dir_owned {
+                                    theme.accent
+                                } else {
+                                    theme.muted_foreground
+                                })
+                                .child(
+                                    Icon::new(if is_dir_owned {
+                                        IconName::Folder
+                                    } else {
+                                        IconName::File
+                                    })
+                                    .size(Size::Sm),
+                                ),
                         ),
                 )
                 .child(
@@ -257,8 +420,7 @@ impl XWikiApp {
                         })),
                 )
                 .child({
-                    let menu_path = path_owned.clone();
-                    let menu_dir = is_dir_owned;
+                    let menu = btn_menu.clone();
                     div()
                         .flex_none()
                         .size(px(28.0))
@@ -267,45 +429,15 @@ impl XWikiApp {
                         .justify_center()
                         .rounded(px(tokens::RADIUS_SMALL))
                         .hover(|s| s.bg(theme.border.opacity(0.15)))
-                        .child(
-                            Button::new(format!("doc-menu-{}", menu_path))
-                                .ghost()
-                                .compact()
-                                .icon(IconName::EllipsisVertical)
-                                .tooltip("文档操作")
-                                .dropdown_menu(move |menu, _window, _cx| {
-                                    let mut m = menu.menu(
-                                        if menu_dir { "进入目录" } else { "打开" },
-                                        Box::new(TreeContextAction {
-                                            path: menu_path.clone(),
-                                            is_dir: menu_dir,
-                                        }),
-                                    );
-                                    if !menu_dir {
-                                        m = m.menu(
-                                            "编辑",
-                                            Box::new(EditDocAction {
-                                                path: menu_path.clone(),
-                                            }),
-                                        );
-                                        m = m.menu("导出项目", Box::new(ProjectExportAction));
-                                    }
-                                    m = m.menu(
-                                        "重命名",
-                                        Box::new(DocRenameAction {
-                                            path: menu_path.clone(),
-                                            is_dir: menu_dir,
-                                        }),
-                                    );
-                                    m.menu(
-                                        "删除",
-                                        Box::new(DocDeleteAction {
-                                            path: menu_path.clone(),
-                                            is_dir: menu_dir,
-                                        }),
-                                    )
-                                }),
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |_, ev: &MouseDownEvent, window, cx| {
+                                let position = ev.position;
+                                cx.stop_propagation();
+                                menu.update(cx, |menu, cx| menu.show(position, window, cx));
+                            }),
                         )
+                        .child(Icon::new(IconName::EllipsisVertical).size(Size::Xs))
                 })
                 .on_click({
                     let click_path = path_owned.clone();
@@ -326,42 +458,16 @@ impl XWikiApp {
             } else {
                 row
             };
-            // Plan §3.2: right-click on a tree row.
-            let ctx_path = path_owned.clone();
-            let ctx_dir = is_dir_owned;
-            let row = row.context_menu(move |menu, _window, _cx| {
-                let mut m = menu.menu(
-                    if ctx_dir { "进入目录" } else { "打开" },
-                    Box::new(TreeContextAction {
-                        path: ctx_path.clone(),
-                        is_dir: ctx_dir,
-                    }),
-                );
-                if !ctx_dir {
-                    m = m.menu(
-                        "编辑",
-                        Box::new(EditDocAction {
-                            path: ctx_path.clone(),
-                        }),
-                    );
-                }
-                m = m.menu(
-                    "重命名",
-                    Box::new(DocRenameAction {
-                        path: ctx_path.clone(),
-                        is_dir: ctx_dir,
-                    }),
-                );
-                m = m.menu(
-                    "删除",
-                    Box::new(DocDeleteAction {
-                        path: ctx_path.clone(),
-                        is_dir: ctx_dir,
-                    }),
-                );
-                m
+            // Plan §3.2: right-click on a tree row opens the shorter menu.
+            let row = row.on_mouse_down(MouseButton::Right, {
+                let menu_handle = ctx_menu.clone();
+                cx.listener(move |_, ev: &MouseDownEvent, window, cx| {
+                    let position = ev.position;
+                    let menu = menu_handle.clone();
+                    menu.update(cx, |menu, cx| menu.show(position, window, cx));
+                })
             });
-            list = list.child(row);
+            list = list.child(row.child(btn_menu.clone()).child(ctx_menu.clone()));
         }
         // Keyboard: wrap the list in a focusable container.
         let dirs: Vec<String> = items
@@ -420,8 +526,8 @@ impl XWikiApp {
     }
 
     fn render_project_changes(&self, cx: &mut Context<Self>) -> AnyElement {
-        let theme = cx.theme().clone();
-        let mut timeline = div().size_full().v_flex().child(
+        let theme = DocTheme::from_cx(cx);
+        let mut timeline = div().size_full().flex().flex_col().child(
             div()
                 .px_2()
                 .py_1()
@@ -473,7 +579,6 @@ impl XWikiApp {
                 let author = commit.author.clone();
                 let date = commit.date.clone();
                 let tooltip_sha = sha.clone();
-                let tooltip_theme = theme.clone();
 
                 let mut track = div().w_full().h(px(24.0)).flex().items_center();
                 if index > 0 {
@@ -536,50 +641,19 @@ impl XWikiApp {
 
                 nodes = nodes.child(
                     div()
-                        .id(format!("project-roadmap-node-{sha}"))
+                        .id(ElementId::named_usize("project-roadmap-node", index))
                         .w(px(NODE_WIDTH))
                         .flex_none()
                         .h(px(NODE_HEIGHT))
-                        .v_flex()
+                        .flex()
+                        .flex_col()
                         .child(top_slot)
                         .child(track)
                         .child(bottom_slot)
-                        .tooltip(move |window, cx| {
-                            let message = message.clone();
-                            let author = author.clone();
-                            let date = date.clone();
-                            let tooltip_sha = tooltip_sha.clone();
-                            let tooltip_theme = tooltip_theme.clone();
-                            Tooltip::element(move |_, _| {
-                                div()
-                                    .v_flex()
-                                    .gap_1()
-                                    .max_w(px(360.0))
-                                    .child(
-                                        div()
-                                            .text_sm()
-                                            .font_weight(FontWeight::SEMIBOLD)
-                                            .whitespace_normal()
-                                            .text_color(tooltip_theme.popover_foreground)
-                                            .child(message.clone()),
-                                    )
-                                    .child(
-                                        div()
-                                            .font_family(tokens::FONT_MONO)
-                                            .text_xs()
-                                            .text_color(tooltip_theme.muted_foreground)
-                                            .child(format!("{} · {}", author, date)),
-                                    )
-                                    .child(
-                                        div()
-                                            .font_family(tokens::FONT_MONO)
-                                            .text_xs()
-                                            .text_color(tooltip_theme.accent)
-                                            .child(tooltip_sha.clone()),
-                                    )
-                            })
-                            .build(window, cx)
-                        }),
+                        .tooltip(tooltip(format!(
+                            "{message}\n{} · {}\n{}",
+                            author, date, tooltip_sha
+                        ))),
                 );
             }
 
@@ -596,8 +670,8 @@ impl XWikiApp {
                         .track_scroll(&scroll_handle)
                         .overflow_x_scroll()
                         .child(nodes),
-                )
-                .horizontal_scrollbar(&scroll_handle);
+                );
+
             let scroll_left_handle = self.project_changes_scroll.clone();
             let scroll_right_handle = self.project_changes_scroll.clone();
             let scroll_left = div()
@@ -609,9 +683,9 @@ impl XWikiApp {
                 .justify_center()
                 .cursor_pointer()
                 .child(
-                    Icon::new(IconName::ArrowLeft)
-                        .with_size(px(14.0))
-                        .text_color(theme.muted_foreground),
+                    div()
+                        .text_color(theme.muted_foreground)
+                        .child(Icon::new(IconName::ArrowLeft).size(Size::Sm)),
                 )
                 .on_click(cx.listener(move |_, _, _, cx| {
                     let offset = scroll_left_handle.offset();
@@ -631,13 +705,13 @@ impl XWikiApp {
                 .justify_center()
                 .cursor_pointer()
                 .child(
-                    Icon::new(IconName::ArrowRight)
-                        .with_size(px(14.0))
-                        .text_color(theme.muted_foreground),
+                    div()
+                        .text_color(theme.muted_foreground)
+                        .child(Icon::new(IconName::ArrowRight).size(Size::Sm)),
                 )
                 .on_click(cx.listener(move |_, _, _, cx| {
                     let offset = scroll_right_handle.offset();
-                    let max_x = scroll_right_handle.max_offset().x;
+                    let max_x = scroll_right_handle.max_offset().width;
                     let next_x = offset.x - px(240.0);
                     scroll_right_handle.set_offset(point(
                         if next_x < -max_x { -max_x } else { next_x },
@@ -665,10 +739,10 @@ impl XWikiApp {
     /// Project card grid (web home.tsx style): hairline panels, hover lift,
 
     pub(crate) fn render_doc_view(&self, window: &mut Window, cx: &mut Context<Self>) -> Div {
-        let theme = cx.theme().clone();
+        let theme = DocTheme::from_cx(cx);
         let view_mode = document_view_mode(self.doc_path.is_some(), self.editing);
         if view_mode == DocumentViewMode::Browser {
-            return self.render_doc_browser(cx);
+            return self.render_doc_browser(window, cx);
         }
         let app_handle = cx.entity();
         // Build the content side first so `window` isn't borrowed twice in the
@@ -704,8 +778,8 @@ impl XWikiApp {
 
     /// Project root and directory browser. It deliberately has no document
     /// rail: the file list owns the center of the workspace, like the web app.
-    fn render_doc_browser(&self, cx: &mut Context<Self>) -> Div {
-        let theme = cx.theme().clone();
+    fn render_doc_browser(&self, window: &mut Window, cx: &mut Context<Self>) -> Div {
+        let theme = DocTheme::from_cx(cx);
         let count = self
             .tree_entries
             .iter()
@@ -720,17 +794,18 @@ impl XWikiApp {
             .w(px(tokens::MEASURE))
             .max_w_full()
             .mx_auto()
-            .child(self.render_tree(cx));
+            .child(self.render_tree(window, cx));
         let file_list = if self.tree_loading {
             div()
                 .flex_1()
                 .min_h(px(0.0))
                 .p_6()
-                .v_flex()
+                .flex()
+                .flex_col()
                 .gap_3()
                 .children((0..6).map(|i| {
                     div()
-                        .id(format!("browser-skeleton-{i}"))
+                        .id(ElementId::named_usize("browser-skeleton", i))
                         .h(px(34.0))
                         .w_full()
                         .rounded(px(tokens::RADIUS_SMALL))
@@ -753,10 +828,9 @@ impl XWikiApp {
                         .child(err.clone()),
                 )
                 .child(
-                    Button::new("retry-browser-tree")
-                        .rounded(px(tokens::RADIUS))
-                        .icon(IconName::Redo2)
-                        .label("重试")
+                    Button::new("retry-browser-tree", "重试")
+                        .radius(Size::Sm)
+                        .left_section(Icon::new(IconName::Redo2).size(Size::Sm))
                         .on_click(cx.listener(|this, _, _, cx| {
                             let path = this.tree_path.clone();
                             this.load_tree(&path, cx);
@@ -767,7 +841,8 @@ impl XWikiApp {
             div()
                 .flex_1()
                 .min_h(px(0.0))
-                .overflow_y_scrollbar()
+                .id("file-list-scroll")
+                .overflow_y_scroll()
                 .p_6()
                 .child(browser_content)
                 .into_any_element()
@@ -793,7 +868,8 @@ impl XWikiApp {
         let content = div()
             .flex_1()
             .min_h(px(0.0))
-            .v_flex()
+            .flex()
+            .flex_col()
             .overflow_hidden()
             .child(file_list)
             .child(roadmap);
@@ -813,12 +889,11 @@ impl XWikiApp {
                     .border_color(theme.border)
                     .bg(theme.sidebar)
                     .child(
-                        Button::new("back-projects-browser")
-                            .ghost()
-                            .compact()
-                            .rounded(px(tokens::RADIUS))
-                            .icon(IconName::ArrowLeft)
-                            .label("项目")
+                        Button::new("back-projects-browser", "项目")
+                            .variant(Variant::Subtle)
+                            .size(Size::Xs)
+                            .radius(Size::Sm)
+                            .left_section(Icon::new(IconName::ArrowLeft).size(Size::Sm))
                             .on_click(cx.listener(|this, _, _, cx| this.back_to_projects(cx))),
                     )
                     .child(
@@ -852,23 +927,19 @@ impl XWikiApp {
                         .justify_end()
                         .gap_2()
                         .child(
-                            Button::new("doc-import-folder")
-                                .secondary()
-                                .outline()
-                                .compact()
-                                .rounded(px(tokens::RADIUS))
-                                .label("导入文件夹")
+                            Button::new("doc-import-folder", "导入文件夹")
+                                .variant(Variant::Outline)
+                                .size(Size::Xs)
+                                .radius(Size::Sm)
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.open_document_folder_import_dialog(window, cx)
                                 })),
                         )
                         .child(
-                            Button::new("doc-import-markdown")
-                                .secondary()
-                                .outline()
-                                .compact()
-                                .rounded(px(tokens::RADIUS))
-                                .label("导入 Markdown")
+                            Button::new("doc-import-markdown", "导入 Markdown")
+                                .variant(Variant::Outline)
+                                .size(Size::Xs)
+                                .radius(Size::Sm)
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.open_document_markdown_import_dialog(window, cx)
                                 })),
@@ -879,7 +950,7 @@ impl XWikiApp {
     }
 
     pub(crate) fn render_doc_rail(&self, cx: &mut Context<Self>) -> Div {
-        let theme = cx.theme().clone();
+        let theme = DocTheme::from_cx(cx);
         div()
             .h_full()
             .flex()
@@ -895,13 +966,11 @@ impl XWikiApp {
                     .items_center()
                     .gap_3()
                     .child(
-                        Button::new("back-document-browser")
-                            .ghost()
-                            .compact()
-                            .rounded(px(tokens::RADIUS))
-                            .icon(IconName::ArrowLeft)
-                            .label("返回文件列表")
-                            .tooltip("返回当前项目的文件列表")
+                        Button::new("back-document-browser", "返回文件列表")
+                            .variant(Variant::Subtle)
+                            .size(Size::Xs)
+                            .radius(Size::Sm)
+                            .left_section(Icon::new(IconName::ArrowLeft).size(Size::Sm))
                             .disabled(self.editing)
                             .on_click(
                                 cx.listener(|this, _, _, cx| this.back_to_document_browser(cx)),
@@ -909,73 +978,82 @@ impl XWikiApp {
                     )
                     .child(mono_label("OUTLINE").text_color(theme.muted_foreground)),
             )
-            .child(div().flex_1().overflow_y_scrollbar().p_2().child(
-                if self.doc_outline.entries.is_empty() {
-                    div()
-                        .p_3()
-                        .text_sm()
-                        .text_color(theme.muted_foreground)
-                        .child("暂无大纲")
-                        .into_any_element()
-                } else {
-                    div()
-                        .v_flex()
-                        .gap_1()
-                        .children(self.doc_outline.entries.iter().enumerate().map(
-                            |(index, entry)| {
-                                let active = self.active_outline == Some(index);
-                                let section = entry.section;
-                                let indent = 8.0 + (entry.level.saturating_sub(1) as f32) * 12.0;
-                                div()
-                                    .id(format!("outline-{index}"))
-                                    .w_full()
-                                    .pl(px(indent))
-                                    .pr_2()
-                                    .py_1()
-                                    .rounded(px(tokens::RADIUS_SMALL))
-                                    .cursor_pointer()
-                                    .text_xs()
-                                    .text_color(if active {
-                                        theme.accent
-                                    } else {
-                                        theme.muted_foreground
-                                    })
-                                    .bg(if active {
-                                        theme.list_active
-                                    } else {
-                                        theme.sidebar
-                                    })
-                                    .hover(|s| s.bg(theme.list_hover).text_color(theme.foreground))
-                                    .child(tokens::truncate(&entry.text, 64))
-                                    .on_click(cx.listener(move |this, _, window, cx| {
-                                        this.doc_scroll.scroll_to_top_of_item(section);
-                                        this.active_outline = Some(index);
+            .child(
+                div()
+                    .flex_1()
+                    .id("outline-scroll")
+                    .overflow_y_scroll()
+                    .p_2()
+                    .child(if self.doc_outline.entries.is_empty() {
+                        div()
+                            .p_3()
+                            .text_sm()
+                            .text_color(theme.muted_foreground)
+                            .child("暂无大纲")
+                            .into_any_element()
+                    } else {
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap_1()
+                            .children(self.doc_outline.entries.iter().enumerate().map(
+                                |(index, entry)| {
+                                    let active = self.active_outline == Some(index);
+                                    let section = entry.section;
+                                    let indent =
+                                        8.0 + (entry.level.saturating_sub(1) as f32) * 12.0;
+                                    div()
+                                        .id(ElementId::named_usize("outline", index))
+                                        .w_full()
+                                        .pl(px(indent))
+                                        .pr_2()
+                                        .py_1()
+                                        .rounded(px(tokens::RADIUS_SMALL))
+                                        .cursor_pointer()
+                                        .text_xs()
+                                        .text_color(if active {
+                                            theme.accent
+                                        } else {
+                                            theme.muted_foreground
+                                        })
+                                        .bg(if active {
+                                            theme.list_active
+                                        } else {
+                                            theme.sidebar
+                                        })
+                                        .hover(|s| {
+                                            s.bg(theme.list_hover).text_color(theme.foreground)
+                                        })
+                                        .child(tokens::truncate(&entry.text, 64))
+                                        .on_click(cx.listener(move |this, _, window, cx| {
+                                            this.doc_scroll.scroll_to_top_of_item(section);
+                                            this.active_outline = Some(index);
 
-                                        // GPUI applies ScrollHandle's active item during
-                                        // prepaint. Keep the window rendering long enough
-                                        // for the item bounds and resulting offset to settle.
-                                        cx.on_next_frame(window, |_, window, cx| {
-                                            cx.on_next_frame(window, |_, _, cx| cx.notify());
+                                            // GPUI applies ScrollHandle's active item during
+                                            // prepaint. Keep the window rendering long enough
+                                            // for the item bounds and resulting offset to settle.
+                                            cx.on_next_frame(window, |_, window, cx| {
+                                                cx.on_next_frame(window, |_, _, cx| cx.notify());
+                                                cx.notify();
+                                            });
                                             cx.notify();
-                                        });
-                                        cx.notify();
-                                    }))
-                            },
-                        ))
-                        .into_any_element()
-                },
-            ))
+                                        }))
+                                },
+                            ))
+                            .into_any_element()
+                    }),
+            )
     }
 
     fn render_reading_content(&self, cx: &mut Context<Self>) -> AnyElement {
-        let theme = cx.theme().clone();
+        let theme = DocTheme::from_cx(cx);
         if self.doc_content.trim().is_empty() {
             return div()
                 .id("doc-content-scroll")
                 .flex_1()
                 .min_h(px(0.0))
                 .track_scroll(&self.doc_scroll)
-                .overflow_y_scrollbar()
+                .overflow_y_scroll()
                 .child(
                     div()
                         .min_h(px(320.0))
@@ -986,9 +1064,9 @@ impl XWikiApp {
                         .gap_3()
                         .text_center()
                         .child(
-                            Icon::new(IconName::File)
-                                .with_size(px(24.0))
-                                .text_color(theme.muted_foreground),
+                            div()
+                                .text_color(theme.muted_foreground)
+                                .child(Icon::new(IconName::File).size(Size::Lg)),
                         )
                         .child(
                             div()
@@ -1004,10 +1082,9 @@ impl XWikiApp {
                                 .child("可以直接开始编辑，保存后会创建一个新的版本。"),
                         )
                         .child(
-                            Button::new("empty-doc-edit")
-                                .rounded(px(tokens::RADIUS))
-                                .icon(IconName::File)
-                                .label("开始编辑")
+                            Button::new("empty-doc-edit", "开始编辑")
+                                .radius(Size::Sm)
+                                .left_section(Icon::new(IconName::File).size(Size::Sm))
                                 .on_click(cx.listener(|this, _, _, cx| this.start_edit(cx))),
                         ),
                 )
@@ -1016,28 +1093,34 @@ impl XWikiApp {
                 .into_any_element();
         }
 
-        let sections = self
+        let sections: Vec<AnyElement> = self
             .doc_outline
             .sections
             .iter()
             .enumerate()
             .map(|(index, section)| {
                 div()
-                    .id(format!("doc-section-{index}"))
+                    .id(ElementId::named_usize("doc-section", index))
                     .w_full()
                     .px_6()
                     .py_4()
-                    .child(div().w(px(tokens::MEASURE)).max_w_full().mx_auto().child(
-                        crate::ui::markdown(format!("doc-content-{index}"), section.source.clone()),
-                    ))
-            });
+                    .child(
+                        div()
+                            .w(px(tokens::MEASURE))
+                            .max_w_full()
+                            .mx_auto()
+                            .child(crate::ui::markdown(cx, section.source.clone())),
+                    )
+                    .into_any_element()
+            })
+            .collect();
 
         div()
             .id("doc-content-scroll")
             .flex_1()
             .min_h(px(0.0))
             .track_scroll(&self.doc_scroll)
-            .overflow_y_scrollbar()
+            .overflow_y_scroll()
             .on_scroll_wheel(cx.listener(|this, _, _, cx| {
                 let top = this.doc_scroll.top_item();
                 let active = this
@@ -1060,7 +1143,7 @@ impl XWikiApp {
     }
 
     fn render_content_tools(&self, cx: &mut Context<Self>) -> AnyElement {
-        let theme = cx.theme().clone();
+        let theme = DocTheme::from_cx(cx);
         div()
             .w_full()
             .px_6()
@@ -1078,7 +1161,8 @@ impl XWikiApp {
                     .gap_3()
                     .child(
                         div()
-                            .v_flex()
+                            .flex()
+                            .flex_col()
                             .gap_1()
                             .child(
                                 mono_label("DOCUMENT CONTEXT").text_color(theme.muted_foreground),
@@ -1096,12 +1180,13 @@ impl XWikiApp {
                             .items_center()
                             .gap_2()
                             .child(
-                                Button::new("content-backlinks")
-                                    .secondary()
-                                    .outline()
-                                    .compact()
-                                    .label("文档分析")
-                                    .selected(self.doc_panel == crate::app::DocPanel::Backlinks)
+                                Button::new("content-backlinks", "文档分析")
+                                    .variant(if self.doc_panel == crate::app::DocPanel::Backlinks {
+                                        Variant::Filled
+                                    } else {
+                                        Variant::Outline
+                                    })
+                                    .size(Size::Xs)
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         if this.doc_panel == crate::app::DocPanel::Backlinks {
                                             this.close_doc_panel(cx);
@@ -1111,12 +1196,15 @@ impl XWikiApp {
                                     })),
                             )
                             .child(
-                                Button::new("content-attachments")
-                                    .secondary()
-                                    .outline()
-                                    .compact()
-                                    .label("附件")
-                                    .selected(self.doc_panel == crate::app::DocPanel::Attachments)
+                                Button::new("content-attachments", "附件")
+                                    .variant(
+                                        if self.doc_panel == crate::app::DocPanel::Attachments {
+                                            Variant::Filled
+                                        } else {
+                                            Variant::Outline
+                                        },
+                                    )
+                                    .size(Size::Xs)
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         if this.doc_panel == crate::app::DocPanel::Attachments {
                                             this.close_doc_panel(cx);
@@ -1137,7 +1225,7 @@ impl XWikiApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<> {
-        let theme = cx.theme().clone();
+        let theme = DocTheme::from_cx(cx);
         let main = div()
             .flex_1()
             .min_w(px(0.0))
@@ -1169,7 +1257,7 @@ impl XWikiApp {
     }
 
     pub(crate) fn render_main_pane(&self, cx: &mut Context<Self>) -> AnyElement {
-        let theme = cx.theme().clone();
+        let theme = DocTheme::from_cx(cx);
         if self.editing {
             return self.render_editor_view(cx).into_any_element();
         }
@@ -1185,7 +1273,8 @@ impl XWikiApp {
                 // Plan §4: skeleton while the page loads.
                 div()
                     .p_6()
-                    .v_flex()
+                    .flex()
+                    .flex_col()
                     .gap_3()
                     .w_full()
                     .child(
@@ -1234,10 +1323,9 @@ impl XWikiApp {
                             .child(err.clone()),
                     )
                     .child(
-                        Button::new("retry-doc")
-                            .rounded(px(tokens::RADIUS))
-                            .icon(IconName::Redo2)
-                            .label("重试")
+                        Button::new("retry-doc", "重试")
+                            .radius(Size::Sm)
+                            .left_section(Icon::new(IconName::Redo2).size(Size::Sm))
                             .on_click(cx.listener(|this, _, _, cx| {
                                 let path = this.doc_path.clone().unwrap_or_default();
                                 this.open_doc(&path, cx);
@@ -1276,38 +1364,35 @@ impl XWikiApp {
                                     .items_center()
                                     .gap_2()
                                     .child(
-                                        Button::new("open-search")
-                                            .rounded(px(tokens::RADIUS))
-                                            .icon(IconName::Search)
-                                            .label("搜索")
+                                        Button::new("open-search", "搜索")
+                                            .radius(Size::Sm)
+                                            .left_section(
+                                                Icon::new(IconName::Search).size(Size::Sm),
+                                            )
                                             .on_click(cx.listener(|this, _, _, cx| {
                                                 this.open_project_search(cx)
                                             })),
                                     )
                                     .child(
-                                        Button::new("open-file-history")
-                                            .rounded(px(tokens::RADIUS))
-                                            .icon(IconName::Undo2)
-                                            .label("历史")
-                                            .tooltip("查看当前文件的版本历史")
+                                        Button::new("open-file-history", "历史")
+                                            .radius(Size::Sm)
+                                            .left_section(Icon::new(IconName::Undo2).size(Size::Sm))
                                             .on_click(cx.listener(|this, _, _, cx| {
                                                 this.open_file_history_panel(cx)
                                             })),
                                     )
                                     .child(
-                                        Button::new("open-share")
-                                            .primary()
-                                            .rounded(px(tokens::RADIUS))
-                                            .label("分享")
+                                        Button::new("open-share", "分享")
+                                            .variant(Variant::Filled)
+                                            .radius(Size::Sm)
                                             .on_click(cx.listener(|this, _, _, cx| {
                                                 this.open_share_panel(cx)
                                             })),
                                     )
                                     .child(
-                                        Button::new("start-edit")
-                                            .rounded(px(tokens::RADIUS))
-                                            .icon(IconName::File)
-                                            .label("编辑")
+                                        Button::new("start-edit", "编辑")
+                                            .radius(Size::Sm)
+                                            .left_section(Icon::new(IconName::File).size(Size::Sm))
                                             .on_click(
                                                 cx.listener(|this, _, _, cx| this.start_edit(cx)),
                                             ),
@@ -1330,7 +1415,7 @@ impl XWikiApp {
     }
 
     fn render_doc_panel(&self, cx: &mut Context<Self>) -> AnyElement {
-        let theme = cx.theme().clone();
+        let theme = DocTheme::from_cx(cx);
         if self.doc_panel == crate::app::DocPanel::None {
             return div().into_any_element();
         }
@@ -1349,12 +1434,10 @@ impl XWikiApp {
             .px_6()
             .py_3()
             .child(
-                Button::new("close-doc-panel")
-                    .ghost()
-                    .compact()
-                    .icon(IconName::ArrowLeft)
-                    .label("返回文档")
-                    .tooltip("返回文档")
+                Button::new("close-doc-panel", "返回文档")
+                    .variant(Variant::Subtle)
+                    .size(Size::Xs)
+                    .left_section(Icon::new(IconName::ArrowLeft).size(Size::Sm))
                     .on_click(cx.listener(|this, _, _, cx| this.close_doc_panel(cx))),
             )
             .child(
@@ -1381,7 +1464,7 @@ impl XWikiApp {
     }
 
     fn render_share_panel(&self, cx: &mut Context<Self>) -> AnyElement {
-        let theme = cx.theme().clone();
+        let theme = DocTheme::from_cx(cx);
         let body = if self.share_loading {
             div()
                 .text_sm()
@@ -1414,10 +1497,9 @@ impl XWikiApp {
                         .child(url.clone()),
                 )
                 .child(
-                    Button::new("copy-share-url")
-                        .primary()
-                        .rounded(px(tokens::RADIUS))
-                        .label("复制完整 URL")
+                    Button::new("copy-share-url", "复制完整 URL")
+                        .variant(Variant::Filled)
+                        .radius(Size::Sm)
                         .on_click(cx.listener(|this, _, _, cx| this.copy_share_url(cx))),
                 )
         } else {
@@ -1430,7 +1512,7 @@ impl XWikiApp {
     }
 
     fn render_backlinks_panel(&self, cx: &mut Context<Self>) -> AnyElement {
-        let theme = cx.theme().clone();
+        let theme = DocTheme::from_cx(cx);
         if self.backlinks_loading {
             return div()
                 .px_6()
@@ -1461,10 +1543,11 @@ impl XWikiApp {
         let items: Vec<AnyElement> = self
             .backlinks
             .iter()
-            .map(|item| {
+            .enumerate()
+            .map(|(index, item)| {
                 let path = item.source.clone();
                 div()
-                    .id(format!("backlink-{}", path))
+                    .id(ElementId::named_usize("backlink", index))
                     .flex()
                     .flex_col()
                     .gap_1()
@@ -1493,14 +1576,15 @@ impl XWikiApp {
             .collect();
         div()
             .max_h(px(220.0))
-            .overflow_y_scrollbar()
+            .id("backlinks-scroll")
+            .overflow_y_scroll()
             .children(items)
             .into_any_element()
     }
 
     fn render_attachments_panel(&self, cx: &mut Context<Self>) -> AnyElement {
-        let theme = cx.theme().clone();
-        let mut content = div().v_flex().gap_3().px_6().py_4();
+        let theme = DocTheme::from_cx(cx);
+        let mut content = div().flex().flex_col().gap_3().px_6().py_4();
         content = content
             .child(
                 div()
@@ -1508,18 +1592,20 @@ impl XWikiApp {
                     .text_color(theme.muted_foreground)
                     .child("上传路径"),
             )
-            .child(Input::new(&self.attachment_source_input).w_full())
+            .child(self.attachment_source_input.clone())
             .child(
-                Button::new("upload-attachment")
-                    .primary()
-                    .rounded(px(tokens::RADIUS))
-                    .label(if self.attachments_loading {
+                Button::new(
+                    "upload-attachment",
+                    if self.attachments_loading {
                         "处理中…"
                     } else {
                         "读取并上传附件"
-                    })
-                    .disabled(self.attachments_loading)
-                    .on_click(cx.listener(|this, _, _, cx| this.upload_attachment(cx))),
+                    },
+                )
+                .variant(Variant::Filled)
+                .radius(Size::Sm)
+                .disabled(self.attachments_loading)
+                .on_click(cx.listener(|this, _, _, cx| this.upload_attachment(cx))),
             )
             .child(
                 div()
@@ -1527,7 +1613,7 @@ impl XWikiApp {
                     .text_color(theme.muted_foreground)
                     .child("下载目标（留空则保存到当前目录）"),
             )
-            .child(Input::new(&self.attachment_destination_input).w_full());
+            .child(self.attachment_destination_input.clone());
         if let Some(error) = &self.attachments_error {
             content = content.child(
                 div()
@@ -1555,7 +1641,8 @@ impl XWikiApp {
         let rows: Vec<AnyElement> = self
             .attachments
             .iter()
-            .map(|item| {
+            .enumerate()
+            .map(|(index, item)| {
                 let path = item.path.clone();
                 let filename = item.name.clone();
                 div()
@@ -1579,19 +1666,18 @@ impl XWikiApp {
                             .child(filename),
                     )
                     .child(
-                        Button::new(format!("download-attachment-{}", path))
-                            .compact()
-                            .label("下载")
+                        Button::new(ElementId::named_usize("download-attachment", index), "下载")
+                            .size(Size::Xs)
                             .on_click(cx.listener({
                                 let path = path.clone();
                                 move |this, _, _, cx| this.download_attachment(&path, cx)
                             })),
                     )
                     .child(
-                        Button::new(format!("delete-attachment-{}", path))
-                            .danger()
-                            .compact()
-                            .label("删除")
+                        Button::new(ElementId::named_usize("delete-attachment", index), "删除")
+                            .variant(Variant::Filled)
+                            .color(ColorName::Red)
+                            .size(Size::Xs)
                             .on_click(cx.listener({
                                 let path = path.clone();
                                 move |this, _, window, cx| {
@@ -1608,7 +1694,7 @@ impl XWikiApp {
 
 #[cfg(test)]
 mod tests {
-    use super::{document_view_mode, DocumentViewMode};
+    use super::{DocumentViewMode, document_view_mode};
 
     #[test]
     fn document_layout_keeps_browser_reading_and_editing_separate() {

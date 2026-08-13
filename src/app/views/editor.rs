@@ -8,7 +8,11 @@
 //!   [status bar: MARKDOWN · UTF-8 · LF · save status]
 
 use gpui::*;
-use gpui_component::{button::*, input::Input, scroll::ScrollableElement as _, *};
+use guise::{
+    Button, Icon, IconName,
+    style::Variant,
+    theme::{ColorName, Size as GuiseSize, theme},
+};
 
 use crate::app::{ConflictInfo, XWikiApp};
 use crate::ui::{markdown, mono_label, tokens};
@@ -19,7 +23,8 @@ impl XWikiApp {
     /// Structure mirrors editor.html exactly:
     ///   toolbar → title → content → status bar.
     pub(crate) fn render_editor_view(&self, cx: &mut Context<Self>) -> Div {
-        let theme = cx.theme().clone();
+        let t = theme(cx);
+        let cobalt = tokens::Cobalt::from_theme(t);
         let path = self
             .edit_path
             .clone()
@@ -37,11 +42,11 @@ impl XWikiApp {
             "● 锁丢失"
         };
         let status_color = if self.saving || dirty {
-            theme.accent
+            cobalt.accent
         } else if self.conflict.is_some() || !self.lock_held {
-            theme.danger
+            cobalt.danger
         } else {
-            theme.success
+            t.success().hsla()
         };
         div()
             .flex_1()
@@ -59,14 +64,14 @@ impl XWikiApp {
                     .items_center()
                     .gap_3()
                     .border_b_1()
-                    .border_color(theme.border)
-                    .bg(theme.sidebar)
-                    .child(mono_label("EDIT").text_color(theme.accent))
+                    .border_color(cobalt.rule)
+                    .bg(cobalt.paper_2)
+                    .child(mono_label("EDIT").text_color(cobalt.accent))
                     .child(
                         div()
                             .font_family(tokens::FONT_MONO)
                             .text_xs()
-                            .text_color(theme.muted_foreground)
+                            .text_color(cobalt.ink_3)
                             .flex_1()
                             .min_w(px(0.0))
                             .overflow_x_hidden()
@@ -77,47 +82,44 @@ impl XWikiApp {
                     .child(self.editor_tab_button(cx, "编辑", !self.editor_preview))
                     .child(self.editor_tab_button(cx, "预览", self.editor_preview))
                     .child(
-                        Button::new("editor-history")
-                            .rounded(px(tokens::RADIUS))
-                            .icon(IconName::Undo2)
-                            .label("历史")
-                            .tooltip("查看当前文件的版本历史")
+                        Button::new("editor-history", "历史")
+                            .variant(Variant::Outline)
+                            .size(GuiseSize::Xs)
+                            .left_section(Icon::new(IconName::Undo2).size(GuiseSize::Xs))
                             .on_click(
                                 cx.listener(|this, _, _, cx| this.open_file_history_panel(cx)),
                             ),
                     )
                     .child(
-                        Button::new("rename-doc")
-                            .rounded(px(tokens::RADIUS))
-                            .icon(IconName::Replace)
-                            .label("重命名")
-                            .tooltip("移动 / 重命名当前文档")
+                        Button::new("rename-doc", "重命名")
+                            .variant(Variant::Outline)
+                            .size(GuiseSize::Xs)
+                            .left_section(Icon::new(IconName::Replace).size(GuiseSize::Xs))
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.open_rename_dialog(window, cx)
                             })),
                     )
-                    .child(Input::new(&self.commit_msg).w(px(280.0)))
+                    .child(div().w(px(280.0)).child(self.commit_msg.clone()))
                     .child(
-                        Button::new("save-edit")
-                            .primary()
-                            .rounded(px(tokens::RADIUS))
-                            .icon(IconName::Check)
-                            .label(if self.saving {
+                        Button::new(
+                            "save-edit",
+                            if self.saving {
                                 "保存中…"
                             } else {
                                 "保存"
-                            })
-                            .loading(self.saving)
-                            .tooltip("提交修改 (Ctrl/Cmd+S)")
-                            .disabled(!self.lock_held || self.saving || self.conflict.is_some())
-                            .on_click(cx.listener(|this, _, _, cx| this.save_edit(cx))),
+                            },
+                        )
+                        .variant(Variant::Filled)
+                        .size(GuiseSize::Xs)
+                        .left_section(Icon::new(IconName::Check).size(GuiseSize::Xs))
+                        .disabled(!self.lock_held || self.saving || self.conflict.is_some())
+                        .on_click(cx.listener(|this, _, _, cx| this.save_edit(cx))),
                     )
                     .child(
-                        Button::new("cancel-edit")
-                            .rounded(px(tokens::RADIUS))
-                            .icon(IconName::Close)
-                            .label("取消")
-                            .tooltip("放弃修改并释放锁 (Esc)")
+                        Button::new("cancel-edit", "取消")
+                            .variant(Variant::Outline)
+                            .size(GuiseSize::Xs)
+                            .left_section(Icon::new(IconName::Close).size(GuiseSize::Xs))
                             .disabled(self.saving)
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.request_cancel_edit(window, cx)
@@ -133,23 +135,22 @@ impl XWikiApp {
                     .items_center()
                     .gap_2()
                     .border_b_1()
-                    .border_color(theme.danger)
-                    .bg(theme.danger.opacity(0.1))
+                    .border_color(cobalt.danger)
+                    .bg(cobalt.danger.opacity(0.1))
                     .font_family(tokens::FONT_MONO)
                     .text_xs()
-                    .child(Icon::new(IconName::CircleX).text_color(theme.danger))
+                    .child(Icon::new(IconName::CircleX).color(ColorName::Red))
                     .child(
                         div()
                             .flex_1()
-                            .text_color(theme.danger)
+                            .text_color(cobalt.danger)
                             .child(format!("保存失败 · {msg}")),
                     )
                     .child(
-                        Button::new("retry-save")
-                            .compact()
-                            .rounded(px(tokens::RADIUS_SMALL))
-                            .icon(IconName::Redo2)
-                            .label("重试")
+                        Button::new("retry-save", "重试")
+                            .variant(Variant::Outline)
+                            .size(GuiseSize::Xs)
+                            .left_section(Icon::new(IconName::Redo2).size(GuiseSize::Xs))
                             .disabled(self.saving || self.conflict.is_some())
                             .on_click(cx.listener(|this, _, _, cx| this.save_edit(cx))),
                     )
@@ -158,21 +159,21 @@ impl XWikiApp {
                     .px_4()
                     .py_2()
                     .border_b_1()
-                    .border_color(theme.border)
-                    .bg(theme.sidebar)
+                    .border_color(cobalt.rule)
+                    .bg(cobalt.paper_2)
                     .font_family(tokens::FONT_MONO)
                     .text_xs()
-                    .text_color(theme.danger)
+                    .text_color(cobalt.danger)
                     .child(msg.clone())
                     .child(if self.editing && !self.lock_held {
-                        Button::new("reacquire-lock")
-                            .compact()
-                            .rounded(px(tokens::RADIUS_SMALL))
-                            .icon(IconName::Redo2)
-                            .label("重新获取锁")
+                        Button::new("reacquire-lock", "重新获取锁")
+                            .variant(Variant::Outline)
+                            .size(GuiseSize::Xs)
+                            .left_section(Icon::new(IconName::Redo2).size(GuiseSize::Xs))
                             .on_click(cx.listener(|this, _, _, cx| this.reacquire_lock(cx)))
+                            .into_any_element()
                     } else {
-                        Button::new("status-placeholder").hidden()
+                        div().hidden().into_any_element()
                     })
             } else {
                 div()
@@ -183,29 +184,29 @@ impl XWikiApp {
                     .px_4()
                     .py_3()
                     .border_b_1()
-                    .border_color(theme.danger)
-                    .bg(theme.danger.opacity(0.1))
+                    .border_color(cobalt.danger)
+                    .bg(cobalt.danger.opacity(0.1))
                     .flex()
                     .items_center()
                     .gap_3()
-                    .child(Icon::new(IconName::TriangleAlert).text_color(theme.danger))
+                    .child(Icon::new(IconName::TriangleAlert).color(ColorName::Red))
                     .child(
                         div()
                             .flex_1()
-                            .v_flex()
+                            .flex()
+                            .flex_col()
                             .gap_1()
                             .font_family(tokens::FONT_MONO)
                             .text_xs()
-                            .text_color(theme.danger)
+                            .text_color(cobalt.danger)
                             .child("远端版本冲突")
                             .child(tokens::truncate(&conflict.message, 180)),
                     )
                     .child(
-                        Button::new("review-conflict-inline")
-                            .secondary()
-                            .rounded(px(tokens::RADIUS))
-                            .icon(IconName::Search)
-                            .label("查看历史")
+                        Button::new("review-conflict-inline", "查看历史")
+                            .variant(Variant::Outline)
+                            .size(GuiseSize::Xs)
+                            .left_section(Icon::new(IconName::Search).size(GuiseSize::Xs))
                             .on_click(
                                 cx.listener(|this, _, _, cx| this.open_file_history_panel(cx)),
                             ),
@@ -221,29 +222,37 @@ impl XWikiApp {
                     .pt_5()
                     .pb_3()
                     .border_b_1()
-                    .border_color(theme.border)
-                    .v_flex()
+                    .border_color(cobalt.rule)
+                    .flex()
+                    .flex_col()
                     .gap_2()
-                    .child(mono_label("文档路径").text_color(theme.muted_foreground))
-                    .child(Input::new(&self.editor_title_input).w_full()),
+                    .child(mono_label("文档路径").text_color(cobalt.ink_3))
+                    .child(div().w_full().child(self.editor_title_input.clone())),
             )
             // ── Editor content / Preview ─────────────────────────
             .child(if self.editor_preview {
-                div().flex_1().overflow_y_scrollbar().p_6().child(
-                    div().w(px(tokens::MEASURE)).max_w_full().child(markdown(
-                        "editor-preview",
-                        self.editor_input.read(cx).value().to_string(),
-                    )),
-                )
+                let content = self.editor_input.read(cx).text();
+                div()
+                    .id("editor-preview-scroll")
+                    .flex_1()
+                    .p_6()
+                    .overflow_y_scroll()
+                    .child(
+                        div()
+                            .w(px(tokens::MEASURE))
+                            .max_w_full()
+                            .child(markdown(&mut *cx, content)),
+                    )
             } else {
                 div()
+                    .id("editor-input-scroll")
                     .flex_1()
-                    .overflow_y_scrollbar()
                     .p_6()
-                    .v_flex()
+                    .flex()
+                    .flex_col()
                     .gap_2()
-                    .child(mono_label("MARKDOWN CONTENT").text_color(theme.muted_foreground))
-                    .child(Input::new(&self.editor_input).h_full().w_full())
+                    .child(mono_label("MARKDOWN CONTENT").text_color(cobalt.ink_3))
+                    .child(div().h_full().w_full().child(self.editor_input.clone()))
             })
             // ── Status bar ───────────────────────────────────────
             // Matches: [Markdown] [UTF-8] [LF] | [Ln 1, Col 1] [Spaces: 2] [● Saved]
@@ -255,11 +264,11 @@ impl XWikiApp {
                     .items_center()
                     .gap_3()
                     .border_t_1()
-                    .border_color(theme.border)
-                    .bg(theme.sidebar)
-                    .child(mono_label("MARKDOWN").text_color(theme.muted_foreground))
-                    .child(mono_label("UTF-8").text_color(theme.muted_foreground))
-                    .child(mono_label("LF").text_color(theme.muted_foreground))
+                    .border_color(cobalt.rule)
+                    .bg(cobalt.paper_2)
+                    .child(mono_label("MARKDOWN").text_color(cobalt.ink_3))
+                    .child(mono_label("UTF-8").text_color(cobalt.ink_3))
+                    .child(mono_label("LF").text_color(cobalt.ink_3))
                     .child(div().flex_1())
                     .child(mono_label(status_label).text_color(status_color)),
             )
@@ -271,7 +280,7 @@ impl XWikiApp {
         label: &'static str,
         active: bool,
     ) -> AnyElement {
-        let theme = cx.theme().clone();
+        let cobalt = tokens::Cobalt::from_theme(theme(cx));
         let id = if label == "编辑" {
             "tab-edit"
         } else {
@@ -285,14 +294,10 @@ impl XWikiApp {
             .text_sm()
             .font_weight(FontWeight::MEDIUM)
             .font_family(tokens::FONT_BODY)
-            .text_color(if active {
-                theme.accent
-            } else {
-                theme.muted_foreground
-            })
-            .border_b_2()
+            .text_color(if active { cobalt.accent } else { cobalt.ink_3 })
+            .border_b(px(2.0))
             .border_color(if active {
-                theme.accent
+                cobalt.accent
             } else {
                 gpui::transparent_black()
             })
@@ -308,7 +313,7 @@ impl XWikiApp {
     /// Conflict recovery panel — shown when a save-time revision conflict occurs.
     /// Matches demo: centered card with danger border, description, and action buttons.
     pub(crate) fn render_conflict_panel(&self, c: &ConflictInfo, cx: &mut Context<Self>) -> Div {
-        let theme = cx.theme().clone();
+        let cobalt = tokens::Cobalt::from_theme(theme(cx));
         div()
             .flex_1()
             .h_full()
@@ -321,23 +326,24 @@ impl XWikiApp {
                     .p_6()
                     .rounded(px(tokens::RADIUS))
                     .border_1()
-                    .border_color(theme.danger)
-                    .bg(theme.popover)
-                    .v_flex()
+                    .border_color(cobalt.danger)
+                    .bg(cobalt.paper_2)
+                    .flex()
+                    .flex_col()
                     .gap_4()
                     .child(
                         div()
                             .flex()
                             .items_center()
                             .gap_3()
-                            .child(Icon::new(IconName::TriangleAlert).text_color(theme.danger))
-                            .child(mono_label("保存冲突").text_color(theme.danger))
+                            .child(Icon::new(IconName::TriangleAlert).color(ColorName::Red))
+                            .child(mono_label("保存冲突").text_color(cobalt.danger))
                             .child(div().flex_1())
                             .child(
                                 div()
                                     .font_family(tokens::FONT_MONO)
                                     .text_size(px(tokens::FONT_SIZE_LABEL))
-                                    .text_color(theme.muted_foreground)
+                                    .text_color(cobalt.ink_3)
                                     .overflow_x_hidden()
                                     .text_ellipsis()
                                     .whitespace_nowrap()
@@ -347,13 +353,13 @@ impl XWikiApp {
                     .child(
                         div()
                             .text_sm()
-                            .text_color(theme.foreground)
+                            .text_color(cobalt.ink)
                             .child(c.message.clone()),
                     )
                     .child(
                         div()
                             .text_sm()
-                            .text_color(theme.muted_foreground)
+                            .text_color(cobalt.ink_3)
                             .child("服务器上的文档已被修改。选择如何处理你的本地编辑："),
                     )
                     .child(
@@ -363,32 +369,29 @@ impl XWikiApp {
                             .justify_end()
                             .w_full()
                             .child(
-                                Button::new("conflict-abandon")
-                                    .danger()
-                                    .rounded(px(tokens::RADIUS))
-                                    .icon(IconName::Delete)
-                                    .label("放弃编辑")
+                                Button::new("conflict-abandon", "放弃编辑")
+                                    .variant(Variant::Filled)
+                                    .color(ColorName::Red)
+                                    .size(GuiseSize::Xs)
+                                    .left_section(Icon::new(IconName::Delete).size(GuiseSize::Xs))
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.resolve_conflict_abandon(cx)
                                     })),
                             )
                             .child(
-                                Button::new("conflict-reload")
-                                    .rounded(px(tokens::RADIUS))
-                                    .icon(IconName::Redo2)
-                                    .label("重新加载")
-                                    .tooltip("丢弃本地修改，加载服务器版本")
+                                Button::new("conflict-reload", "重新加载")
+                                    .variant(Variant::Outline)
+                                    .size(GuiseSize::Xs)
+                                    .left_section(Icon::new(IconName::Redo2).size(GuiseSize::Xs))
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.resolve_conflict_reload(cx)
                                     })),
                             )
                             .child(
-                                Button::new("conflict-force")
-                                    .primary()
-                                    .rounded(px(tokens::RADIUS))
-                                    .icon(IconName::Check)
-                                    .label("覆盖重试")
-                                    .tooltip("以最新 revision 重新提交（后写者胜）")
+                                Button::new("conflict-force", "覆盖重试")
+                                    .variant(Variant::Filled)
+                                    .size(GuiseSize::Xs)
+                                    .left_section(Icon::new(IconName::Check).size(GuiseSize::Xs))
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.resolve_conflict_force(cx)
                                     })),

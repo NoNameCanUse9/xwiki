@@ -3,7 +3,6 @@
 
 use std::path::PathBuf;
 
-use gpui_component::ThemeMode;
 use serde::{Deserialize, Serialize};
 
 fn config_path() -> PathBuf {
@@ -162,13 +161,22 @@ pub fn remove_draft(server: &str, username: &str, project: &str, path: &str) {
     save_drafts(&drafts);
 }
 
-/// Returns the persisted theme mode, defaulting to System.
+/// Light or dark UI theme. Formerly re-exported from gpui-component;
+/// now defined locally so `config` stays dependency-free. The persisted
+/// `theme` file still stores `"light"` / `"dark"`.
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum ThemeMode {
+    #[default]
+    Light,
+    Dark,
+}
+
+/// Returns the persisted theme mode, defaulting to Light.
 pub fn load_theme() -> ThemeMode {
     match std::fs::read_to_string(config_path().join("theme"))
         .unwrap_or_default()
         .trim()
     {
-        "light" => ThemeMode::Light,
         "dark" => ThemeMode::Dark,
         _ => ThemeMode::Light,
     }

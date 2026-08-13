@@ -9,15 +9,8 @@ use std::time::Duration;
 
 use gpui::StatefulInteractiveElement;
 use gpui::*;
-use gpui_component::{
-    button::*,
-    checkbox::Checkbox,
-    dialog::DialogContent,
-    input::{Input, InputEvent, InputState},
-    notification::Notification,
-    scroll::ScrollableElement as _,
-    *,
-};
+use guise::prelude::*;
+use guise::theme::{Size, theme};
 
 use crate::api::{Client, dto};
 use crate::config;
@@ -228,14 +221,14 @@ pub struct XWikiApp {
     /// Forgot-password flow: true swaps the login panel for the reset form.
     reset_mode: bool,
     reset_status: Option<(bool, String)>,
-    reset_token_input: Entity<InputState>,
-    reset_password_input: Entity<InputState>,
+    reset_token_input: Entity<TextInput>,
+    reset_password_input: Entity<TextInput>,
     meta_version: Option<String>,
-    server_input: Entity<InputState>,
-    user_input: Entity<InputState>,
-    password_input: Entity<InputState>,
+    server_input: Entity<TextInput>,
+    user_input: Entity<TextInput>,
+    password_input: Entity<TextInput>,
     projects: Vec<ProjectRow>,
-    filter_input: Entity<InputState>,
+    filter_input: Entity<TextInput>,
     project_filter: ProjectFilter,
     // Document workspace state.
     selected_project: Option<String>,
@@ -259,8 +252,8 @@ pub struct XWikiApp {
     attachments_loading: bool,
     attachments_error: Option<String>,
     attachments: Vec<dto::TreeEntry>,
-    attachment_source_input: Entity<InputState>,
-    attachment_destination_input: Entity<InputState>,
+    attachment_source_input: Entity<TextInput>,
+    attachment_destination_input: Entity<TextInput>,
     // Edit state: page lock + markdown editor + commit message.
     editing: bool,
     edit_path: Option<String>,
@@ -272,14 +265,14 @@ pub struct XWikiApp {
     status_msg: Option<String>,
     save_error: Option<String>,
     saving: bool,
-    commit_msg: Entity<InputState>,
-    editor_input: Entity<InputState>,
-    editor_title_input: Entity<InputState>,
+    commit_msg: Entity<TextInput>,
+    editor_input: Entity<TextArea>,
+    editor_title_input: Entity<TextInput>,
     editor_preview: bool,
     // History view state.
     history_open: bool,
     history_file_path: Option<String>,
-    history_input: Entity<InputState>,
+    history_input: Entity<TextInput>,
     history_loading: bool,
     history_has_more: bool,
     history_generation: u64,
@@ -321,7 +314,7 @@ pub struct XWikiApp {
     projects_error: Option<String>,
     project_action: Option<String>,
     /// Settings view: server URL input + connection-test result.
-    settings_server_input: Entity<InputState>,
+    settings_server_input: Entity<TextInput>,
     settings_test: Option<(bool, String)>,
     settings_test_detail: Option<String>,
     settings_loading: bool,
@@ -335,10 +328,10 @@ pub struct XWikiApp {
     settings_access_loading: bool,
     /// ⌘P quick-open overlay state.
     quick_open: bool,
-    quick_input: Entity<InputState>,
+    quick_input: Entity<TextInput>,
     /// Project-wide full-text search overlay state.
     search_open: bool,
-    search_input: Entity<InputState>,
+    search_input: Entity<TextInput>,
     search_results: Vec<dto::SearchResult>,
     search_loading: bool,
     search_error: Option<String>,
@@ -360,6 +353,9 @@ pub struct XWikiApp {
     last_title: String,
     /// Keep input subscriptions alive with the app entity.
     _subscriptions: Vec<Subscription>,
+    /// Window-level modal stack + toast queue (guise), mounted as the last
+    /// child of the root view.
+    overlay_host: Entity<OverlayHost>,
 }
 
 enum Screen {
@@ -393,87 +389,67 @@ impl ProjectRow {
 
 impl XWikiApp {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let server_input =
-            cx.new(|cx| InputState::new(window, cx).placeholder(config::load_server()));
+        let server_input = cx.new(|cx| TextInput::new(cx).placeholder(config::load_server()));
         let saved_username = config::load_username();
         let user_input = cx.new(|cx| {
-            let mut state = InputState::new(window, cx).placeholder("用户名");
-            if !saved_username.is_empty() {
-                state.set_value(saved_username.clone(), window, cx);
-            }
-            state
+            TextInput::new(cx)
+                .placeholder("用户名")
+                .value(&saved_username)
         });
-        let password_input =
-            cx.new(|cx| InputState::new(window, cx).placeholder("密码").masked(true));
-        let reset_token_input =
-            cx.new(|cx| InputState::new(window, cx).placeholder("一次性 token"));
+        let password_input = cx.new(|cx| TextInput::new(cx).placeholder("密码").password(true));
+        let reset_token_input = cx.new(|cx| TextInput::new(cx).placeholder("一次性 token"));
         let reset_password_input = cx.new(|cx| {
-            InputState::new(window, cx)
+            TextInput::new(cx)
                 .placeholder("新密码（至少 8 位）")
-                .masked(true)
+                .password(true)
         });
 
         // ponytail: rows are loaded from GET /api/v1/projects on login; this
         // starts empty. Plain Vec — every access happens on the main thread
         // inside update callbacks, so no lock is needed.
-        let filter_input = cx.new(|cx| InputState::new(window, cx).placeholder("搜索项目…"));
+        let filter_input = cx.new(|cx| TextInput::new(cx).placeholder("搜索项目…"));
 
-        let commit_msg = cx.new(|cx| InputState::new(window, cx).placeholder("提交消息…"));
-        let editor_input = cx.new(|cx| {
-            InputState::new(window, cx)
-                .multi_line(true)
-                .placeholder("# 用 Markdown 写作…")
-        });
-        let editor_title_input = cx.new(|cx| InputState::new(window, cx).placeholder("文档标题"));
-        let history_input = cx.new(|cx| InputState::new(window, cx).placeholder("搜索版本…"));
+        let commit_msg = cx.new(|cx| TextInput::new(cx).placeholder("提交消息…"));
+        let editor_input = cx.new(|cx| TextArea::new(cx).placeholder("# 用 Markdown 写作…"));
+        let editor_title_input = cx.new(|cx| TextInput::new(cx).placeholder("文档标题"));
+        let history_input = cx.new(|cx| TextInput::new(cx).placeholder("搜索版本…"));
         let attachment_source_input =
-            cx.new(|cx| InputState::new(window, cx).placeholder("本地文件路径（≤ 5 MiB）"));
+            cx.new(|cx| TextInput::new(cx).placeholder("本地文件路径（≤ 5 MiB）"));
         let attachment_destination_input =
-            cx.new(|cx| InputState::new(window, cx).placeholder("下载目标路径"));
+            cx.new(|cx| TextInput::new(cx).placeholder("下载目标路径"));
 
-        let settings_server_input = cx.new(|cx| {
-            let mut state = InputState::new(window, cx);
-            state.set_value(config::load_server(), window, cx);
-            state
-        });
-        let quick_input = cx.new(|cx| InputState::new(window, cx).placeholder("项目 / 文档…"));
-        let search_input = cx.new(|cx| InputState::new(window, cx).placeholder("搜索文档内容…"));
+        let settings_server_input = cx.new(|cx| TextInput::new(cx).value(&config::load_server()));
+        let quick_input = cx.new(|cx| TextInput::new(cx).placeholder("项目 / 文档…"));
+        let search_input = cx.new(|cx| TextInput::new(cx).placeholder("搜索文档内容…"));
         let mut subs = Vec::new();
         for state in [&server_input, &user_input, &password_input] {
-            subs.push(
-                cx.subscribe_in(state, window, |app, _, event: &InputEvent, window, cx| {
-                    if matches!(
-                        event,
-                        InputEvent::PressEnter {
-                            secondary: false,
-                            shift: false
-                        }
-                    ) && !app.reset_mode
-                    {
+            subs.push(cx.subscribe_in(
+                state,
+                window,
+                |app, _entity, event: &TextInputEvent, window, cx| {
+                    if matches!(event, TextInputEvent::Submit(_)) && !app.reset_mode {
                         app.do_login(window, cx);
                     } else {
                         cx.notify();
                     }
-                }),
-            );
+                },
+            ));
         }
         // Filter keystrokes re-render the project cards.
         {
             let filter = filter_input.clone();
-            subs.push(cx.subscribe_in(
-                &filter_input,
-                window,
-                move |_, _, _: &InputEvent, _, cx| {
+            subs.push(
+                cx.subscribe(&filter_input, move |_, _entity, _: &TextInputEvent, cx| {
                     let _ = filter.read(cx);
                     cx.notify();
-                },
-            ));
+                }),
+            );
         }
         // ⌘P quick-open keystrokes re-render the overlay list.
         {
             let quick = quick_input.clone();
             subs.push(
-                cx.subscribe_in(&quick_input, window, move |_, _, _: &InputEvent, _, cx| {
+                cx.subscribe(&quick_input, move |_, _entity, _: &TextInputEvent, cx| {
                     let _ = quick.read(cx);
                     cx.notify();
                 }),
@@ -483,11 +459,10 @@ impl XWikiApp {
         // search once a query is present.
         {
             let search = search_input.clone();
-            subs.push(cx.subscribe_in(
+            subs.push(cx.subscribe(
                 &search_input,
-                window,
-                move |app, _, _: &InputEvent, _, cx| {
-                    let q = search.read(cx).value().trim().to_string();
+                move |app, _entity, _: &TextInputEvent, cx| {
+                    let q = search.read(cx).text().trim().to_string();
                     if q.is_empty() {
                         app.search_results.clear();
                         app.search_error = None;
@@ -503,26 +478,23 @@ impl XWikiApp {
         // invalidate the app even while the editor is open.
         {
             let editor = editor_input.clone();
-            subs.push(cx.subscribe_in(
-                &editor_input,
-                window,
-                move |app, _, _: &InputEvent, _, cx| {
+            subs.push(
+                cx.subscribe(&editor_input, move |app, _entity, _: &TextAreaEvent, cx| {
                     let _ = editor.read(cx);
                     if app.editing {
                         app.persist_draft(cx);
                     }
                     cx.notify();
-                },
-            ));
+                }),
+            );
         }
         // History search is server-backed so it covers every ref and commit,
         // not only the currently loaded page.
         {
             let history = history_input.clone();
-            subs.push(cx.subscribe_in(
+            subs.push(cx.subscribe(
                 &history_input,
-                window,
-                move |app, _, _: &InputEvent, _, cx| {
+                move |app, _entity, _: &TextInputEvent, cx| {
                     let _ = history.read(cx);
                     if app.history_open {
                         app.load_history_page(true, cx);
@@ -534,22 +506,19 @@ impl XWikiApp {
         }
         // Title and commit-message edits update dirty-state and button labels.
         for state in [&commit_msg, &editor_title_input] {
-            subs.push(
-                cx.subscribe_in(state, window, |app, _, _: &InputEvent, _, cx| {
-                    if app.editing {
-                        app.persist_draft(cx);
-                    }
-                    cx.notify();
-                }),
-            );
+            subs.push(cx.subscribe(state, |app, _entity, _: &TextInputEvent, cx| {
+                if app.editing {
+                    app.persist_draft(cx);
+                }
+                cx.notify();
+            }));
         }
         // Changing the server address invalidates the previous connection result.
         {
             let settings_input = settings_server_input.clone();
-            subs.push(cx.subscribe_in(
+            subs.push(cx.subscribe(
                 &settings_server_input,
-                window,
-                move |app, _, _: &InputEvent, _, cx| {
+                move |app, _entity, _: &TextInputEvent, cx| {
                     let _ = settings_input.read(cx);
                     app.settings_test = None;
                     app.settings_test_detail = None;
@@ -674,12 +643,13 @@ impl XWikiApp {
             pending_edit: None,
             last_title: String::new(),
             _subscriptions: subs,
+            overlay_host: cx.new(OverlayHost::new),
         };
         app.restore_session(window, cx);
         app
     }
 
-    fn restore_session(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn restore_session(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         let Some(session) = config::load_session() else {
             return;
         };
@@ -688,10 +658,10 @@ impl XWikiApp {
         let client = Client::with_session(&server, Some(session.cookie));
         let _ = config::save_server(&server);
         self.server_input.update(cx, |state, cx| {
-            state.set_value(server.clone(), window, cx);
+            state.set_text(&server, cx);
         });
         self.user_input.update(cx, |state, cx| {
-            state.set_value(username.clone(), window, cx);
+            state.set_text(&username, cx);
         });
         self.server_url = server;
         self.username = username;
@@ -1102,7 +1072,7 @@ impl XWikiApp {
         let source = self
             .attachment_source_input
             .read(cx)
-            .value()
+            .text()
             .trim()
             .to_string();
         if source.is_empty() {
@@ -1169,7 +1139,7 @@ impl XWikiApp {
         let destination = self
             .attachment_destination_input
             .read(cx)
-            .value()
+            .text()
             .trim()
             .to_string();
         let fallback = path.rsplit('/').next().unwrap_or("attachment").to_string();
@@ -1216,34 +1186,29 @@ impl XWikiApp {
         path: String,
     ) {
         let handle = cx.entity();
-        window.open_dialog(cx, move |dialog, _window, cx| {
-            let theme = cx.theme().clone();
-            let cancel = Button::new("cancel-delete-attachment")
-                .rounded(px(tokens::RADIUS))
-                .label("取消")
-                .on_click(|_, window, cx| window.close_dialog(cx));
-            let target = handle.clone();
-            let delete_path = path.clone();
-            let confirm = Button::new("confirm-delete-attachment")
-                .danger()
-                .rounded(px(tokens::RADIUS))
-                .label("删除")
-                .on_click(move |_, window, cx| {
-                    let path = delete_path.clone();
-                    target.update(cx, |app, cx| app.delete_attachment(&path, cx));
-                    window.close_dialog(cx);
-                });
-            dialog
-                .title(div().text_color(theme.danger).child("删除附件？"))
-                .content(|content, _, _| content.child("删除会创建一个新的文档提交。"))
-                .footer(
-                    h_flex()
-                        .gap_2()
-                        .justify_end()
-                        .w_full()
-                        .child(cancel)
-                        .child(confirm),
-                )
+        let target = handle.clone();
+        let delete_path = path.clone();
+        let host = self.overlay_host.clone();
+        host.update(cx, |host, cx| {
+            host.open_modal(window, cx, move |close, _window, _cx| {
+                let target = target.clone();
+                let delete_path = delete_path.clone();
+                let close_confirm = close.clone();
+                let close_cancel = close.clone();
+                ConfirmModal::new()
+                    .title("删除附件？")
+                    .message("删除会创建一个新的文档提交。")
+                    .confirm_label("删除")
+                    .cancel_label("取消")
+                    .danger()
+                    .on_confirm(move |_, window, cx| {
+                        let path = delete_path.clone();
+                        target.update(cx, |app, cx| app.delete_attachment(&path, cx));
+                        close_confirm(window, cx);
+                    })
+                    .on_cancel(move |_, window, cx| close_cancel(window, cx))
+                    .into_any_element()
+            });
         });
     }
 
@@ -1428,10 +1393,10 @@ impl XWikiApp {
             self.status_msg = Some("已恢复本地草稿".into());
         }
         if let Some(handle) = cx.active_window() {
-            let _ = cx.update_window(handle, |_view, window, cx| {
-                editor.update(cx, |s, cx| s.set_value(content, window, cx));
-                commit.update(cx, |s, cx| s.set_value(message, window, cx));
-                title.update(cx, |s, cx| s.set_value(filename, window, cx));
+            let _ = cx.update_window(handle, |_view, _window, cx| {
+                editor.update(cx, |s, cx| s.set_text(&content, cx));
+                commit.update(cx, |s, cx| s.set_text(&message, cx));
+                title.update(cx, |s, cx| s.set_text(&filename, cx));
             });
         }
         self.edit_path = Some(path.to_string());
@@ -1452,8 +1417,8 @@ impl XWikiApp {
         else {
             return;
         };
-        let content = self.editor_input.read(cx).value().to_string();
-        let title = self.editor_title_input.read(cx).value().trim().to_string();
+        let content = self.editor_input.read(cx).text().to_string();
+        let title = self.editor_title_input.read(cx).text().trim().to_string();
         let target = if title.is_empty() {
             path.clone()
         } else {
@@ -1466,7 +1431,7 @@ impl XWikiApp {
             original_path: path.clone(),
             target_path: target,
             content,
-            message: self.commit_msg.read(cx).value().to_string(),
+            message: self.commit_msg.read(cx).text().to_string(),
             base_revision: self.edit_base_revision.clone().unwrap_or_default(),
             updated_at: chrono::Utc::now().timestamp(),
         });
@@ -1571,13 +1536,13 @@ impl XWikiApp {
         if !self.editing {
             return false;
         }
-        let content_changed = self.editor_input.read(cx).value().as_ref() != self.doc_content;
-        let message_changed = !self.commit_msg.read(cx).value().trim().is_empty();
+        let content_changed = self.editor_input.read(cx).text() != self.doc_content;
+        let message_changed = !self.commit_msg.read(cx).text().trim().is_empty();
         let title_changed = self
             .edit_path
             .as_deref()
             .and_then(|path| path.rsplit('/').next())
-            .is_some_and(|filename| self.editor_title_input.read(cx).value().trim() != filename);
+            .is_some_and(|filename| self.editor_title_input.read(cx).text().trim() != filename);
         content_changed || message_changed || title_changed
     }
 
@@ -1587,51 +1552,27 @@ impl XWikiApp {
             return;
         }
         let handle = cx.entity();
-        let discard_handle = handle.clone();
-        window.open_dialog(cx, move |dialog, _window, cx| {
-            let theme = cx.theme().clone();
-            let content_theme = theme.clone();
-            let cancel = Button::new("cancel-discard-dialog")
-                .rounded(px(tokens::RADIUS))
-                .icon(IconName::Close)
-                .label("继续编辑")
-                .on_click(|_, window, cx| window.close_dialog(cx));
-            let discard_target = discard_handle.clone();
-            let discard = Button::new("confirm-discard-edit")
-                .danger()
-                .rounded(px(tokens::RADIUS))
-                .icon(IconName::Delete)
-                .label("放弃修改")
-                .on_click(move |_, window, cx| {
-                    let handle = discard_target.clone();
-                    handle.update(cx, |app, cx| app.cancel_edit(cx));
-                    window.close_dialog(cx);
-                });
-            dialog
-                .title(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap_2()
-                        .child(Icon::new(IconName::TriangleAlert).text_color(theme.danger))
-                        .child("放弃未保存的修改？"),
-                )
-                .content(move |content, _window, _cx| {
-                    content.child(
-                        div()
-                            .text_sm()
-                            .text_color(content_theme.muted_foreground)
-                            .child("当前文档包含尚未提交的内容。继续离开会丢弃这些修改。"),
-                    )
-                })
-                .footer(
-                    h_flex()
-                        .gap_2()
-                        .justify_end()
-                        .w_full()
-                        .child(cancel)
-                        .child(discard),
-                )
+        let discard_target = handle.clone();
+        let host = self.overlay_host.clone();
+        host.update(cx, |host, cx| {
+            host.open_modal(window, cx, move |close, _window, _cx| {
+                let discard_target = discard_target.clone();
+                let close_confirm = close.clone();
+                let close_cancel = close.clone();
+                ConfirmModal::new()
+                    .title("放弃未保存的修改？")
+                    .message("当前文档包含尚未提交的内容。继续离开会丢弃这些修改。")
+                    .confirm_label("放弃修改")
+                    .cancel_label("继续编辑")
+                    .danger()
+                    .on_confirm(move |_, window, cx| {
+                        let handle = discard_target.clone();
+                        handle.update(cx, |app, cx| app.cancel_edit(cx));
+                        close_confirm(window, cx);
+                    })
+                    .on_cancel(move |_, window, cx| close_cancel(window, cx))
+                    .into_any_element()
+            });
         });
     }
 
@@ -1646,9 +1587,9 @@ impl XWikiApp {
         let Some(path) = self.edit_path.clone() else {
             return;
         };
-        let content = self.editor_input.read(cx).value().to_string();
-        let title = self.editor_title_input.read(cx).value().to_string();
-        let msg = self.commit_msg.read(cx).value().to_string();
+        let content = self.editor_input.read(cx).text().to_string();
+        let title = self.editor_title_input.read(cx).text().to_string();
+        let msg = self.commit_msg.read(cx).text().to_string();
         let title = title.trim();
         if title.is_empty() {
             self.save_error = Some("文档路径不能为空".into());
@@ -1813,7 +1754,7 @@ impl XWikiApp {
             self.commit_patch = None;
         }
         let generation = self.history_generation;
-        let query = self.history_input.read(cx).value().trim().to_string();
+        let query = self.history_input.read(cx).text().trim().to_string();
         let offset = history_page_offset(reset, self.commits.len());
         self.history_loading = true;
         self.history_error = None;
@@ -1942,49 +1883,28 @@ impl XWikiApp {
         let short: String = sha.chars().take(7).collect();
         let handle = cx.entity();
         let confirm_handle = handle.clone();
-        window.open_dialog(cx, move |dialog, _window, cx| {
-            let theme = cx.theme().clone();
-            let cancel = Button::new("cancel-restore")
-                .rounded(px(tokens::RADIUS))
-                .icon(IconName::Close)
-                .label("取消")
-                .on_click(|_, window, cx| window.close_dialog(cx));
-            let confirm_target = confirm_handle.clone();
-            let restore = Button::new("confirm-restore")
-                .danger()
-                .rounded(px(tokens::RADIUS))
-                .icon(IconName::Redo2)
-                .label("确认恢复")
-                .on_click(move |_, window, cx| {
-                    let handle = confirm_target.clone();
-                    handle.update(cx, |app, cx| app.revert_selected(cx));
-                    window.close_dialog(cx);
-                });
-            let short_for_content = short.clone();
-            let content_theme = theme.clone();
-            dialog
-                .title(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap_2()
-                        .child(Icon::new(IconName::TriangleAlert).text_color(theme.danger))
-                        .child("恢复历史版本？"),
-                )
-                .content(move |content, _window, _cx| {
-                    content.child(
-                        div()
-                            .v_flex()
-                            .gap_2()
-                            .text_sm()
-                            .text_color(content_theme.muted_foreground)
-                            .child(format!(
-                                "将以 {short_for_content} 创建一个新的恢复提交，当前文档内容不会被静默覆盖。"
-                            ))
-                            .child("此操作会生成新的提交，请确认后继续。"),
-                    )
-                })
-                .footer(h_flex().gap_2().justify_end().w_full().child(cancel).child(restore))
+        let host = self.overlay_host.clone();
+        host.update(cx, |host, cx| {
+            host.open_modal(window, cx, move |close, _window, _cx| {
+                let confirm_handle = confirm_handle.clone();
+                let close_confirm = close.clone();
+                let close_cancel = close.clone();
+                ConfirmModal::new()
+                    .title("恢复历史版本？")
+                    .message(format!(
+                        "将以 {short} 创建一个新的恢复提交，当前文档内容不会被静默覆盖。\n此操作会生成新的提交，请确认后继续。"
+                    ))
+                    .confirm_label("确认恢复")
+                    .cancel_label("取消")
+                    .danger()
+                    .on_confirm(move |_, window, cx| {
+                        let handle = confirm_handle.clone();
+                        handle.update(cx, |app, cx| app.revert_selected(cx));
+                        close_confirm(window, cx);
+                    })
+                    .on_cancel(move |_, window, cx| close_cancel(window, cx))
+                    .into_any_element()
+            });
         });
     }
 
@@ -2084,70 +2004,40 @@ impl XWikiApp {
             return;
         }
         let handle = cx.entity();
-        let action_handle = handle.clone();
+        let confirm_handle = handle.clone();
+        let confirm_project = project_id.clone();
         let action_label = if archived {
             "归档项目"
         } else {
             "恢复项目"
         };
-        window.open_dialog(cx, move |dialog, _window, cx| {
-            let theme = cx.theme().clone();
-            let content_theme = theme.clone();
-            let confirm_handle = action_handle.clone();
-            let confirm_project = project_id.clone();
-            let confirm_label = action_label;
-            let title_label = action_label;
-            let cancel = Button::new("cancel-project-archive")
-                .rounded(px(tokens::RADIUS))
-                .icon(IconName::Close)
-                .label("取消")
-                .on_click(|_, window, cx| window.close_dialog(cx));
-            let confirm = Button::new("confirm-project-archive")
-                .danger()
-                .rounded(px(tokens::RADIUS))
-                .icon(if archived {
-                    IconName::Delete
-                } else {
-                    IconName::Redo2
-                })
-                .label(confirm_label)
-                .on_click(move |_, window, cx| {
-                    let handle = confirm_handle.clone();
-                    let project_id = confirm_project.clone();
-                    handle.update(cx, |app, cx| {
-                        app.set_project_archived(&project_id, archived, cx);
-                    });
-                    window.close_dialog(cx);
-                });
-            dialog
-                .title(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap_2()
-                        .child(Icon::new(IconName::TriangleAlert).text_color(theme.danger))
-                        .child(title_label),
-                )
-                .content(move |content, _window, _cx| {
-                    content.child(
-                        div()
-                            .text_sm()
-                            .text_color(content_theme.muted_foreground)
-                            .child(if archived {
-                                "归档后项目仍保留，但会从活跃项目视图中移除。"
-                            } else {
-                                "恢复后项目会重新出现在活跃项目视图中。"
-                            }),
-                    )
-                })
-                .footer(
-                    h_flex()
-                        .gap_2()
-                        .justify_end()
-                        .w_full()
-                        .child(cancel)
-                        .child(confirm),
-                )
+        self.overlay_host.update(cx, |host, cx| {
+            host.open_modal(window, cx, move |close, _window, _cx| {
+                let confirm_handle = confirm_handle.clone();
+                let confirm_project = confirm_project.clone();
+                let close_confirm = close.clone();
+                let close_cancel = close.clone();
+                ConfirmModal::new()
+                    .title(format!("{action_label}？"))
+                    .message(if archived {
+                        "归档后项目仍保留，但会从活跃项目视图中移除。"
+                    } else {
+                        "恢复后项目会重新出现在活跃项目视图中。"
+                    })
+                    .confirm_label(action_label)
+                    .cancel_label("取消")
+                    .danger()
+                    .on_confirm(move |_, window, cx| {
+                        let handle = confirm_handle.clone();
+                        let project_id = confirm_project.clone();
+                        handle.update(cx, |app, cx| {
+                            app.set_project_archived(&project_id, archived, cx);
+                        });
+                        close_confirm(window, cx);
+                    })
+                    .on_cancel(move |_, window, cx| close_cancel(window, cx))
+                    .into_any_element()
+            });
         });
     }
 
@@ -2208,65 +2098,65 @@ impl XWikiApp {
         let confirm_handle = handle.clone();
         let project_id_for_dialog = project_id.clone();
         let default_name = current_name.clone();
-        window.open_dialog(cx, move |dialog, window, cx| {
-            let name_state = cx.new(|cx| {
-                let mut s = InputState::new(window, cx).placeholder("project-name");
-                s.set_value(default_name.clone(), window, cx);
-                s
-            });
-            let content_state = name_state.clone();
-            let content_theme = cx.theme().clone();
-            let content_builder = move |content: DialogContent, _: &mut Window, _cx: &mut App| {
-                content.child(
-                    div()
-                        .v_flex()
-                        .gap_2()
-                        .w_full()
-                        .child(mono_label("新名称").text_color(content_theme.muted_foreground))
-                        .child(Input::new(&content_state).w_full()),
-                )
-            };
-            let cancel = Button::new("cancel-rename-project")
-                .rounded(px(tokens::RADIUS))
-                .icon(IconName::Close)
-                .label("取消")
-                .on_click(|_, window, cx| window.close_dialog(cx));
-            let submit_state = name_state.clone();
-            let submit_handle = confirm_handle.clone();
-            let submit_project = project_id_for_dialog.clone();
-            let rename = Button::new("confirm-rename-project")
-                .primary()
-                .rounded(px(tokens::RADIUS))
-                .icon(IconName::Check)
-                .label("重命名")
-                .on_click(move |_, window, cx| {
-                    let new_name = submit_state.read(cx).value().trim().to_string();
-                    if new_name.is_empty() {
-                        return;
-                    }
-                    let handle = submit_handle.clone();
-                    let project_id = submit_project.clone();
-                    handle.update(cx, |app, cx| {
-                        app.do_rename_project(&project_id, new_name, cx);
-                    });
-                    window.close_dialog(cx);
+        let host = self.overlay_host.clone();
+        host.update(cx, |host, cx| {
+            host.open_modal(window, cx, move |close, _window, cx| {
+                let name_state = cx.new(|cx| {
+                    TextInput::new(cx)
+                        .placeholder("新名称")
+                        .value(&default_name)
                 });
-            dialog
-                .title(
-                    div()
-                        .text_lg()
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .child("重命名项目"),
-                )
-                .content(content_builder)
-                .footer(
-                    h_flex()
-                        .gap_2()
-                        .justify_end()
-                        .w_full()
-                        .child(cancel)
-                        .child(rename),
-                )
+                let content_theme = tokens::Cobalt::from_theme(theme(cx));
+                let submit_state = name_state.clone();
+                let submit_handle = confirm_handle.clone();
+                let submit_project = project_id_for_dialog.clone();
+                let close_cancel = close.clone();
+                let close_confirm = close.clone();
+                let cancel = Button::new("cancel-rename-project", "取消")
+                    .variant(Variant::Subtle)
+                    .size(Size::Xs)
+                    .left_section(Icon::new(IconName::Close).size(Size::Sm))
+                    .on_click(move |_, window, cx| close_cancel(window, cx));
+                let rename = Button::new("confirm-rename-project", "重命名")
+                    .variant(Variant::Filled)
+                    .size(Size::Xs)
+                    .left_section(Icon::new(IconName::Check).size(Size::Sm))
+                    .on_click(move |_, window, cx| {
+                        let new_name = submit_state.read(cx).text().trim().to_string();
+                        if new_name.is_empty() {
+                            return;
+                        }
+                        let handle = submit_handle.clone();
+                        let project_id = submit_project.clone();
+                        handle.update(cx, |app, cx| {
+                            app.do_rename_project(&project_id, new_name, cx);
+                        });
+                        close_confirm(window, cx);
+                    });
+                Modal::new()
+                    .title("重命名项目")
+                    .on_close(move |_ev, window, cx| close(window, cx))
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap_2()
+                            .w_full()
+                            .child(mono_label("新名称").text_color(content_theme.ink_3))
+                            .child(div().w_full().child(name_state.clone())),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .justify_end()
+                            .w_full()
+                            .child(cancel)
+                            .child(rename),
+                    )
+                    .into_any_element()
+            });
         });
     }
 
@@ -2320,57 +2210,32 @@ impl XWikiApp {
         let action_handle = handle.clone();
         let confirm_project = project_id.clone();
         let confirm_name = project_name.clone();
-        window.open_dialog(cx, move |dialog, _window, cx| {
-            let theme = cx.theme().clone();
-            let content_theme = theme.clone();
-            let confirm_handle = action_handle.clone();
-            let delete_id = confirm_project.clone();
-            let delete_name = confirm_name.clone();
-            let content_delete_name = delete_name.clone();
-            let cancel = Button::new("cancel-project-delete")
-                .rounded(px(tokens::RADIUS))
-                .icon(IconName::Close)
-                .label("取消")
-                .on_click(|_, window, cx| window.close_dialog(cx));
-            let confirm = Button::new("confirm-project-delete")
-                .danger()
-                .rounded(px(tokens::RADIUS))
-                .icon(IconName::Delete)
-                .label("删除项目")
-                .on_click(move |_, window, cx| {
-                    let handle = confirm_handle.clone();
-                    let id = delete_id.clone();
-                    let name = delete_name.clone();
-                    handle.update(cx, |app, cx| app.do_delete_project(&id, &name, cx));
-                    window.close_dialog(cx);
-                });
-            dialog
-                .title(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap_2()
-                        .child(Icon::new(IconName::TriangleAlert).text_color(theme.danger))
-                        .child("删除项目？"),
-                )
-                .content(move |content, _window, _cx| {
-                    content.child(
-                        div()
-                            .text_sm()
-                            .text_color(content_theme.muted_foreground)
-                            .child(format!(
-                                "项目「{content_delete_name}」及其全部 Git 历史将被彻底删除，无法恢复。"
-                            )),
-                    )
-                })
-                .footer(
-                    h_flex()
-                        .gap_2()
-                        .justify_end()
-                        .w_full()
-                        .child(cancel)
-                        .child(confirm),
-                )
+        let host = self.overlay_host.clone();
+        host.update(cx, |host, cx| {
+            host.open_modal(window, cx, move |close, _window, _cx| {
+                let confirm_handle = action_handle.clone();
+                let delete_id = confirm_project.clone();
+                let delete_name = confirm_name.clone();
+                let close_confirm = close.clone();
+                let close_cancel = close.clone();
+                ConfirmModal::new()
+                    .title("删除项目？")
+                    .message(format!(
+                        "项目「{delete_name}」及其全部 Git 历史将被彻底删除，无法恢复。"
+                    ))
+                    .confirm_label("删除项目")
+                    .cancel_label("取消")
+                    .danger()
+                    .on_confirm(move |_, window, cx| {
+                        let handle = confirm_handle.clone();
+                        let id = delete_id.clone();
+                        let name = delete_name.clone();
+                        handle.update(cx, |app, cx| app.do_delete_project(&id, &name, cx));
+                        close_confirm(window, cx);
+                    })
+                    .on_cancel(move |_, window, cx| close_cancel(window, cx))
+                    .into_any_element()
+            });
         });
     }
 
@@ -2433,84 +2298,91 @@ impl XWikiApp {
         let project_for_dialog = project.clone();
         let client_for_dialog = client.clone();
         let default_name = path.rsplit('/').next().unwrap_or(&path).to_string();
-        window.open_dialog(cx, move |dialog, window, cx| {
-            let name_state = cx.new(|cx| {
-                let mut s = InputState::new(window, cx).placeholder("新名称");
-                s.set_value(default_name.clone(), window, cx);
-                s
-            });
-            let content_state = name_state.clone();
-            let content_theme = cx.theme().clone();
-            let content_builder = move |content: DialogContent, _: &mut Window, _cx: &mut App| {
-                content.child(
-                    div()
-                        .v_flex()
-                        .gap_2()
-                        .w_full()
-                        .child(mono_label("新名称").text_color(content_theme.muted_foreground))
-                        .child(Input::new(&content_state).w_full()),
-                )
-            };
-            let cancel = Button::new("cancel-rename-doc")
-                .rounded(px(tokens::RADIUS))
-                .icon(IconName::Close)
-                .label("取消")
-                .on_click(|_, window, cx| window.close_dialog(cx));
-            let submit_state = name_state.clone();
-            let submit_handle = confirm_handle.clone();
-            let submit_project = project_for_dialog.clone();
-            let submit_client = client_for_dialog.clone();
-            let submit_path = current_path.clone();
-            let submit_dir = is_dir;
-            let rename = Button::new("confirm-rename-doc")
-                .primary()
-                .rounded(px(tokens::RADIUS))
-                .icon(IconName::Check)
-                .label("重命名")
-                .on_click(move |_, window, cx| {
-                    let new_name = submit_state.read(cx).value().trim().to_string();
-                    if new_name.is_empty() || new_name.contains('/') {
-                        window.push_notification(
-                            Notification::error("名称不能为空且不能包含斜杠"),
-                            cx,
-                        );
-                        return;
-                    }
-                    let from = submit_path.clone();
-                    let to = match from.rsplit_once('/') {
-                        Some((parent, _)) => format!("{parent}/{new_name}"),
-                        None => new_name.clone(),
-                    };
-                    let handle = submit_handle.clone();
-                    let project_id = submit_project.clone();
-                    let c = submit_client.clone();
-                    let from_move = from.clone();
-                    let to_move = to.clone();
-                    handle.update(cx, |app, cx| {
-                        app.move_tree_path(&c, &project_id, &from_move, &to_move, submit_dir, cx);
-                    });
-                    window.close_dialog(cx);
+        let host_handle = self.overlay_host.clone();
+        let host = self.overlay_host.clone();
+        host.update(cx, |host, cx| {
+            host.open_modal(window, cx, move |close, _window, cx| {
+                let name_state = cx.new(|cx| {
+                    TextInput::new(cx)
+                        .placeholder("新名称")
+                        .value(&default_name)
                 });
-            dialog
-                .title(
-                    div()
-                        .text_lg()
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .child(if is_dir {
-                            "重命名目录"
-                        } else {
-                            "重命名文档"
-                        }),
-                )
-                .content(content_builder)
-                .footer(
-                    h_flex()
-                        .gap_2()
-                        .justify_end()
-                        .w_full()
-                        .child(cancel)
-                        .child(rename),
-                )
+                let content_theme = tokens::Cobalt::from_theme(theme(cx));
+                let submit_state = name_state.clone();
+                let submit_handle = confirm_handle.clone();
+                let submit_project = project_for_dialog.clone();
+                let submit_client = client_for_dialog.clone();
+                let submit_path = current_path.clone();
+                let submit_dir = is_dir;
+                let toast_host = host_handle.clone();
+                let close_cancel = close.clone();
+                let close_confirm = close.clone();
+                let cancel = Button::new("cancel-rename-doc", "取消")
+                    .variant(Variant::Subtle)
+                    .size(Size::Xs)
+                    .left_section(Icon::new(IconName::Close).size(Size::Sm))
+                    .on_click(move |_, window, cx| close_cancel(window, cx));
+                let rename = Button::new("confirm-rename-doc", "重命名")
+                    .variant(Variant::Filled)
+                    .size(Size::Xs)
+                    .left_section(Icon::new(IconName::Check).size(Size::Sm))
+                    .on_click(move |_, window, cx| {
+                        let new_name = submit_state.read(cx).text().trim().to_string();
+                        if new_name.is_empty() || new_name.contains('/') {
+                            let h = toast_host.clone();
+                            h.update(cx, |host, cx| host.toast("名称不能为空且不能包含斜杠", cx));
+                            return;
+                        }
+                        let from = submit_path.clone();
+                        let to = match from.rsplit_once('/') {
+                            Some((parent, _)) => format!("{parent}/{new_name}"),
+                            None => new_name.clone(),
+                        };
+                        let handle = submit_handle.clone();
+                        let project_id = submit_project.clone();
+                        let c = submit_client.clone();
+                        let from_move = from.clone();
+                        let to_move = to.clone();
+                        handle.update(cx, |app, cx| {
+                            app.move_tree_path(
+                                &c,
+                                &project_id,
+                                &from_move,
+                                &to_move,
+                                submit_dir,
+                                cx,
+                            );
+                        });
+                        close_confirm(window, cx);
+                    });
+                Modal::new()
+                    .title(if is_dir {
+                        "重命名目录"
+                    } else {
+                        "重命名文档"
+                    })
+                    .on_close(move |_ev, window, cx| close(window, cx))
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap_2()
+                            .w_full()
+                            .child(mono_label("新名称").text_color(content_theme.ink_3))
+                            .child(div().w_full().child(name_state.clone())),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .justify_end()
+                            .w_full()
+                            .child(cancel)
+                            .child(rename),
+                    )
+                    .into_any_element()
+            });
         });
     }
 
@@ -2577,94 +2449,90 @@ impl XWikiApp {
         let confirm_path = path.clone();
         let confirm_dir = is_dir;
         let confirm_name = path.rsplit('/').next().unwrap_or(&path).to_string();
-        window.open_dialog(cx, move |dialog, window, cx| {
-            let theme = cx.theme().clone();
-            let content_theme = theme.clone();
-            let content_name = confirm_name.clone();
-            let content_dir = confirm_dir;
-            // Hard-delete gate: the user must type the full path to enable
-            // the irreversible purge button.
-            let confirm_input = cx.new(|cx| {
-                InputState::new(window, cx).placeholder("输入完整路径以确认")
-            });
-            let gate_state = confirm_input.clone();
-            let gate_handle = action_handle.clone();
-            let gate_client = confirm_client.clone();
-            let gate_project = confirm_project.clone();
-            let gate_path = confirm_path.clone();
-            let gate_dir = confirm_dir;
-            let hard_delete = Button::new("confirm-delete-doc-hard")
-                .danger()
-                .outline()
-                .compact()
-                .icon(IconName::CircleX)
-                .label("彻底删除（重写历史）")
-                .on_click(move |_, window, cx| {
-                    let typed = gate_state.read(cx).value().trim().to_string();
-                    if typed != gate_path {
-                        window.push_notification(
-                            Notification::error("请输入完整的路径以确认彻底删除"),
-                            cx,
-                        );
-                        return;
-                    }
-                    let handle = gate_handle.clone();
-                    let c = gate_client.clone();
-                    let project = gate_project.clone();
-                    let path = gate_path.clone();
-                    let dir = gate_dir;
-                    handle.update(cx, |app, cx| {
-                        app.purge_tree_path(&c, &project, &path, dir, cx);
-                    });
-                    window.close_dialog(cx);
+        let host_handle = self.overlay_host.clone();
+        let host = self.overlay_host.clone();
+        host.update(cx, |host, cx| {
+            host.open_modal(window, cx, move |close, _window, cx| {
+                let content_theme = tokens::Cobalt::from_theme(theme(cx));
+                let content_name = confirm_name.clone();
+                let content_dir = confirm_dir;
+                // Hard-delete gate: the user must type the full path to enable
+                // the irreversible purge button.
+                let confirm_input = cx.new(|cx| {
+                    TextInput::new(cx).placeholder("输入完整路径以确认")
                 });
-            let gate_input = confirm_input.clone();
-            let cancel = Button::new("cancel-delete-doc")
-                .rounded(px(tokens::RADIUS))
-                .icon(IconName::Close)
-                .label("取消")
-                .on_click(|_, window, cx| window.close_dialog(cx));
-            let confirm_handle = action_handle.clone();
-            let delete_client = confirm_client.clone();
-            let delete_project = confirm_project.clone();
-            let delete_path = confirm_path.clone();
-            let delete_dir = confirm_dir;
-            let confirm = Button::new("confirm-delete-doc")
-                .danger()
-                .rounded(px(tokens::RADIUS))
-                .icon(IconName::Delete)
-                .label("删除（保留历史）")
-                .on_click(move |_, window, cx| {
-                    let handle = confirm_handle.clone();
-                    let c = delete_client.clone();
-                    let project = delete_project.clone();
-                    let path = delete_path.clone();
-                    let dir = delete_dir;
-                    handle.update(cx, |app, cx| {
-                        app.delete_tree_path(&c, &project, &path, dir, cx);
+                let gate_state = confirm_input.clone();
+                let gate_handle = action_handle.clone();
+                let gate_client = confirm_client.clone();
+                let gate_project = confirm_project.clone();
+                let gate_path = confirm_path.clone();
+                let gate_dir = confirm_dir;
+                let gate_toast = host_handle.clone();
+                let gate_close = close.clone();
+                let hard_delete = Button::new("confirm-delete-doc-hard", "彻底删除（重写历史）")
+                    .variant(Variant::Outline)
+                    .color(ColorName::Red)
+                    .size(Size::Xs)
+                    .left_section(Icon::new(IconName::CircleX).size(Size::Sm).color(ColorName::Red))
+                    .on_click(move |_, window, cx| {
+                        let typed = gate_state.read(cx).text().trim().to_string();
+                        if typed != gate_path {
+                            let h = gate_toast.clone();
+                            h.update(cx, |host, cx| {
+                                host.toast("请输入完整的路径以确认彻底删除", cx)
+                            });
+                            return;
+                        }
+                        let handle = gate_handle.clone();
+                        let c = gate_client.clone();
+                        let project = gate_project.clone();
+                        let path = gate_path.clone();
+                        let dir = gate_dir;
+                        handle.update(cx, |app, cx| {
+                            app.purge_tree_path(&c, &project, &path, dir, cx);
+                        });
+                        gate_close(window, cx);
                     });
-                    window.close_dialog(cx);
-                });
-            let content_input = gate_input.clone();
-            dialog
-                .title(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap_2()
-                        .child(Icon::new(IconName::TriangleAlert).text_color(theme.danger))
-                        .child("删除？"),
-                )
-                .content(move |content, _window, _cx| {
-                    content.child(
+                let cancel_close = close.clone();
+                let cancel = Button::new("cancel-delete-doc", "取消")
+                    .variant(Variant::Subtle)
+                    .size(Size::Xs)
+                    .left_section(Icon::new(IconName::Close).size(Size::Sm))
+                    .on_click(move |_, window, cx| cancel_close(window, cx));
+                let confirm_handle = action_handle.clone();
+                let delete_client = confirm_client.clone();
+                let delete_project = confirm_project.clone();
+                let delete_path = confirm_path.clone();
+                let delete_dir = confirm_dir;
+                let confirm_close = close.clone();
+                let confirm = Button::new("confirm-delete-doc", "删除（保留历史）")
+                    .variant(Variant::Filled)
+                    .color(ColorName::Red)
+                    .size(Size::Xs)
+                    .left_section(Icon::new(IconName::Delete).size(Size::Sm).color(ColorName::Red))
+                    .on_click(move |_, window, cx| {
+                        let handle = confirm_handle.clone();
+                        let c = delete_client.clone();
+                        let project = delete_project.clone();
+                        let path = delete_path.clone();
+                        let dir = delete_dir;
+                        handle.update(cx, |app, cx| {
+                            app.delete_tree_path(&c, &project, &path, dir, cx);
+                        });
+                        confirm_close(window, cx);
+                    });
+                Modal::new()
+                    .title("删除？")
+                    .on_close(move |_ev, window, cx| close(window, cx))
+                    .child(
                         div()
-                            .v_flex()
+                            .flex().flex_col()
                             .gap_3()
                             .w_full()
                             .child(
                                 div()
                                     .text_sm()
-                                    .text_color(content_theme.muted_foreground)
+                                    .text_color(content_theme.ink_3)
                                     .child(if content_dir {
                                         format!(
                                             "目录「{content_name}」及其全部内容将被删除。\n保留历史：可恢复；彻底删除：重写 Git 历史，不可恢复。"
@@ -2677,7 +2545,7 @@ impl XWikiApp {
                             )
                             .child(
                                 div()
-                                    .v_flex()
+                                    .flex().flex_col()
                                     .gap_1()
                                     .w_full()
                                     .child(
@@ -2685,20 +2553,21 @@ impl XWikiApp {
                                             content_theme.danger,
                                         ),
                                     )
-                                    .child(Input::new(&content_input).w_full()),
+                                    .child(div().w_full().child(confirm_input.clone())),
                             ),
                     )
-                })
-                .footer(
-                    h_flex()
-                        .flex_wrap()
-                        .gap_2()
-                        .justify_end()
-                        .w_full()
-                        .child(cancel)
-                        .child(hard_delete)
-                        .child(confirm),
-                )
+                    .child(
+                        div().flex().items_center()
+                            .flex_wrap()
+                            .gap_2()
+                            .justify_end()
+                            .w_full()
+                            .child(cancel)
+                            .child(hard_delete)
+                            .child(confirm),
+                    )
+                    .into_any_element()
+            });
         });
     }
 
@@ -2849,58 +2718,51 @@ impl XWikiApp {
         let cmds = self.palette_commands();
         let content_cmds = cmds.clone();
         let content_handle = handle.clone();
-        window.open_dialog(cx, move |dialog, _window, cx| {
-            let theme = cx.theme();
-            dialog
-                .title(
-                    div()
-                        .font_family(tokens::FONT_MONO)
-                        .text_xs()
-                        .text_color(theme.muted_foreground)
-                        .child("命令面板 · ⌘K"),
-                )
-                .content({
-                    let cc = content_cmds.clone();
-                    let ch = content_handle.clone();
-                    move |content, _window, cx| {
-                        let theme = cx.theme();
-                        let mut list = div().v_flex().gap_1().w_full();
-                        for c in &cc {
-                            let handle = ch.clone();
-                            let id = c.id;
-                            let label = c.label;
-                            let hint = c.hint;
-                            list = list.child(
+        let host = self.overlay_host.clone();
+        host.update(cx, |host, cx| {
+            host.open_modal(window, cx, move |close, _window, cx| {
+                let theme = tokens::Cobalt::from_theme(theme(cx));
+                let cc = content_cmds.clone();
+                let ch = content_handle.clone();
+                let mut list = div().flex().flex_col().gap_1().w_full();
+                for (index, c) in cc.iter().enumerate() {
+                    let handle = ch.clone();
+                    let id = c.id;
+                    let label = c.label;
+                    let hint = c.hint;
+                    let close_item = close.clone();
+                    list = list.child(
+                        div()
+                            .id(ElementId::named_usize("cmd", index))
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .px_2()
+                            .py_1_5()
+                            .rounded(px(tokens::RADIUS_SMALL))
+                            .hover(|s| s.bg(theme.surface_accent))
+                            .cursor_pointer()
+                            .child(div().text_sm().text_color(theme.ink).child(label))
+                            .child(
                                 div()
-                                    .id(format!("cmd-{id}"))
-                                    .flex()
-                                    .items_center()
-                                    .justify_between()
-                                    .px_2()
-                                    .py_1_5()
-                                    .rounded(px(tokens::RADIUS_SMALL))
-                                    .hover(|s| s.bg(theme.list_hover))
-                                    .cursor_pointer()
-                                    .child(
-                                        div().text_sm().text_color(theme.foreground).child(label),
-                                    )
-                                    .child(
-                                        div()
-                                            .font_family(tokens::FONT_MONO)
-                                            .text_xs()
-                                            .text_color(theme.muted_foreground)
-                                            .child(hint),
-                                    )
-                                    .on_click(move |_, window, cx| {
-                                        window.close_dialog(cx);
-                                        let h = handle.clone();
-                                        h.update(cx, |app, cx| app.run_command(id, cx));
-                                    }),
-                            );
-                        }
-                        content.child(list)
-                    }
-                })
+                                    .font_family(tokens::FONT_MONO)
+                                    .text_xs()
+                                    .text_color(theme.ink_3)
+                                    .child(hint),
+                            )
+                            .on_click(move |_, window, cx| {
+                                close_item(window, cx);
+                                let h = handle.clone();
+                                h.update(cx, |app, cx| app.run_command(id, cx));
+                            }),
+                    );
+                }
+                Modal::new()
+                    .title("命令面板 · ⌘K")
+                    .on_close(move |_ev, window, cx| close(window, cx))
+                    .child(list)
+                    .into_any_element()
+            });
         });
     }
 
@@ -2961,37 +2823,38 @@ impl XWikiApp {
     }
 
     fn toggle_theme(&mut self, cx: &mut Context<Self>) {
-        let next = if cx.theme().is_dark() {
-            ThemeMode::Light
+        let next = if theme(cx).scheme.is_dark() {
+            config::ThemeMode::Light
         } else {
-            ThemeMode::Dark
+            config::ThemeMode::Dark
         };
         config::save_theme(next);
-        Theme::change(next, None, cx);
+        let t = match next {
+            config::ThemeMode::Light => tokens::cobalt_light(),
+            config::ThemeMode::Dark => tokens::cobalt_dark(),
+        };
+        cx.set_global(t);
         cx.notify();
     }
 
     fn notify(&mut self, message: String, cx: &mut Context<Self>) {
-        if let Some(h) = cx.active_window() {
-            let _ = cx.update_window(h, move |_view, window, cx| {
-                window.push_notification(Notification::success(message), cx);
-            });
-        }
+        self.overlay_host
+            .update(cx, |host, cx| host.toast(message, cx));
     }
     fn do_login(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         if self.loading {
             return;
         }
         let server = {
-            let v = self.server_input.read(cx).value().to_string();
+            let v = self.server_input.read(cx).text().to_string();
             if v.trim().is_empty() {
                 config::load_server()
             } else {
                 v.trim().to_string()
             }
         };
-        let username = self.user_input.read(cx).value().to_string();
-        let password = self.password_input.read(cx).value().to_string();
+        let username = self.user_input.read(cx).text().to_string();
+        let password = self.password_input.read(cx).text().to_string();
         if username.trim().is_empty() || password.is_empty() {
             self.login_error = Some("请输入用户名和密码".into());
             cx.notify();
@@ -3063,14 +2926,14 @@ impl XWikiApp {
     /// ask the operator for it.
     fn request_reset(&mut self, cx: &mut Context<Self>) {
         let server = {
-            let v = self.server_input.read(cx).value().to_string();
+            let v = self.server_input.read(cx).text().to_string();
             if v.trim().is_empty() {
                 config::load_server()
             } else {
                 v.trim().to_string()
             }
         };
-        let username = self.user_input.read(cx).value().to_string();
+        let username = self.user_input.read(cx).text().to_string();
         if username.trim().is_empty() {
             self.reset_status = Some((false, "请输入用户名".into()));
             cx.notify();
@@ -3107,15 +2970,15 @@ impl XWikiApp {
     /// Submit token + new password to complete the reset.
     fn submit_reset(&mut self, cx: &mut Context<Self>) {
         let server = {
-            let v = self.server_input.read(cx).value().to_string();
+            let v = self.server_input.read(cx).text().to_string();
             if v.trim().is_empty() {
                 config::load_server()
             } else {
                 v.trim().to_string()
             }
         };
-        let token = self.reset_token_input.read(cx).value().to_string();
-        let new_password = self.reset_password_input.read(cx).value().to_string();
+        let token = self.reset_token_input.read(cx).text().to_string();
+        let new_password = self.reset_password_input.read(cx).text().to_string();
         if token.trim().is_empty() || new_password.len() < 8 {
             self.reset_status = Some((false, "需要 token 且新密码至少 8 个字符".into()));
             cx.notify();
@@ -3135,12 +2998,12 @@ impl XWikiApp {
                         let token_input = app.reset_token_input.clone();
                         let password_input = app.reset_password_input.clone();
                         if let Some(window) = cx.active_window() {
-                            let _ = cx.update_window(window, |_v, window, cx| {
+                            let _ = cx.update_window(window, |_v, _window, cx| {
                                 token_input.update(cx, |s, cx| {
-                                    s.set_value(String::new(), window, cx);
+                                    s.set_text("", cx);
                                 });
                                 password_input.update(cx, |s, cx| {
-                                    s.set_value(String::new(), window, cx);
+                                    s.set_text("", cx);
                                 });
                             });
                         }
@@ -3257,114 +3120,113 @@ impl XWikiApp {
         let current_path = path.clone();
         let project_id_outer = project.clone();
         let client_outer = client.clone();
-        window.open_dialog(cx, move |dialog, window, cx| {
-            // Fresh locals per invocation: safe to move into inner closures.
-            let content_path = current_path.clone();
-            let submit_path = current_path.clone();
-            let new_path_state = cx.new(|cx| {
-                let mut s = InputState::new(window, cx).placeholder("docs/new-name.md");
-                s.set_value(default_name.clone(), window, cx);
-                s
-            });
-
-            let content_state = new_path_state.clone();
-            let content_builder = move |content: DialogContent, _: &mut Window, cx: &mut App| {
-                let theme = cx.theme();
-                content.child(
-                    div()
-                        .v_flex()
-                        .gap_2()
-                        .w_full()
-                        .child(
-                            div()
-                                .font_family(tokens::FONT_MONO)
-                                .text_xs()
-                                .text_color(theme.muted_foreground)
-                                .child(format!("当前路径 · {content_path}")),
-                        )
-                        .child(
-                            div()
-                                .font_family(tokens::FONT_MONO)
-                                .text_xs()
-                                .text_color(theme.muted_foreground)
-                                .child("新路径"),
-                        )
-                        .child(Input::new(&content_state).w_full()),
-                )
-            };
-
-            let cancel = Button::new("cancel-rename")
-                .rounded(px(tokens::RADIUS))
-                .icon(IconName::Close)
-                .label("取消")
-                .on_click(move |_, window, cx| window.close_dialog(cx));
-
-            let submit_state = new_path_state.clone();
-            let submit_client = client_outer.clone();
-            let app_handle = handle.clone();
-            let project_id = project_id_outer.clone();
-            let rename = Button::new("confirm-rename")
-                .primary()
-                .rounded(px(tokens::RADIUS))
-                .icon(IconName::Check)
-                .label("重命名")
-                .on_click(move |_, window, cx| {
-                    let new_path = submit_state.read(cx).value().to_string();
-                    if new_path.trim().is_empty() {
-                        return;
-                    }
-                    let c = submit_client.clone();
-                    let h = app_handle.clone();
-                    let pid = project_id.clone();
-                    let to = new_path.trim().to_string();
-                    let from = submit_path.clone();
-                    cx.spawn(async move |cx| {
-                        match c.move_doc(&pid, &from, &to, "重命名文档").await {
-                            Ok(_) => {
-                                h.update(cx, |app, cx| {
-                                    app.notify(format!("已重命名为 {to}"), cx);
-                                    app.edit_path = Some(to.clone());
-                                    app.doc_path = Some(to.clone());
-                                    // The heartbeat loop captured the old
-                                    // path; restart it so the lock on the new
-                                    // path stays fresh while editing.
-                                    app.start_heartbeat(cx);
-                                    cx.notify();
-                                });
-                            }
-                            Err(e) => {
-                                h.update(cx, |app, cx| {
-                                    app.status_msg = Some(format!("重命名失败: {e}"));
-                                    cx.notify();
-                                });
-                            }
-                        }
-                    })
-                    .detach();
-                    window.close_dialog(cx);
+        let host = self.overlay_host.clone();
+        host.update(cx, |host, cx| {
+            host.open_modal(window, cx, move |close, _window, cx| {
+                // Fresh locals per invocation: safe to move into inner closures.
+                let content_path = current_path.clone();
+                let submit_path = current_path.clone();
+                let new_path_state = cx.new(|cx| {
+                    TextInput::new(cx)
+                        .placeholder("docs/new-name.md")
+                        .value(&default_name)
                 });
+                let theme = tokens::Cobalt::from_theme(theme(cx));
 
-            dialog
-                .title(
-                    div()
-                        .text_lg()
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .child("重命名文档"),
-                )
-                .content(content_builder)
-                .footer(
-                    h_flex()
-                        .gap_2()
-                        .justify_end()
-                        .w_full()
-                        .child(cancel)
-                        .child(rename),
-                )
+                let close_cancel = close.clone();
+                let cancel = Button::new("cancel-rename", "取消")
+                    .variant(Variant::Subtle)
+                    .size(Size::Xs)
+                    .left_section(Icon::new(IconName::Close).size(Size::Sm))
+                    .on_click(move |_, window, cx| close_cancel(window, cx));
+
+                let submit_state = new_path_state.clone();
+                let submit_client = client_outer.clone();
+                let app_handle = handle.clone();
+                let project_id = project_id_outer.clone();
+                let close_rename = close.clone();
+                let rename = Button::new("confirm-rename", "重命名")
+                    .variant(Variant::Filled)
+                    .size(Size::Xs)
+                    .left_section(Icon::new(IconName::Check).size(Size::Sm))
+                    .on_click(move |_, window, cx| {
+                        let new_path = submit_state.read(cx).text().to_string();
+                        if new_path.trim().is_empty() {
+                            return;
+                        }
+                        let c = submit_client.clone();
+                        let h = app_handle.clone();
+                        let pid = project_id.clone();
+                        let to = new_path.trim().to_string();
+                        let from = submit_path.clone();
+                        cx.spawn(async move |cx| {
+                            match c.move_doc(&pid, &from, &to, "重命名文档").await {
+                                Ok(_) => {
+                                    let _ = h.update(cx, |app, cx| {
+                                        app.notify(format!("已重命名为 {to}"), cx);
+                                        app.edit_path = Some(to.clone());
+                                        app.doc_path = Some(to.clone());
+                                        // The heartbeat loop captured the old
+                                        // path; restart it so the lock on the new
+                                        // path stays fresh while editing.
+                                        app.start_heartbeat(cx);
+                                        cx.notify();
+                                    });
+                                }
+                                Err(e) => {
+                                    let _ = h.update(cx, |app, cx| {
+                                        app.status_msg = Some(format!("重命名失败: {e}"));
+                                        cx.notify();
+                                    });
+                                }
+                            }
+                        })
+                        .detach();
+                        close_rename(window, cx);
+                    });
+
+                Modal::new()
+                    .title("重命名文档")
+                    .on_close(move |_ev, window, cx| close(window, cx))
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap_2()
+                            .w_full()
+                            .child(
+                                div()
+                                    .font_family(tokens::FONT_MONO)
+                                    .text_xs()
+                                    .text_color(theme.ink_3)
+                                    .child(format!("当前路径 · {content_path}")),
+                            )
+                            .child(
+                                div()
+                                    .font_family(tokens::FONT_MONO)
+                                    .text_xs()
+                                    .text_color(theme.ink_3)
+                                    .child("新路径"),
+                            )
+                            .child(div().w_full().child(new_path_state.clone())),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .justify_end()
+                            .w_full()
+                            .child(cancel)
+                            .child(rename),
+                    )
+                    .into_any_element()
+            });
         });
     }
 
     fn render_status_bar(&self, cx: &Context<Self>) -> Div {
-        let theme = cx.theme().clone();
+        let theme = tokens::Cobalt::from_theme(theme(cx));
         let connected = self.client.is_some();
         let connection_color = if connected {
             theme.success
@@ -3379,8 +3241,8 @@ impl XWikiApp {
             .items_center()
             .gap_3()
             .border_t_1()
-            .border_color(theme.border)
-            .bg(theme.sidebar)
+            .border_color(theme.rule)
+            .bg(theme.paper_2)
             .child(
                 div()
                     .w(px(8.0))
@@ -3403,7 +3265,7 @@ impl XWikiApp {
                     .whitespace_nowrap()
                     .font_family(tokens::FONT_MONO)
                     .text_xs()
-                    .text_color(theme.muted_foreground)
+                    .text_color(theme.ink_3)
                     .child(tokens::truncate(&self.server_url, 72)),
             )
             .child(div().flex_1())
@@ -3441,7 +3303,7 @@ impl XWikiApp {
                 div()
                     .font_family(tokens::FONT_MONO)
                     .text_xs()
-                    .text_color(theme.muted_foreground)
+                    .text_color(theme.ink_3)
                     .child(format!("revision {}", tokens::truncate(revision, 12)))
             } else {
                 div()
@@ -3450,7 +3312,7 @@ impl XWikiApp {
                 div()
                     .font_family(tokens::FONT_MONO)
                     .text_xs()
-                    .text_color(theme.muted_foreground)
+                    .text_color(theme.ink_3)
                     .child(format!("server v{version}"))
             } else {
                 div()
@@ -3551,8 +3413,8 @@ impl XWikiApp {
         if self.quick_open {
             let input = self.quick_input.clone();
             if let Some(h) = cx.active_window() {
-                let _ = cx.update_window(h, move |_v, window, cx| {
-                    input.update(cx, |s, cx| s.set_value(String::new(), window, cx));
+                let _ = cx.update_window(h, move |_v, _window, cx| {
+                    input.update(cx, |s, cx| s.set_text("", cx));
                 });
             }
         }
@@ -3569,8 +3431,8 @@ impl XWikiApp {
         self.search_error = None;
         let input = self.search_input.clone();
         if let Some(h) = cx.active_window() {
-            let _ = cx.update_window(h, move |_v, window, cx| {
-                input.update(cx, |s, cx| s.set_value(String::new(), window, cx));
+            let _ = cx.update_window(h, move |_v, _window, cx| {
+                input.update(cx, |s, cx| s.set_text("", cx));
             });
         }
         cx.notify();
@@ -3584,7 +3446,7 @@ impl XWikiApp {
         else {
             return;
         };
-        let q = self.search_input.read(cx).value().trim().to_string();
+        let q = self.search_input.read(cx).text().trim().to_string();
         if q.is_empty() {
             return;
         }
@@ -3597,7 +3459,7 @@ impl XWikiApp {
                     let _ = this.update(cx, |app, cx| {
                         // Discard stale responses: the query may have changed
                         // (or been cleared) while the request was in flight.
-                        if app.search_input.read(cx).value().trim() != q {
+                        if app.search_input.read(cx).text().trim() != q {
                             return;
                         }
                         app.search_loading = false;
@@ -3607,7 +3469,7 @@ impl XWikiApp {
                 }
                 Err(e) => {
                     let _ = this.update(cx, |app, cx| {
-                        if app.search_input.read(cx).value().trim() != q {
+                        if app.search_input.read(cx).text().trim() != q {
                             return;
                         }
                         app.search_loading = false;
@@ -3622,14 +3484,14 @@ impl XWikiApp {
 
     /// Project search overlay: query input + clickable result list.
     fn render_project_search(&self, cx: &Context<Self>) -> impl IntoElement {
-        let theme = cx.theme().clone();
-        let q = self.search_input.read(cx).value().trim().to_string();
+        let theme = tokens::Cobalt::from_theme(theme(cx));
+        let q = self.search_input.read(cx).text().trim().to_string();
         let content: AnyElement = if self.search_loading {
             div()
                 .px_4()
                 .py_3()
                 .text_sm()
-                .text_color(theme.muted_foreground)
+                .text_color(theme.ink_3)
                 .child("搜索中…")
                 .into_any_element()
         } else if let Some(err) = &self.search_error {
@@ -3645,7 +3507,7 @@ impl XWikiApp {
                 .px_4()
                 .py_3()
                 .text_sm()
-                .text_color(theme.muted_foreground)
+                .text_color(theme.ink_3)
                 .child("输入关键词，搜索当前项目全部文档内容。")
                 .into_any_element()
         } else if self.search_results.is_empty() {
@@ -3653,23 +3515,23 @@ impl XWikiApp {
                 .px_4()
                 .py_3()
                 .text_sm()
-                .text_color(theme.muted_foreground)
+                .text_color(theme.ink_3)
                 .child("没有匹配的文档。")
                 .into_any_element()
         } else {
-            let mut list = div().v_flex().w_full();
-            for r in &self.search_results {
+            let mut list = div().flex().flex_col().w_full();
+            for (index, r) in self.search_results.iter().enumerate() {
                 let path = r.path.clone();
                 let snippet = r.snippet.clone();
                 list = list.child(
                     div()
-                        .id(format!("search-result-{}", path))
+                        .id(ElementId::named_usize("search-result", index))
                         .flex()
                         .flex_col()
                         .gap_1()
                         .px_4()
                         .py_2()
-                        .hover(|s| s.bg(theme.list_hover))
+                        .hover(|s| s.bg(theme.surface_accent))
                         .cursor_pointer()
                         .child(
                             div()
@@ -3678,7 +3540,7 @@ impl XWikiApp {
                                 .text_color(theme.accent)
                                 .child(path.clone()),
                         )
-                        .child(div().text_sm().text_color(theme.foreground).child(snippet))
+                        .child(div().text_sm().text_color(theme.ink).child(snippet))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.search_open = false;
                             this.open_doc(&path, cx);
@@ -3697,13 +3559,16 @@ impl XWikiApp {
             .max_h(px(420.0))
             .rounded(px(tokens::RADIUS))
             .border_1()
-            .border_color(theme.border)
-            .bg(theme.sidebar)
-            .shadow(vec![
-                BoxShadow::new(px(0.0), px(4.0), theme.foreground.opacity(0.15))
-                    .blur_radius(px(16.0)),
-            ])
-            .v_flex()
+            .border_color(theme.rule)
+            .bg(theme.paper_2)
+            .shadow(vec![BoxShadow {
+                color: theme.ink.opacity(0.15),
+                offset: point(px(0.0), px(4.0)),
+                blur_radius: px(16.0),
+                spread_radius: px(0.0),
+            }])
+            .flex()
+            .flex_col()
             .child(
                 div()
                     .flex()
@@ -3712,33 +3577,34 @@ impl XWikiApp {
                     .px_3()
                     .py_2()
                     .border_b_1()
-                    .border_color(theme.border)
-                    .child(Icon::new(IconName::Search).text_color(theme.muted_foreground))
+                    .border_color(theme.rule)
                     .child(
                         div()
-                            .flex_1()
-                            .child(Input::new(&self.search_input).w_full()),
-                    ),
+                            .text_color(theme.ink_3)
+                            .child(Icon::new(IconName::Search)),
+                    )
+                    .child(div().flex_1().child(self.search_input.clone())),
             )
             .child(
                 div()
+                    .id("project-search-results")
                     .flex_1()
                     .min_h(px(0.0))
-                    .overflow_y_scrollbar()
+                    .overflow_y_scroll()
                     .child(content),
             )
     }
 
     /// Quick-open overlay: filterable list of projects + current tree docs.
     fn render_quick_open(&self, cx: &Context<Self>) -> impl IntoElement {
-        let theme = cx.theme().clone();
-        let q = self.quick_input.read(cx).value().to_lowercase();
+        let theme = tokens::Cobalt::from_theme(theme(cx));
+        let q = self.quick_input.read(cx).text().to_lowercase();
         let items: Vec<QuickItem> = self
             .quick_items()
             .into_iter()
             .filter(|i| q.is_empty() || i.label.to_lowercase().contains(&q) || i.hint.contains(&q))
             .collect();
-        let mut list = div().v_flex().gap_1().w_full().px_4().pb_4();
+        let mut list = div().flex().flex_col().gap_1().w_full().px_4().pb_4();
         if items.is_empty() {
             list = list.child(
                 div()
@@ -3746,31 +3612,31 @@ impl XWikiApp {
                     .text_center()
                     .font_family(tokens::FONT_MONO)
                     .text_size(px(tokens::FONT_SIZE_LABEL))
-                    .text_color(theme.muted_foreground)
+                    .text_color(theme.ink_3)
                     .child("没有匹配的项目或文档"),
             );
         }
-        for it in &items {
+        for (index, it) in items.iter().enumerate() {
             let label = it.label.clone();
             let hint = it.hint.clone();
             let target = it.target.clone();
             list = list.child(
                 div()
-                    .id(format!("quick-{label}"))
+                    .id(ElementId::named_usize("quick-item", index))
                     .flex()
                     .items_center()
                     .justify_between()
                     .px_3()
                     .py_2()
                     .rounded(px(tokens::RADIUS_SMALL))
-                    .hover(|s| s.bg(theme.list_hover))
+                    .hover(|s| s.bg(theme.surface_accent))
                     .cursor_pointer()
-                    .child(div().text_sm().text_color(theme.foreground).child(label))
+                    .child(div().text_sm().text_color(theme.ink).child(label))
                     .child(
                         div()
                             .font_family(tokens::FONT_MONO)
                             .text_size(px(tokens::FONT_SIZE_LABEL))
-                            .text_color(theme.muted_foreground)
+                            .text_color(theme.ink_3)
                             .child(hint),
                     )
                     .on_click(
@@ -3784,7 +3650,7 @@ impl XWikiApp {
             .size_full()
             .top_0()
             .left_0()
-            .bg(theme.foreground.opacity(0.28))
+            .bg(theme.ink.opacity(0.28))
             .flex()
             .items_start()
             .justify_center()
@@ -3794,13 +3660,16 @@ impl XWikiApp {
                     .w(px(560.0))
                     .rounded(px(tokens::RADIUS))
                     .border_1()
-                    .border_color(theme.border)
+                    .border_color(theme.rule)
                     .bg(theme.popover)
-                    .shadow(vec![
-                        BoxShadow::new(px(0.0), px(8.0), theme.foreground.opacity(0.14))
-                            .blur_radius(px(24.0)),
-                    ])
-                    .v_flex()
+                    .shadow(vec![BoxShadow {
+                        color: theme.ink.opacity(0.14),
+                        offset: point(px(0.0), px(8.0)),
+                        blur_radius: px(24.0),
+                        spread_radius: px(0.0),
+                    }])
+                    .flex()
+                    .flex_col()
                     .child(
                         div()
                             .px_4()
@@ -3809,21 +3678,28 @@ impl XWikiApp {
                             .items_center()
                             .justify_between()
                             .border_b_1()
-                            .border_color(theme.border)
-                            .child(mono_label("快速打开 · ⌘P").text_color(theme.muted_foreground)),
+                            .border_color(theme.rule)
+                            .child(mono_label("快速打开 · ⌘P").text_color(theme.ink_3)),
                     )
                     .child(
                         div()
                             .px_4()
                             .py_3()
                             .border_b_1()
-                            .border_color(theme.border)
-                            .v_flex()
+                            .border_color(theme.rule)
+                            .flex()
+                            .flex_col()
                             .gap_1()
-                            .child(mono_label("搜索").text_color(theme.muted_foreground))
-                            .child(Input::new(&self.quick_input).w_full()),
+                            .child(mono_label("搜索").text_color(theme.ink_3))
+                            .child(div().w_full().child(self.quick_input.clone())),
                     )
-                    .child(div().max_h(px(360.0)).overflow_y_scrollbar().child(list)),
+                    .child(
+                        div()
+                            .id("quick-open-list")
+                            .max_h(px(360.0))
+                            .overflow_y_scroll()
+                            .child(list),
+                    ),
             )
             .on_mouse_down(
                 MouseButton::Left,
@@ -4038,147 +3914,174 @@ impl XWikiApp {
             .map(|project| (project.id.clone(), project.name.clone()))
             .collect();
         let handle = cx.entity();
-        window.open_dialog(cx, move |dialog, window, cx| {
-            let name_state = cx.new(|cx| InputState::new(window, cx).placeholder("ci-docs"));
-            let draft = Rc::new(RefCell::new(TokenDraft::default()));
-            let content_name = name_state.clone();
-            let content_draft = draft.clone();
-            let content_projects = projects.clone();
-            let content_builder = move |content: DialogContent, _: &mut Window, cx: &mut App| {
-                let theme = cx.theme();
+        let host_handle = self.overlay_host.clone();
+        let host = self.overlay_host.clone();
+        host.update(cx, |host, cx| {
+            host.open_modal(window, cx, move |close, _window, cx| {
+                let name_state = cx.new(|cx| TextInput::new(cx).placeholder("ci-docs"));
+                let draft = Rc::new(RefCell::new(TokenDraft::default()));
+                let _content_name = name_state.clone();
+                let content_draft = draft.clone();
+                let content_projects = projects.clone();
+                let theme = tokens::Cobalt::from_theme(theme(cx));
                 let scope = content_draft.borrow().scope();
                 let read_draft = content_draft.clone();
                 let write_draft = content_draft.clone();
-                content.child(
-                    div()
-                        .v_flex()
-                        .gap_2()
-                        .w_full()
-                        .child(mono_label("名称").text_color(theme.muted_foreground))
-                        .child(Input::new(&content_name).w_full())
-                        .child(mono_label("权限范围").text_color(theme.muted_foreground))
-                        .child(
-                            h_flex()
-                                .gap_2()
-                                .child(
-                                    Button::new("token-scope-read")
-                                        .label("只读")
-                                        .selected(scope == "read")
-                                        .on_click(move |_, window, _| {
-                                            read_draft.borrow_mut().set_scope("read");
-                                            window.refresh();
-                                        }),
-                                )
-                                .child(
-                                    Button::new("token-scope-write")
-                                        .label("读写")
-                                        .selected(scope == "write")
-                                        .on_click(move |_, window, _| {
-                                            write_draft.borrow_mut().set_scope("write");
-                                            window.refresh();
-                                        }),
-                                ),
-                        )
-                        .child(
-                            mono_label("项目范围（至少选择一个）")
-                                .text_color(theme.muted_foreground),
-                        )
-                        .child(
-                            div()
-                                .max_h(px(220.0))
-                                .overflow_y_scrollbar()
-                                .v_flex()
-                                .gap_2()
-                                .children(content_projects.iter().map(|(id, name)| {
-                                    let project_id = id.clone();
-                                    let project_draft = content_draft.clone();
-                                    Checkbox::new(format!("token-project-{id}"))
-                                        .checked(content_draft.borrow().projects.contains(id))
-                                        .label(format!("{name} · {id}"))
-                                        .on_click(move |checked, window, _| {
-                                            project_draft
-                                                .borrow_mut()
-                                                .set_project(&project_id, *checked);
-                                            window.refresh();
-                                        })
-                                })),
-                        ),
-                )
-            };
-            let cancel = Button::new("cancel-create-token")
-                .rounded(px(tokens::RADIUS))
-                .icon(IconName::Close)
-                .label("取消")
-                .on_click(|_, window, cx| window.close_dialog(cx));
-            let create_name = name_state.clone();
-            let create_draft = draft.clone();
-            let create_client = client.clone();
-            let create_handle = handle.clone();
-            let create = Button::new("confirm-create-token")
-                .primary()
-                .rounded(px(tokens::RADIUS))
-                .icon(IconName::Plus)
-                .label("创建 Token")
-                .on_click(move |_, window, cx| {
-                    let name = create_name.read(cx).value().trim().to_string();
-                    if name.is_empty() {
-                        window.push_notification(Notification::error("Token 名称不能为空"), cx);
-                        return;
-                    }
-                    let scope = create_draft.borrow().scope().to_string();
-                    let projects = create_draft.borrow().projects();
-                    if projects.is_empty() {
-                        window.push_notification(Notification::error("至少选择一个项目"), cx);
-                        return;
-                    }
-                    let c = create_client.clone();
-                    let h = create_handle.clone();
-                    h.update(cx, |app, cx| {
-                        app.settings_access_loading = true;
-                        app.settings_error = None;
-                        cx.notify();
+                let scope_read = Button::new("token-scope-read", "只读")
+                    .variant(if scope == "read" {
+                        Variant::Filled
+                    } else {
+                        Variant::Subtle
+                    })
+                    .size(Size::Xs)
+                    .on_click(move |_, window, _| {
+                        read_draft.borrow_mut().set_scope("read");
+                        window.refresh();
                     });
-                    cx.spawn(
-                        async move |cx| match c.create_token(&name, &scope, projects).await {
-                            Ok((_token, secret)) => {
-                                h.update(cx, |app, cx| {
-                                    app.settings_access_loading = false;
-                                    app.settings_token_secret = Some(secret);
-                                    app.notify("Token 已创建，请立即复制密钥".into(), cx);
-                                    app.load_settings_access(cx);
-                                });
+                let scope_write = Button::new("token-scope-write", "读写")
+                    .variant(if scope == "write" {
+                        Variant::Filled
+                    } else {
+                        Variant::Subtle
+                    })
+                    .size(Size::Xs)
+                    .on_click(move |_, window, _| {
+                        write_draft.borrow_mut().set_scope("write");
+                        window.refresh();
+                    });
+                let project_checks: Vec<AnyElement> = content_projects
+                    .iter()
+                    .enumerate()
+                    .map(|(index, (id, name))| {
+                        let project_id = id.clone();
+                        let project_draft = content_draft.clone();
+                        let binding = Binding::new(
+                            {
+                                let d = project_draft.clone();
+                                let project_id = project_id.clone();
+                                move |_cx: &App| d.borrow().projects.contains(&project_id)
+                            },
+                            {
+                                let d = project_draft.clone();
+                                let project_id = project_id.clone();
+                                move |_cx: &mut App, v: bool| {
+                                    d.borrow_mut().set_project(&project_id, v)
+                                }
+                            },
+                        );
+                        Checkbox::new(ElementId::named_usize("token-project", index))
+                            .checked(binding.get(cx))
+                            .bind(binding)
+                            .label(format!("{name} · {id}"))
+                            .into_any_element()
+                    })
+                    .collect();
+                let cancel_close = close.clone();
+                let cancel = Button::new("cancel-create-token", "取消")
+                    .variant(Variant::Subtle)
+                    .size(Size::Xs)
+                    .left_section(Icon::new(IconName::Close).size(Size::Sm))
+                    .on_click(move |_, window, cx| cancel_close(window, cx));
+                let create_name = name_state.clone();
+                let create_draft = draft.clone();
+                let create_client = client.clone();
+                let create_handle = handle.clone();
+                let create_toast = host_handle.clone();
+                let create_close = close.clone();
+                let create = Button::new("confirm-create-token", "创建 Token")
+                    .variant(Variant::Filled)
+                    .size(Size::Xs)
+                    .left_section(Icon::new(IconName::Plus).size(Size::Sm))
+                    .on_click(move |_, window, cx| {
+                        let name = create_name.read(cx).text().trim().to_string();
+                        if name.is_empty() {
+                            let h = create_toast.clone();
+                            h.update(cx, |host, cx| host.toast("Token 名称不能为空", cx));
+                            return;
+                        }
+                        let scope = create_draft.borrow().scope().to_string();
+                        let projects = create_draft.borrow().projects();
+                        if projects.is_empty() {
+                            let h = create_toast.clone();
+                            h.update(cx, |host, cx| host.toast("至少选择一个项目", cx));
+                            return;
+                        }
+                        let c = create_client.clone();
+                        let h = create_handle.clone();
+                        h.update(cx, |app, cx| {
+                            app.settings_access_loading = true;
+                            app.settings_error = None;
+                            cx.notify();
+                        });
+                        cx.spawn(async move |cx| {
+                            match c.create_token(&name, &scope, projects).await {
+                                Ok((_token, secret)) => {
+                                    let _ = h.update(cx, |app, cx| {
+                                        app.settings_access_loading = false;
+                                        app.settings_token_secret = Some(secret);
+                                        app.notify("Token 已创建，请立即复制密钥".into(), cx);
+                                        app.load_settings_access(cx);
+                                    });
+                                }
+                                Err(e) => {
+                                    let _ = h.update(cx, |app, cx| {
+                                        app.settings_access_loading = false;
+                                        app.settings_error = Some(format!(
+                                            "创建 Token 失败：{}",
+                                            Self::friendly_api_error(&e)
+                                        ));
+                                        cx.notify();
+                                    });
+                                }
                             }
-                            Err(e) => {
-                                h.update(cx, |app, cx| {
-                                    app.settings_access_loading = false;
-                                    app.settings_error = Some(format!(
-                                        "创建 Token 失败：{}",
-                                        Self::friendly_api_error(&e)
-                                    ));
-                                    cx.notify();
-                                });
-                            }
-                        },
+                        })
+                        .detach();
+                        create_close(window, cx);
+                    });
+                Modal::new()
+                    .title("创建访问 Token")
+                    .on_close(move |_ev, window, cx| close(window, cx))
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap_2()
+                            .w_full()
+                            .child(mono_label("名称").text_color(theme.ink_3))
+                            .child(div().w_full().child(name_state.clone()))
+                            .child(mono_label("权限范围").text_color(theme.ink_3))
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap_2()
+                                    .child(scope_read)
+                                    .child(scope_write),
+                            )
+                            .child(mono_label("项目范围（至少选择一个）").text_color(theme.ink_3))
+                            .child(
+                                div()
+                                    .id("token-project-list")
+                                    .max_h(px(220.0))
+                                    .overflow_y_scroll()
+                                    .flex()
+                                    .flex_col()
+                                    .gap_2()
+                                    .children(project_checks),
+                            ),
                     )
-                    .detach();
-                    window.close_dialog(cx);
-                });
-            dialog
-                .title(
-                    div()
-                        .text_lg()
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .child("创建访问 Token"),
-                )
-                .content(content_builder)
-                .footer(
-                    h_flex()
-                        .gap_2()
-                        .justify_end()
-                        .w_full()
-                        .child(cancel)
-                        .child(create),
-                )
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .justify_end()
+                            .w_full()
+                            .child(cancel)
+                            .child(create),
+                    )
+                    .into_any_element()
+            });
         });
     }
 
@@ -4190,99 +4093,100 @@ impl XWikiApp {
             return;
         };
         let handle = cx.entity();
-        window.open_dialog(cx, move |dialog, window, cx| {
-            let username_state = cx.new(|cx| InputState::new(window, cx).placeholder("operator"));
-            let password_state = cx.new(|cx| {
-                InputState::new(window, cx)
-                    .placeholder("至少 8 个字符")
-                    .masked(true)
-            });
-            let content_username = username_state.clone();
-            let content_password = password_state.clone();
-            let content_builder = move |content: DialogContent, _: &mut Window, cx: &mut App| {
-                let theme = cx.theme();
-                content.child(
-                    div()
-                        .v_flex()
-                        .gap_2()
-                        .w_full()
-                        .child(mono_label("用户名").text_color(theme.muted_foreground))
-                        .child(Input::new(&content_username).w_full())
-                        .child(mono_label("初始密码").text_color(theme.muted_foreground))
-                        .child(Input::new(&content_password).w_full()),
-                )
-            };
-            let cancel = Button::new("cancel-create-user")
-                .rounded(px(tokens::RADIUS))
-                .icon(IconName::Close)
-                .label("取消")
-                .on_click(|_, window, cx| window.close_dialog(cx));
-            let create_username = username_state.clone();
-            let create_password = password_state.clone();
-            let create_client = client.clone();
-            let create_handle = handle.clone();
-            let create = Button::new("confirm-create-user")
-                .primary()
-                .rounded(px(tokens::RADIUS))
-                .icon(IconName::Plus)
-                .label("创建用户")
-                .on_click(move |_, window, cx| {
-                    let username = create_username.read(cx).value().trim().to_string();
-                    let password = create_password.read(cx).value().to_string();
-                    if username.is_empty() || password.len() < 8 {
-                        window.push_notification(
-                            Notification::error("用户名不能为空，密码至少需要 8 个字符"),
-                            cx,
-                        );
-                        return;
-                    }
-                    let c = create_client.clone();
-                    let h = create_handle.clone();
-                    h.update(cx, |app, cx| {
-                        app.settings_access_loading = true;
-                        app.settings_error = None;
-                        cx.notify();
-                    });
-                    cx.spawn(
-                        async move |cx| match c.create_user(&username, &password).await {
-                            Ok(_) => {
-                                h.update(cx, |app, cx| {
-                                    app.settings_access_loading = false;
-                                    app.notify("用户已创建".into(), cx);
-                                    app.load_settings_access(cx);
-                                });
-                            }
-                            Err(e) => {
-                                h.update(cx, |app, cx| {
-                                    app.settings_access_loading = false;
-                                    app.settings_error = Some(format!(
-                                        "创建用户失败：{}",
-                                        Self::friendly_api_error(&e)
-                                    ));
-                                    cx.notify();
-                                });
-                            }
-                        },
-                    )
-                    .detach();
-                    window.close_dialog(cx);
+        let host_handle = self.overlay_host.clone();
+        let host = self.overlay_host.clone();
+        host.update(cx, |host, cx| {
+            host.open_modal(window, cx, move |close, _window, cx| {
+                let username_state = cx.new(|cx| TextInput::new(cx).placeholder("operator"));
+                let password_state = cx.new(|cx| {
+                    TextInput::new(cx)
+                        .placeholder("至少 8 个字符")
+                        .password(true)
                 });
-            dialog
-                .title(
-                    div()
-                        .text_lg()
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .child("创建用户"),
-                )
-                .content(content_builder)
-                .footer(
-                    h_flex()
-                        .gap_2()
-                        .justify_end()
-                        .w_full()
-                        .child(cancel)
-                        .child(create),
-                )
+                let theme = tokens::Cobalt::from_theme(theme(cx));
+                let cancel_close = close.clone();
+                let cancel = Button::new("cancel-create-user", "取消")
+                    .variant(Variant::Subtle)
+                    .size(Size::Xs)
+                    .left_section(Icon::new(IconName::Close).size(Size::Sm))
+                    .on_click(move |_, window, cx| cancel_close(window, cx));
+                let create_username = username_state.clone();
+                let create_password = password_state.clone();
+                let create_client = client.clone();
+                let create_handle = handle.clone();
+                let create_toast = host_handle.clone();
+                let create_close = close.clone();
+                let create = Button::new("confirm-create-user", "创建用户")
+                    .variant(Variant::Filled)
+                    .size(Size::Xs)
+                    .left_section(Icon::new(IconName::Plus).size(Size::Sm))
+                    .on_click(move |_, window, cx| {
+                        let username = create_username.read(cx).text().trim().to_string();
+                        let password = create_password.read(cx).text().to_string();
+                        if username.is_empty() || password.len() < 8 {
+                            let h = create_toast.clone();
+                            h.update(cx, |host, cx| {
+                                host.toast("用户名不能为空，密码至少需要 8 个字符", cx)
+                            });
+                            return;
+                        }
+                        let c = create_client.clone();
+                        let h = create_handle.clone();
+                        h.update(cx, |app, cx| {
+                            app.settings_access_loading = true;
+                            app.settings_error = None;
+                            cx.notify();
+                        });
+                        cx.spawn(
+                            async move |cx| match c.create_user(&username, &password).await {
+                                Ok(_) => {
+                                    let _ = h.update(cx, |app, cx| {
+                                        app.settings_access_loading = false;
+                                        app.notify("用户已创建".into(), cx);
+                                        app.load_settings_access(cx);
+                                    });
+                                }
+                                Err(e) => {
+                                    let _ = h.update(cx, |app, cx| {
+                                        app.settings_access_loading = false;
+                                        app.settings_error = Some(format!(
+                                            "创建用户失败：{}",
+                                            Self::friendly_api_error(&e)
+                                        ));
+                                        cx.notify();
+                                    });
+                                }
+                            },
+                        )
+                        .detach();
+                        create_close(window, cx);
+                    });
+                Modal::new()
+                    .title("创建用户")
+                    .on_close(move |_ev, window, cx| close(window, cx))
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap_2()
+                            .w_full()
+                            .child(mono_label("用户名").text_color(theme.ink_3))
+                            .child(div().w_full().child(username_state.clone()))
+                            .child(mono_label("初始密码").text_color(theme.ink_3))
+                            .child(div().w_full().child(password_state.clone())),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .justify_end()
+                            .w_full()
+                            .child(cancel)
+                            .child(create),
+                    )
+                    .into_any_element()
+            });
         });
     }
 
@@ -4298,53 +4202,29 @@ impl XWikiApp {
         }
         let handle = cx.entity();
         let confirm_handle = handle.clone();
-        window.open_dialog(cx, move |dialog, _window, cx| {
-            let theme = cx.theme().clone();
-            let confirm_target = confirm_handle.clone();
-            let token_id = id.clone();
-            let content_name = name.clone();
-            let cancel = Button::new("cancel-revoke-token")
-                .rounded(px(tokens::RADIUS))
-                .icon(IconName::Close)
-                .label("取消")
-                .on_click(|_, window, cx| window.close_dialog(cx));
-            let confirm = Button::new("confirm-revoke-token")
-                .danger()
-                .rounded(px(tokens::RADIUS))
-                .icon(IconName::Delete)
-                .label("撤销 Token")
-                .on_click(move |_, window, cx| {
-                    let handle = confirm_target.clone();
-                    let token_id = token_id.clone();
-                    handle.update(cx, |app, cx| app.revoke_token(&token_id, cx));
-                    window.close_dialog(cx);
-                });
-            let content_theme = theme.clone();
-            dialog
-                .title(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap_2()
-                        .child(Icon::new(IconName::TriangleAlert).text_color(theme.danger))
-                        .child("撤销访问 Token？"),
-                )
-                .content(move |content, _window, _cx| {
-                    content.child(
-                        div()
-                            .text_sm()
-                            .text_color(content_theme.muted_foreground)
-                            .child(format!("Token「{content_name}」撤销后将无法继续使用。")),
-                    )
-                })
-                .footer(
-                    h_flex()
-                        .gap_2()
-                        .justify_end()
-                        .w_full()
-                        .child(cancel)
-                        .child(confirm),
-                )
+        let host = self.overlay_host.clone();
+        host.update(cx, |host, cx| {
+            host.open_modal(window, cx, move |close, _window, _cx| {
+                let confirm_target = confirm_handle.clone();
+                let token_id = id.clone();
+                let content_name = name.clone();
+                let close_confirm = close.clone();
+                let close_cancel = close.clone();
+                ConfirmModal::new()
+                    .title("撤销访问 Token？")
+                    .message(format!("Token「{content_name}」撤销后将无法继续使用。"))
+                    .confirm_label("撤销 Token")
+                    .cancel_label("取消")
+                    .danger()
+                    .on_confirm(move |_, window, cx| {
+                        let handle = confirm_target.clone();
+                        let token_id = token_id.clone();
+                        handle.update(cx, |app, cx| app.revoke_token(&token_id, cx));
+                        close_confirm(window, cx);
+                    })
+                    .on_cancel(move |_, window, cx| close_cancel(window, cx))
+                    .into_any_element()
+            });
         });
     }
 
@@ -4360,53 +4240,29 @@ impl XWikiApp {
         }
         let handle = cx.entity();
         let confirm_handle = handle.clone();
-        window.open_dialog(cx, move |dialog, _window, cx| {
-            let theme = cx.theme().clone();
-            let confirm_target = confirm_handle.clone();
-            let user_id = id.clone();
-            let content_name = name.clone();
-            let cancel = Button::new("cancel-disable-user")
-                .rounded(px(tokens::RADIUS))
-                .icon(IconName::Close)
-                .label("取消")
-                .on_click(|_, window, cx| window.close_dialog(cx));
-            let confirm = Button::new("confirm-disable-user")
-                .danger()
-                .rounded(px(tokens::RADIUS))
-                .icon(IconName::CircleX)
-                .label("停用用户")
-                .on_click(move |_, window, cx| {
-                    let handle = confirm_target.clone();
-                    let user_id = user_id.clone();
-                    handle.update(cx, |app, cx| app.set_user_enabled(&user_id, false, cx));
-                    window.close_dialog(cx);
-                });
-            let content_theme = theme.clone();
-            dialog
-                .title(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap_2()
-                        .child(Icon::new(IconName::TriangleAlert).text_color(theme.danger))
-                        .child("停用用户？"),
-                )
-                .content(move |content, _window, _cx| {
-                    content.child(
-                        div()
-                            .text_sm()
-                            .text_color(content_theme.muted_foreground)
-                            .child(format!("用户「{content_name}」将无法继续登录。")),
-                    )
-                })
-                .footer(
-                    h_flex()
-                        .gap_2()
-                        .justify_end()
-                        .w_full()
-                        .child(cancel)
-                        .child(confirm),
-                )
+        let host = self.overlay_host.clone();
+        host.update(cx, |host, cx| {
+            host.open_modal(window, cx, move |close, _window, _cx| {
+                let confirm_target = confirm_handle.clone();
+                let user_id = id.clone();
+                let content_name = name.clone();
+                let close_confirm = close.clone();
+                let close_cancel = close.clone();
+                ConfirmModal::new()
+                    .title("停用用户？")
+                    .message(format!("用户「{content_name}」将无法继续登录。"))
+                    .confirm_label("停用用户")
+                    .cancel_label("取消")
+                    .danger()
+                    .on_confirm(move |_, window, cx| {
+                        let handle = confirm_target.clone();
+                        let user_id = user_id.clone();
+                        handle.update(cx, |app, cx| app.set_user_enabled(&user_id, false, cx));
+                        close_confirm(window, cx);
+                    })
+                    .on_cancel(move |_, window, cx| close_cancel(window, cx))
+                    .into_any_element()
+            });
         });
     }
 
@@ -4578,7 +4434,7 @@ impl XWikiApp {
 
     fn test_connection(&mut self, cx: &mut Context<Self>) {
         let url = {
-            let v = self.settings_server_input.read(cx).value().to_string();
+            let v = self.settings_server_input.read(cx).text().to_string();
             if v.trim().is_empty() {
                 config::load_server()
             } else {
@@ -4617,7 +4473,7 @@ impl XWikiApp {
         let url = self
             .settings_server_input
             .read(cx)
-            .value()
+            .text()
             .trim()
             .to_string();
         if url.is_empty() {
@@ -4645,139 +4501,118 @@ impl XWikiApp {
 
     pub(crate) fn open_import_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let handle = cx.entity();
-        window.open_dialog(cx, move |dialog, window, cx| {
-            let theme = cx.theme().clone();
-            let name = cx.new(|cx| InputState::new(window, cx).placeholder("项目名"));
-            let description = cx.new(|cx| InputState::new(window, cx).placeholder("描述（可选）"));
-            let folder = cx.new(|cx| InputState::new(window, cx).placeholder("文件夹路径"));
-            let repo_url = cx.new(|cx| InputState::new(window, cx).placeholder("Git 仓库 URL"));
-            let bundle = cx.new(|cx| InputState::new(window, cx).placeholder("Bundle 文件路径"));
+        let host = self.overlay_host.clone();
+        host.update(cx, |host, cx| {
+            host.open_modal(window, cx, move |close, _window, cx| {
+                let theme = tokens::Cobalt::from_theme(theme(cx));
+                let name = cx.new(|cx| TextInput::new(cx).placeholder("项目名"));
+                let description = cx.new(|cx| TextInput::new(cx).placeholder("描述（可选）"));
+                let folder = cx.new(|cx| TextInput::new(cx).placeholder("文件夹路径"));
+                let repo_url = cx.new(|cx| TextInput::new(cx).placeholder("Git 仓库 URL"));
+                let bundle = cx.new(|cx| TextInput::new(cx).placeholder("Bundle 文件路径"));
 
-            let folder_name = name.clone();
-            let folder_description = description.clone();
-            let folder_path = folder.clone();
-            let folder_picker_state = folder.clone();
-            let folder_picker_handle = handle.clone();
-            let folder_handle = handle.clone();
-            let folder_button = Button::new("import-folder")
-                .primary()
-                .rounded(px(tokens::RADIUS))
-                .label("预览文件夹")
-                .on_click(move |_, window, cx| {
-                    let name = folder_name.read(cx).value().trim().to_string();
-                    let description = folder_description.read(cx).value().trim().to_string();
-                    let path = folder_path.read(cx).value().trim().to_string();
-                    folder_handle.update(cx, |app, cx| {
-                        app.prepare_folder_import(window, name, description, path, cx)
+                let folder_name = name.clone();
+                let folder_description = description.clone();
+                let folder_path = folder.clone();
+                let folder_picker_state = folder.clone();
+                let folder_picker_handle = handle.clone();
+                let folder_handle = handle.clone();
+                let folder_button = Button::new("import-folder", "预览文件夹")
+                    .variant(Variant::Filled)
+                    .size(Size::Xs)
+                    .on_click(move |_, window, cx| {
+                        let name = folder_name.read(cx).text().trim().to_string();
+                        let description = folder_description.read(cx).text().trim().to_string();
+                        let path = folder_path.read(cx).text().trim().to_string();
+                        folder_handle.update(cx, |app, cx| {
+                            app.prepare_folder_import(window, name, description, path, cx)
+                        });
                     });
-                });
 
-            let repo_name = name.clone();
-            let repo_input = repo_url.clone();
-            let repo_handle = handle.clone();
-            let repo_button = Button::new("import-repo")
-                .secondary()
-                .outline()
-                .rounded(px(tokens::RADIUS))
-                .label("确认导入仓库")
-                .on_click(move |_, window, cx| {
-                    let name = repo_name.read(cx).value().trim().to_string();
-                    let url = repo_input.read(cx).value().trim().to_string();
-                    repo_handle
-                        .update(cx, |app, cx| app.confirm_repo_import(window, name, url, cx));
-                });
-
-            let bundle_name = name.clone();
-            let bundle_input = bundle.clone();
-            let bundle_handle = handle.clone();
-            let bundle_button = Button::new("import-bundle")
-                .secondary()
-                .outline()
-                .rounded(px(tokens::RADIUS))
-                .label("预览 Bundle")
-                .on_click(move |_, window, cx| {
-                    let name = bundle_name.read(cx).value().trim().to_string();
-                    let path = bundle_input.read(cx).value().trim().to_string();
-                    bundle_handle.update(cx, |app, cx| {
-                        app.prepare_bundle_import(window, name, path, cx)
+                let repo_name = name.clone();
+                let repo_input = repo_url.clone();
+                let repo_handle = handle.clone();
+                let repo_button = Button::new("import-repo", "确认导入仓库")
+                    .variant(Variant::Outline)
+                    .size(Size::Xs)
+                    .on_click(move |_, window, cx| {
+                        let name = repo_name.read(cx).text().trim().to_string();
+                        let url = repo_input.read(cx).text().trim().to_string();
+                        repo_handle
+                            .update(cx, |app, cx| app.confirm_repo_import(window, name, url, cx));
                     });
-                });
 
-            dialog
-                .title(div().text_color(theme.foreground).child("导入项目"))
-                .content(move |content, _, _| {
-                    content
-                        .child(
-                            div()
-                                .text_sm()
-                                .text_color(theme.muted_foreground)
-                                .child("填写来源后先预览；确认后才会读取并上传本地内容。"),
-                        )
-                        .child(
-                            div()
-                                .mt_3()
-                                .text_xs()
-                                .text_color(theme.muted_foreground)
-                                .child("项目名"),
-                        )
-                        .child(Input::new(&name))
-                        .child(
-                            div()
-                                .mt_2()
-                                .text_xs()
-                                .text_color(theme.muted_foreground)
-                                .child("描述"),
-                        )
-                        .child(Input::new(&description))
-                        .child(
-                            div()
-                                .mt_2()
-                                .text_xs()
-                                .text_color(theme.muted_foreground)
-                                .child("文件夹路径"),
-                        )
-                        .child(
-                            h_flex()
-                                .gap_2()
-                                .w_full()
-                                .child(Input::new(&folder).flex_1())
-                                .child(import_folder_picker_button(
-                                    folder_picker_state.clone(),
-                                    folder_picker_handle.clone(),
-                                )),
-                        )
-                        .child(
-                            div()
-                                .mt_2()
-                                .text_xs()
-                                .text_color(theme.muted_foreground)
-                                .child("Git URL"),
-                        )
-                        .child(Input::new(&repo_url))
-                        .child(
-                            div()
-                                .mt_2()
-                                .text_xs()
-                                .text_color(theme.muted_foreground)
-                                .child("Bundle 路径"),
-                        )
-                        .child(Input::new(&bundle))
-                })
-                .footer(
-                    h_flex()
-                        .gap_2()
-                        .justify_end()
-                        .w_full()
-                        .child(
-                            Button::new("cancel-import")
-                                .ghost()
-                                .label("取消")
-                                .on_click(|_, window, cx| window.close_dialog(cx)),
-                        )
-                        .child(bundle_button)
-                        .child(repo_button)
-                        .child(folder_button),
-                )
+                let bundle_name = name.clone();
+                let bundle_input = bundle.clone();
+                let bundle_handle = handle.clone();
+                let bundle_button = Button::new("import-bundle", "预览 Bundle")
+                    .variant(Variant::Outline)
+                    .size(Size::Xs)
+                    .on_click(move |_, window, cx| {
+                        let name = bundle_name.read(cx).text().trim().to_string();
+                        let path = bundle_input.read(cx).text().trim().to_string();
+                        bundle_handle.update(cx, |app, cx| {
+                            app.prepare_bundle_import(window, name, path, cx)
+                        });
+                    });
+
+                let close_cancel = close.clone();
+                let cancel = Button::new("cancel-import", "取消")
+                    .variant(Variant::Subtle)
+                    .size(Size::Xs)
+                    .on_click(move |_, window, cx| close_cancel(window, cx));
+
+                Modal::new()
+                    .title("导入项目")
+                    .on_close(move |_ev, window, cx| close(window, cx))
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap_2()
+                            .w_full()
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .text_color(theme.ink_3)
+                                    .child("填写来源后先预览；确认后才会读取并上传本地内容。"),
+                            )
+                            .child(mono_label("项目名").text_color(theme.ink_3))
+                            .child(div().w_full().child(name.clone()))
+                            .child(mono_label("描述").text_color(theme.ink_3))
+                            .child(div().w_full().child(description.clone()))
+                            .child(mono_label("文件夹路径").text_color(theme.ink_3))
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap_2()
+                                    .w_full()
+                                    .child(div().flex_1().child(folder.clone()))
+                                    .child(import_folder_picker_button(
+                                        folder_picker_state.clone(),
+                                        folder_picker_handle.clone(),
+                                    )),
+                            )
+                            .child(mono_label("Git URL").text_color(theme.ink_3))
+                            .child(div().w_full().child(repo_url.clone()))
+                            .child(mono_label("Bundle 路径").text_color(theme.ink_3))
+                            .child(div().w_full().child(bundle.clone())),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .justify_end()
+                            .w_full()
+                            .child(cancel)
+                            .child(bundle_button)
+                            .child(repo_button)
+                            .child(folder_button),
+                    )
+                    .into_any_element()
+            });
         });
     }
 
@@ -4818,64 +4653,66 @@ impl XWikiApp {
                 "预览 Markdown 导入",
             ),
         };
-        window.open_dialog(cx, move |dialog, window, cx| {
-            let theme = cx.theme().clone();
-            let source = cx.new(|cx| InputState::new(window, cx).placeholder(placeholder));
-            let action_source = source.clone();
-            let action_handle = handle.clone();
-            let action_base_path = base_path.clone();
-            let action = Button::new("preview-document-import")
-                .primary()
-                .rounded(px(tokens::RADIUS))
-                .label(action_label)
-                .on_click(move |_, window, cx| {
-                    let source = action_source.read(cx).value().trim().to_string();
-                    action_handle.update(cx, |app, cx| {
-                        app.prepare_document_import(
-                            window,
-                            mode,
-                            source,
-                            action_base_path.clone(),
-                            cx,
-                        )
+        let host = self.overlay_host.clone();
+        host.update(cx, |host, cx| {
+            host.open_modal(window, cx, move |close, _window, cx| {
+                let theme = tokens::Cobalt::from_theme(theme(cx));
+                let source = cx.new(|cx| TextInput::new(cx).placeholder(placeholder));
+                let action_source = source.clone();
+                let action_handle = handle.clone();
+                let action_base_path = base_path.clone();
+                let action = Button::new("preview-document-import", action_label)
+                    .variant(Variant::Filled)
+                    .size(Size::Xs)
+                    .on_click(move |_, window, cx| {
+                        let source = action_source.read(cx).text().trim().to_string();
+                        action_handle.update(cx, |app, cx| {
+                            app.prepare_document_import(
+                                window,
+                                mode,
+                                source,
+                                action_base_path.clone(),
+                                cx,
+                            )
+                        });
                     });
-                });
-            dialog
-                .title(div().text_color(theme.foreground).child(title))
-                .content(move |content, _, _| {
-                    content
-                        .child(div().text_sm().text_color(theme.muted_foreground).child(
-                            match mode {
+                let close_cancel = close.clone();
+                let cancel = Button::new("cancel-document-import", "取消")
+                    .variant(Variant::Subtle)
+                    .size(Size::Xs)
+                    .on_click(move |_, window, cx| close_cancel(window, cx));
+                Modal::new()
+                    .title(title)
+                    .on_close(move |_ev, window, cx| close(window, cx))
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap_2()
+                            .w_full()
+                            .child(div().text_sm().text_color(theme.ink_3).child(match mode {
                                 DocumentImportMode::Folder => {
                                     "只导入文件夹中的 Markdown 文件，保留相对目录。"
                                 }
                                 DocumentImportMode::Markdown => {
                                     "选择一个 .md 文件，导入到当前文档目录。"
                                 }
-                            },
-                        ))
-                        .child(
-                            div()
-                                .mt_3()
-                                .text_xs()
-                                .text_color(theme.muted_foreground)
-                                .child("来源路径"),
-                        )
-                        .child(Input::new(&source))
-                })
-                .footer(
-                    h_flex()
-                        .gap_2()
-                        .justify_end()
-                        .w_full()
-                        .child(
-                            Button::new("cancel-document-import")
-                                .ghost()
-                                .label("取消")
-                                .on_click(|_, window, cx| window.close_dialog(cx)),
-                        )
-                        .child(action),
-                )
+                            }))
+                            .child(mono_label("来源路径").text_color(theme.ink_3))
+                            .child(div().w_full().child(source.clone())),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .justify_end()
+                            .w_full()
+                            .child(cancel)
+                            .child(action),
+                    )
+                    .into_any_element()
+            });
         });
     }
 
@@ -4960,45 +4797,51 @@ impl XWikiApp {
             .collect::<Vec<_>>()
             .join("、");
         let more = count.saturating_sub(5);
-        window.open_dialog(cx, move |dialog, _, cx| {
-            let theme = cx.theme().clone();
-            let confirm_handle = handle.clone();
-            let confirm_files = files.clone();
-            let confirm = Button::new("confirm-document-import")
-                .primary()
-                .rounded(px(tokens::RADIUS))
-                .label("确认导入")
-                .on_click(move |_, window, cx| {
-                    let files = confirm_files.clone();
-                    confirm_handle.update(cx, |app, cx| app.execute_document_import(files, cx));
-                    window.close_dialog(cx);
-                });
-            let summary_for_content = summary.clone();
-            dialog
-                .title(div().text_color(theme.foreground).child("确认导入文档"))
-                .content(move |content, _, _| {
-                    let suffix = if more > 0 {
-                        format!(" 等 {} 个文件", more)
-                    } else {
-                        String::new()
-                    };
-                    content.child(div().text_sm().text_color(theme.muted_foreground).child(
-                        format!("将导入 {} 个文件：{}{}", count, summary_for_content, suffix),
-                    ))
-                })
-                .footer(
-                    h_flex()
-                        .gap_2()
-                        .justify_end()
-                        .w_full()
-                        .child(
-                            Button::new("cancel-confirm-document-import")
-                                .ghost()
-                                .label("取消")
-                                .on_click(|_, window, cx| window.close_dialog(cx)),
-                        )
-                        .child(confirm),
-                )
+        let host = self.overlay_host.clone();
+        host.update(cx, |host, cx| {
+            host.open_modal(window, cx, move |close, _window, cx| {
+                let theme = tokens::Cobalt::from_theme(theme(cx));
+                let confirm_handle = handle.clone();
+                let confirm_files = files.clone();
+                let close_confirm = close.clone();
+                let confirm = Button::new("confirm-document-import", "确认导入")
+                    .variant(Variant::Filled)
+                    .size(Size::Xs)
+                    .on_click(move |_, window, cx| {
+                        let files = confirm_files.clone();
+                        confirm_handle.update(cx, |app, cx| app.execute_document_import(files, cx));
+                        close_confirm(window, cx);
+                    });
+                let summary_for_content = summary.clone();
+                let close_cancel = close.clone();
+                let cancel = Button::new("cancel-confirm-document-import", "取消")
+                    .variant(Variant::Subtle)
+                    .size(Size::Xs)
+                    .on_click(move |_, window, cx| close_cancel(window, cx));
+                let suffix = if more > 0 {
+                    format!(" 等 {} 个文件", more)
+                } else {
+                    String::new()
+                };
+                Modal::new()
+                    .title("确认导入文档")
+                    .on_close(move |_ev, window, cx| close(window, cx))
+                    .child(div().text_sm().text_color(theme.ink_3).child(format!(
+                        "将导入 {} 个文件：{}{}",
+                        count, summary_for_content, suffix
+                    )))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .justify_end()
+                            .w_full()
+                            .child(cancel)
+                            .child(confirm),
+                    )
+                    .into_any_element()
+            });
         });
     }
 
@@ -5049,73 +4892,75 @@ impl XWikiApp {
             return;
         };
         let handle = cx.entity();
-        window.open_dialog(cx, move |dialog, window, cx| {
-            let theme = cx.theme().clone();
-            let destination =
-                cx.new(|cx| InputState::new(window, cx).placeholder("保存路径（可选）"));
-            let zip_destination = destination.clone();
-            let zip_project = project.clone();
-            let zip_handle = handle.clone();
-            let zip = Button::new("export-zip")
-                .primary()
-                .rounded(px(tokens::RADIUS))
-                .label("预览 ZIP 导出")
-                .on_click(move |_, window, cx| {
-                    let destination = zip_destination.read(cx).value().trim().to_string();
-                    zip_handle.update(cx, |app, cx| {
-                        app.confirm_export(window, zip_project.clone(), "zip", destination, cx)
+        let host = self.overlay_host.clone();
+        host.update(cx, |host, cx| {
+            host.open_modal(window, cx, move |close, _window, cx| {
+                let theme = tokens::Cobalt::from_theme(theme(cx));
+                let destination =
+                    cx.new(|cx| TextInput::new(cx).placeholder("保存路径（可选）"));
+                let zip_destination = destination.clone();
+                let zip_project = project.clone();
+                let zip_handle = handle.clone();
+                let zip = Button::new("export-zip", "预览 ZIP 导出")
+                    .variant(Variant::Filled)
+                    .size(Size::Xs)
+                    .on_click(move |_, window, cx| {
+                        let destination = zip_destination.read(cx).text().trim().to_string();
+                        zip_handle.update(cx, |app, cx| {
+                            app.confirm_export(window, zip_project.clone(), "zip", destination, cx)
+                        });
                     });
-                });
-            let bundle_destination = destination.clone();
-            let bundle_project = project.clone();
-            let bundle_handle = handle.clone();
-            let bundle = Button::new("export-bundle")
-                .secondary()
-                .outline()
-                .rounded(px(tokens::RADIUS))
-                .label("预览 Bundle 导出")
-                .on_click(move |_, window, cx| {
-                    let destination = bundle_destination.read(cx).value().trim().to_string();
-                    bundle_handle.update(cx, |app, cx| {
-                        app.confirm_export(
-                            window,
-                            bundle_project.clone(),
-                            "bundle",
-                            destination,
-                            cx,
-                        )
+                let bundle_destination = destination.clone();
+                let bundle_project = project.clone();
+                let bundle_handle = handle.clone();
+                let bundle = Button::new("export-bundle", "预览 Bundle 导出")
+                    .variant(Variant::Outline)
+                    .size(Size::Xs)
+                    .on_click(move |_, window, cx| {
+                        let destination = bundle_destination.read(cx).text().trim().to_string();
+                        bundle_handle.update(cx, |app, cx| {
+                            app.confirm_export(
+                                window,
+                                bundle_project.clone(),
+                                "bundle",
+                                destination,
+                                cx,
+                            )
+                        });
                     });
-                });
-            dialog
-                .title(div().text_color(theme.foreground).child("导出项目"))
-                .content(move |content, _, _| {
-                    content
-                        .child(div().text_sm().text_color(theme.muted_foreground).child(
-                            "ZIP 是工作树快照；Bundle 保留完整 Git 历史。确认后才会写入本地路径。",
-                        ))
-                        .child(
-                            div()
-                                .mt_3()
-                                .text_xs()
-                                .text_color(theme.muted_foreground)
-                                .child("保存路径"),
-                        )
-                        .child(Input::new(&destination))
-                })
-                .footer(
-                    h_flex()
-                        .gap_2()
-                        .justify_end()
-                        .w_full()
-                        .child(
-                            Button::new("cancel-export")
-                                .ghost()
-                                .label("取消")
-                                .on_click(|_, window, cx| window.close_dialog(cx)),
-                        )
-                        .child(bundle)
-                        .child(zip),
-                )
+                let close_cancel = close.clone();
+                let cancel = Button::new("cancel-export", "取消")
+                    .variant(Variant::Subtle)
+                    .size(Size::Xs)
+                    .on_click(move |_, window, cx| close_cancel(window, cx));
+                Modal::new()
+                    .title("导出项目")
+                    .on_close(move |_ev, window, cx| close(window, cx))
+                    .child(
+                        div()
+                            .flex().flex_col()
+                            .gap_2()
+                            .w_full()
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .text_color(theme.ink_3)
+                                    .child("ZIP 是工作树快照；Bundle 保留完整 Git 历史。确认后才会写入本地路径。"),
+                            )
+                            .child(mono_label("保存路径").text_color(theme.ink_3))
+                            .child(div().w_full().child(destination.clone())),
+                    )
+                    .child(
+                        div().flex().items_center()
+                            .gap_2()
+                            .justify_end()
+                            .w_full()
+                            .child(cancel)
+                            .child(bundle)
+                            .child(zip),
+                    )
+                    .into_any_element()
+            });
         });
     }
 
@@ -5158,50 +5003,34 @@ impl XWikiApp {
         let handle = cx.entity();
         let files = Arc::new(files);
         let count = files.len();
-        window.open_dialog(cx, move |dialog, _, cx| {
-            let theme = cx.theme().clone();
-            let confirm_files = files.clone();
-            let confirm_name = name.clone();
-            let confirm_description = description.clone();
-            let confirm_handle = handle.clone();
-            let confirm = Button::new("confirm-folder-import")
-                .primary()
-                .rounded(px(tokens::RADIUS))
-                .label("确认并上传")
-                .on_click(move |_, window, cx| {
-                    confirm_handle.update(cx, |app, cx| {
-                        app.execute_folder_import(
-                            confirm_name.clone(),
-                            confirm_description.clone(),
-                            confirm_files.clone(),
-                            cx,
-                        )
-                    });
-                    window.close_dialog(cx);
-                });
-            dialog
-                .title(div().text_color(theme.foreground).child("确认文件夹导入"))
-                .content(move |content, _, _| {
-                    content.child(
-                        div()
-                            .text_sm()
-                            .text_color(theme.muted_foreground)
-                            .child(format!("将上传 {count} 个文件并创建一个新项目。")),
-                    )
-                })
-                .footer(
-                    h_flex()
-                        .gap_2()
-                        .justify_end()
-                        .w_full()
-                        .child(
-                            Button::new("cancel-folder-import")
-                                .ghost()
-                                .label("取消")
-                                .on_click(|_, window, cx| window.close_dialog(cx)),
-                        )
-                        .child(confirm),
-                )
+        let host = self.overlay_host.clone();
+        host.update(cx, |host, cx| {
+            host.open_modal(window, cx, move |close, _window, _cx| {
+                let confirm_files = files.clone();
+                let confirm_name = name.clone();
+                let confirm_description = description.clone();
+                let confirm_handle = handle.clone();
+                let close_confirm = close.clone();
+                let close_cancel = close.clone();
+                ConfirmModal::new()
+                    .title("确认文件夹导入")
+                    .message(format!("将上传 {count} 个文件并创建一个新项目。"))
+                    .confirm_label("确认并上传")
+                    .cancel_label("取消")
+                    .on_confirm(move |_, window, cx| {
+                        confirm_handle.update(cx, |app, cx| {
+                            app.execute_folder_import(
+                                confirm_name.clone(),
+                                confirm_description.clone(),
+                                confirm_files.clone(),
+                                cx,
+                            )
+                        });
+                        close_confirm(window, cx);
+                    })
+                    .on_cancel(move |_, window, cx| close_cancel(window, cx))
+                    .into_any_element()
+            });
         });
     }
 
@@ -5218,49 +5047,29 @@ impl XWikiApp {
             return;
         }
         let handle = cx.entity();
-        window.open_dialog(cx, move |dialog, _, cx| {
-            let theme = cx.theme().clone();
-            let confirm_handle = handle.clone();
-            let confirm_name = name.clone();
-            let confirm_url = url.clone();
-            let confirm = Button::new("confirm-repo-import")
-                .primary()
-                .rounded(px(tokens::RADIUS))
-                .label("确认并克隆")
-                .on_click(move |_, window, cx| {
-                    confirm_handle.update(cx, |app, cx| {
-                        app.execute_repo_import(confirm_name.clone(), confirm_url.clone(), cx)
-                    });
-                    window.close_dialog(cx);
-                });
-            let summary_url = url.clone();
-            dialog
-                .title(
-                    div()
-                        .text_color(theme.foreground)
-                        .child("确认 Git 仓库导入"),
-                )
-                .content(move |content, _, _| {
-                    content.child(
-                        div()
-                            .text_sm()
-                            .text_color(theme.muted_foreground)
-                            .child(format!("将从 {summary_url} 克隆为新项目。")),
-                    )
-                })
-                .footer(
-                    h_flex()
-                        .gap_2()
-                        .justify_end()
-                        .w_full()
-                        .child(
-                            Button::new("cancel-repo-import")
-                                .ghost()
-                                .label("取消")
-                                .on_click(|_, window, cx| window.close_dialog(cx)),
-                        )
-                        .child(confirm),
-                )
+        let host = self.overlay_host.clone();
+        host.update(cx, |host, cx| {
+            host.open_modal(window, cx, move |close, _window, _cx| {
+                let confirm_handle = handle.clone();
+                let confirm_name = name.clone();
+                let confirm_url = url.clone();
+                let summary_url = url.clone();
+                let close_confirm = close.clone();
+                let close_cancel = close.clone();
+                ConfirmModal::new()
+                    .title("确认 Git 仓库导入")
+                    .message(format!("将从 {summary_url} 克隆为新项目。"))
+                    .confirm_label("确认并克隆")
+                    .cancel_label("取消")
+                    .on_confirm(move |_, window, cx| {
+                        confirm_handle.update(cx, |app, cx| {
+                            app.execute_repo_import(confirm_name.clone(), confirm_url.clone(), cx)
+                        });
+                        close_confirm(window, cx);
+                    })
+                    .on_cancel(move |_, window, cx| close_cancel(window, cx))
+                    .into_any_element()
+            });
         });
     }
 
@@ -5300,44 +5109,32 @@ impl XWikiApp {
     ) {
         let handle = cx.entity();
         let size = bytes.len();
-        window.open_dialog(cx, move |dialog, _, cx| {
-            let theme = cx.theme().clone();
-            let confirm_handle = handle.clone();
-            let confirm_name = name.clone();
-            let confirm_bytes = bytes.clone();
-            let confirm = Button::new("confirm-bundle-import")
-                .primary()
-                .rounded(px(tokens::RADIUS))
-                .label("确认并上传")
-                .on_click(move |_, window, cx| {
-                    confirm_handle.update(cx, |app, cx| {
-                        app.execute_bundle_import(confirm_name.clone(), confirm_bytes.clone(), cx)
-                    });
-                    window.close_dialog(cx);
-                });
-            dialog
-                .title(div().text_color(theme.foreground).child("确认 Bundle 导入"))
-                .content(move |content, _, _| {
-                    content.child(
-                        div()
-                            .text_sm()
-                            .text_color(theme.muted_foreground)
-                            .child(format!("将上传 {} 后创建新项目。", format_bytes(size))),
-                    )
-                })
-                .footer(
-                    h_flex()
-                        .gap_2()
-                        .justify_end()
-                        .w_full()
-                        .child(
-                            Button::new("cancel-bundle-import")
-                                .ghost()
-                                .label("取消")
-                                .on_click(|_, window, cx| window.close_dialog(cx)),
-                        )
-                        .child(confirm),
-                )
+        let host = self.overlay_host.clone();
+        host.update(cx, |host, cx| {
+            host.open_modal(window, cx, move |close, _window, _cx| {
+                let confirm_handle = handle.clone();
+                let confirm_name = name.clone();
+                let confirm_bytes = bytes.clone();
+                let close_confirm = close.clone();
+                let close_cancel = close.clone();
+                ConfirmModal::new()
+                    .title("确认 Bundle 导入")
+                    .message(format!("将上传 {} 后创建新项目。", format_bytes(size)))
+                    .confirm_label("确认并上传")
+                    .cancel_label("取消")
+                    .on_confirm(move |_, window, cx| {
+                        confirm_handle.update(cx, |app, cx| {
+                            app.execute_bundle_import(
+                                confirm_name.clone(),
+                                confirm_bytes.clone(),
+                                cx,
+                            )
+                        });
+                        close_confirm(window, cx);
+                    })
+                    .on_cancel(move |_, window, cx| close_cancel(window, cx))
+                    .into_any_element()
+            });
         });
     }
 
@@ -5465,53 +5262,40 @@ impl XWikiApp {
             destination
         };
         let handle = cx.entity();
-        window.open_dialog(cx, move |dialog, _, cx| {
-            let theme = cx.theme().clone();
-            let confirm_handle = handle.clone();
-            let confirm_project = project.clone();
-            let confirm_format = format.clone();
-            let confirm_path = path.clone();
-            let summary_format = format.clone();
-            let summary_path = path.clone();
-            let confirm = Button::new("confirm-export")
-                .primary()
-                .rounded(px(tokens::RADIUS))
-                .label("确认并保存")
-                .on_click(move |_, window, cx| {
-                    confirm_handle.update(cx, |app, cx| {
-                        app.execute_export(
-                            confirm_project.clone(),
-                            confirm_format.clone(),
-                            confirm_path.clone(),
-                            cx,
-                        )
-                    });
-                    window.close_dialog(cx);
-                });
-            dialog
-                .title(div().text_color(theme.foreground).child("确认导出"))
-                .content(move |content, _, _| {
-                    content.child(div().text_sm().text_color(theme.muted_foreground).child(
-                        format!(
-                            "将生成 {} 并写入 {}。",
-                            summary_format.to_uppercase(),
-                            summary_path
-                        ),
+        let host = self.overlay_host.clone();
+        host.update(cx, |host, cx| {
+            host.open_modal(window, cx, move |close, _window, _cx| {
+                let confirm_handle = handle.clone();
+                let confirm_project = project.clone();
+                let confirm_format = format.clone();
+                let confirm_path = path.clone();
+                let summary_format = format.clone();
+                let summary_path = path.clone();
+                let close_confirm = close.clone();
+                let close_cancel = close.clone();
+                ConfirmModal::new()
+                    .title("确认导出")
+                    .message(format!(
+                        "将生成 {} 并写入 {}。",
+                        summary_format.to_uppercase(),
+                        summary_path
                     ))
-                })
-                .footer(
-                    h_flex()
-                        .gap_2()
-                        .justify_end()
-                        .w_full()
-                        .child(
-                            Button::new("cancel-confirm-export")
-                                .ghost()
-                                .label("取消")
-                                .on_click(|_, window, cx| window.close_dialog(cx)),
-                        )
-                        .child(confirm),
-                )
+                    .confirm_label("确认并保存")
+                    .cancel_label("取消")
+                    .on_confirm(move |_, window, cx| {
+                        confirm_handle.update(cx, |app, cx| {
+                            app.execute_export(
+                                confirm_project.clone(),
+                                confirm_format.clone(),
+                                confirm_path.clone(),
+                                cx,
+                            )
+                        });
+                        close_confirm(window, cx);
+                    })
+                    .on_cancel(move |_, window, cx| close_cancel(window, cx))
+                    .into_any_element()
+            });
         });
     }
 
@@ -5812,13 +5596,11 @@ fn folder_path_prompt_options() -> PathPromptOptions {
     }
 }
 
-fn import_folder_picker_button(folder: Entity<InputState>, handle: Entity<XWikiApp>) -> Button {
-    Button::new("choose-import-folder")
-        .secondary()
-        .outline()
-        .rounded(px(tokens::RADIUS))
-        .icon(IconName::FolderOpen)
-        .label("选择文件夹")
+fn import_folder_picker_button(folder: Entity<TextInput>, handle: Entity<XWikiApp>) -> Button {
+    Button::new("choose-import-folder", "选择文件夹")
+        .variant(Variant::Outline)
+        .radius(Size::Sm)
+        .left_section(Icon::new(IconName::FolderOpen).size(Size::Sm))
         .on_click(move |_, window, cx| {
             let selected = cx.prompt_for_paths(folder_path_prompt_options());
             let window_handle = window.window_handle();
@@ -5828,15 +5610,15 @@ fn import_folder_picker_button(folder: Entity<InputState>, handle: Entity<XWikiA
                 Ok(Ok(Some(paths))) => {
                     if let Some(path) = paths.into_iter().next() {
                         let value = path.to_string_lossy().to_string();
-                        let _ = cx.update_window(window_handle, |_, window, cx| {
+                        let _ = cx.update_window(window_handle, |_, _window, cx| {
                             folder.update(cx, |state, cx| {
-                                state.set_value(value, window, cx);
+                                state.set_text(&value, cx);
                             });
                         });
                     }
                 }
                 Ok(Err(error)) => {
-                    handle.update(cx, |app, cx| {
+                    let _ = handle.update(cx, |app, cx| {
                         app.status_msg = Some(format!("打开文件夹选择器失败: {error}"));
                         cx.notify();
                     });
@@ -6019,112 +5801,110 @@ fn open_new_project_dialog_window(
     let Some(client) = client else {
         return;
     };
-    window.open_dialog(cx, move |dialog, window, cx| {
-        let name_state = cx.new(|cx| InputState::new(window, cx).placeholder("docs-site"));
-        let desc_state = cx.new(|cx| InputState::new(window, cx).placeholder("项目描述（可选）"));
+    let host = handle.read(cx).overlay_host.clone();
+    host.update(cx, |host, cx| {
+        host.open_modal(window, cx, move |close, _window, cx| {
+            let name_state = cx.new(|cx| TextInput::new(cx).placeholder("docs-site"));
+            let desc_state = cx.new(|cx| TextInput::new(cx).placeholder("项目描述（可选）"));
+            let theme = tokens::Cobalt::from_theme(theme(cx));
 
-        let content_name = name_state.clone();
-        let content_desc = desc_state.clone();
-        let content_builder = move |content: DialogContent, _: &mut Window, cx: &mut App| {
-            let theme = cx.theme();
-            content.child(
-                div()
-                    .v_flex()
-                    .gap_2()
-                    .w_full()
-                    .child(
-                        div()
-                            .font_family(tokens::FONT_MONO)
-                            .text_xs()
-                            .text_color(theme.muted_foreground)
-                            .child("名称"),
-                    )
-                    .child(Input::new(&content_name).w_full())
-                    .child(
-                        div()
-                            .font_family(tokens::FONT_MONO)
-                            .text_xs()
-                            .text_color(theme.muted_foreground)
-                            .child("描述"),
-                    )
-                    .child(Input::new(&content_desc).w_full()),
-            )
-        };
-
-        let cancel_handle = handle.clone();
-        let cancel = Button::new("cancel-project")
-            .rounded(px(tokens::RADIUS))
-            .icon(IconName::Close)
-            .label("取消")
-            .on_click(move |_, window, cx| {
-                cancel_handle.update(cx, |app, cx| {
-                    app.project_action = None;
-                    cx.notify();
+            let cancel_handle = handle.clone();
+            let close_cancel = close.clone();
+            let cancel = Button::new("cancel-project", "取消")
+                .variant(Variant::Subtle)
+                .size(Size::Xs)
+                .left_section(Icon::new(IconName::Close).size(Size::Sm))
+                .on_click(move |_, window, cx| {
+                    cancel_handle.update(cx, |app, cx| {
+                        app.project_action = None;
+                        cx.notify();
+                    });
+                    close_cancel(window, cx);
                 });
-                window.close_dialog(cx);
-            });
 
-        let create_name = name_state.clone();
-        let create_desc = desc_state.clone();
-        let create_client = client.clone();
-        let app_handle = handle.clone();
-        let action_handle = handle.clone();
-        let create = Button::new("create-project")
-            .primary()
-            .rounded(px(tokens::RADIUS))
-            .icon(IconName::Folder)
-            .label("创建")
-            .on_click(move |_, window, cx| {
-                let name = create_name.read(cx).value().to_string();
-                if name.trim().is_empty() {
-                    return;
-                }
-                let desc = create_desc.read(cx).value().to_string();
-                let c = create_client.clone();
-                let h = app_handle.clone();
-                action_handle.update(cx, |app, cx| {
-                    app.project_action = Some("__new-project__".into());
-                    app.status_msg = None;
-                    cx.notify();
+            let create_name = name_state.clone();
+            let create_desc = desc_state.clone();
+            let create_client = client.clone();
+            let app_handle = handle.clone();
+            let action_handle = handle.clone();
+            let close_create = close.clone();
+            let create = Button::new("create-project", "创建")
+                .variant(Variant::Filled)
+                .size(Size::Xs)
+                .left_section(Icon::new(IconName::Folder).size(Size::Sm))
+                .on_click(move |_, window, cx| {
+                    let name = create_name.read(cx).text().to_string();
+                    if name.trim().is_empty() {
+                        return;
+                    }
+                    let desc = create_desc.read(cx).text().to_string();
+                    let c = create_client.clone();
+                    let h = app_handle.clone();
+                    action_handle.update(cx, |app, cx| {
+                        app.project_action = Some("__new-project__".into());
+                        app.status_msg = None;
+                        cx.notify();
+                    });
+                    cx.spawn(async move |cx| {
+                        match c.create_project(name.trim(), desc.trim()).await {
+                            Ok(p) => {
+                                let _ = h.update(cx, |app, cx| {
+                                    app.project_action = None;
+                                    app.projects.push(ProjectRow::from_dto(&p));
+                                    app.notify("项目已创建".into(), cx);
+                                    cx.notify();
+                                });
+                            }
+                            Err(e) => {
+                                let _ = h.update(cx, |app, cx| {
+                                    app.project_action = None;
+                                    app.status_msg = Some(format!("创建项目失败: {e}"));
+                                    cx.notify();
+                                });
+                            }
+                        }
+                    })
+                    .detach();
+                    close_create(window, cx);
                 });
-                cx.spawn(
-                    async move |cx| match c.create_project(name.trim(), desc.trim()).await {
-                        Ok(p) => {
-                            h.update(cx, |app, cx| {
-                                app.project_action = None;
-                                app.projects.push(ProjectRow::from_dto(&p));
-                                app.notify("项目已创建".into(), cx);
-                                cx.notify();
-                            });
-                        }
-                        Err(e) => {
-                            h.update(cx, |app, cx| {
-                                app.project_action = None;
-                                app.status_msg = Some(format!("创建项目失败: {e}"));
-                                cx.notify();
-                            });
-                        }
-                    },
+
+            Modal::new()
+                .title("新建项目")
+                .on_close(move |_ev, window, cx| close(window, cx))
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap_2()
+                        .w_full()
+                        .child(
+                            div()
+                                .font_family(tokens::FONT_MONO)
+                                .text_xs()
+                                .text_color(theme.ink_3)
+                                .child("名称"),
+                        )
+                        .child(div().w_full().child(name_state.clone()))
+                        .child(
+                            div()
+                                .font_family(tokens::FONT_MONO)
+                                .text_xs()
+                                .text_color(theme.ink_3)
+                                .child("描述"),
+                        )
+                        .child(div().w_full().child(desc_state.clone())),
                 )
-                .detach();
-                window.close_dialog(cx);
-            });
-
-        dialog
-            .title(
-                div()
-                    .text_lg()
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .child("新建项目"),
-            )
-            .content(content_builder)
-            .footer(
-                h_flex()
-                    .gap_2()
-                    .justify_end()
-                    .w_full()
-                    .child(cancel)
-                    .child(create),
-            )
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .justify_end()
+                        .w_full()
+                        .child(cancel)
+                        .child(create),
+                )
+                .into_any_element()
+        });
     });
 }
