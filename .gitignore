@@ -18,9 +18,9 @@ node_modules/
 package.json
 package-lock.json
 
-# AgentDocs runtime (Go branch)
+# XWiki runtime (Go branch)
 /data/
-/agentdocs
+/xwiki
 *.log
 
 # Web build output (Go branch)
