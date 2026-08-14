@@ -3,10 +3,10 @@
 use gpui::prelude::*;
 use gpui::*;
 use guise::{
-    ActionIcon, Button, Icon, IconName,
     overlay::tooltip as guise_tooltip,
     style::Variant,
-    theme::{Size as GuiseSize, Theme, theme},
+    theme::{theme, Size as GuiseSize, Theme},
+    ActionIcon, Button, Icon, IconName,
 };
 
 use crate::app::{Screen, XWikiApp};
@@ -145,6 +145,8 @@ impl XWikiApp {
             Screen::Settings => self.render_settings(cx).into_any_element(),
             Screen::ApiReference => self.render_api_reference(cx).into_any_element(),
             Screen::Audit => self.render_audit(cx).into_any_element(),
+            Screen::Backlinks => self.render_backlinks_page(cx).into_any_element(),
+            Screen::Attachments => self.render_attachments_page(cx).into_any_element(),
             Screen::Login => self.render_login(cx).into_any_element(),
         };
         div()
@@ -954,6 +956,8 @@ impl XWikiApp {
             Screen::Settings => "设置".to_string(),
             Screen::ApiReference => "API Reference".to_string(),
             Screen::Audit => "审计日志".to_string(),
+            Screen::Backlinks => "文档分析".to_string(),
+            Screen::Attachments => "附件".to_string(),
             _ => self
                 .selected_project
                 .as_deref()

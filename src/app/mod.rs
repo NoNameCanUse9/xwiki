@@ -190,8 +190,6 @@ pub(crate) enum ProjectFilter {
 pub(crate) enum DocPanel {
     None,
     Share,
-    Backlinks,
-    Attachments,
 }
 
 #[derive(Clone, Copy)]
@@ -218,6 +216,9 @@ pub struct XWikiApp {
     username: String,
     login_error: Option<String>,
     loading: bool,
+    /// Show the initial project skeleton only when loading lasts long enough to
+    /// be useful; fast local responses should not flash an empty placeholder.
+    project_skeleton_visible: bool,
     /// Forgot-password flow: true swaps the login panel for the reset form.
     reset_mode: bool,
     reset_status: Option<(bool, String)>,
@@ -364,6 +365,10 @@ enum Screen {
     Settings,
     ApiReference,
     Audit,
+    /// 文档分析（反向链接）独立页：从文档页"更多"菜单进入。
+    Backlinks,
+    /// 附件管理独立页：从文档页"更多"菜单进入。
+    Attachments,
 }
 
 #[derive(Clone)]
@@ -407,7 +412,9 @@ impl XWikiApp {
         // ponytail: rows are loaded from GET /api/v1/projects on login; this
         // starts empty. Plain Vec — every access happens on the main thread
         // inside update callbacks, so no lock is needed.
-        let filter_input = cx.new(|cx| TextInput::new(cx).placeholder("搜索项目…"));
+        // Match the compact action buttons in the workspace toolbar.
+        let filter_input =
+            cx.new(|cx| TextInput::new(cx).size(Size::Xs).placeholder("搜索项目…"));
 
         let commit_msg = cx.new(|cx| TextInput::new(cx).placeholder("提交消息…"));
         let editor_input = cx.new(|cx| TextArea::new(cx).placeholder("# 用 Markdown 写作…"));
@@ -534,6 +541,7 @@ impl XWikiApp {
             username: String::new(),
             login_error: None,
             loading: false,
+            project_skeleton_visible: false,
             reset_mode: false,
             reset_status: None,
             reset_token_input,
@@ -981,7 +989,8 @@ impl XWikiApp {
         ) else {
             return;
         };
-        self.doc_panel = DocPanel::Backlinks;
+        self.doc_panel = DocPanel::None;
+        self.screen = Screen::Backlinks;
         self.backlinks_loading = true;
         self.backlinks_error = None;
         cx.notify();
@@ -1011,7 +1020,8 @@ impl XWikiApp {
         else {
             return;
         };
-        self.doc_panel = DocPanel::Attachments;
+        self.doc_panel = DocPanel::None;
+        self.screen = Screen::Attachments;
         self.attachments_loading = true;
         self.attachments_error = None;
         cx.notify();
@@ -2818,6 +2828,8 @@ impl XWikiApp {
             Screen::Settings => self.load_settings_access(cx),
             Screen::ApiReference => self.open_api_reference(cx),
             Screen::Audit => self.open_audit(cx),
+            Screen::Backlinks => self.open_backlinks_panel(cx),
+            Screen::Attachments => self.open_attachments_panel(cx),
             Screen::Login => {}
         }
     }
@@ -3027,6 +3039,22 @@ impl XWikiApp {
         };
         self.loading = true;
         self.projects_error = None;
+        self.project_skeleton_visible = false;
+        cx.notify();
+
+        // Do not flash a skeleton for fast local/server responses. Existing
+        // project cards remain visible while a refresh is in flight.
+        cx.spawn(async move |this, cx| {
+            Timer::after(Duration::from_millis(150)).await;
+            let _ = this.update(cx, |app, cx| {
+                if app.loading && app.projects.is_empty() && app.projects_error.is_none() {
+                    app.project_skeleton_visible = true;
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+
         cx.spawn(async move |this, cx| {
             let projects = client.projects().await;
             let meta = client.meta().await;
@@ -3035,6 +3063,7 @@ impl XWikiApp {
                     let _ = this.update(cx, |app, cx| {
                         app.projects = list.iter().map(ProjectRow::from_dto).collect();
                         app.loading = false;
+                        app.project_skeleton_visible = false;
                         if let Ok(m) = meta {
                             app.meta_version = Some(m.version);
                         } else {
@@ -3047,6 +3076,7 @@ impl XWikiApp {
                 Err(e) => {
                     let _ = this.update(cx, |app, cx| {
                         app.loading = false;
+                        app.project_skeleton_visible = false;
                         app.projects_error = Some(e.to_string());
                         cx.notify();
                     });
@@ -3343,6 +3373,10 @@ impl XWikiApp {
             "XWiki".into()
         } else if matches!(self.screen, Screen::Settings) {
             "XWiki — 设置".into()
+        } else if matches!(self.screen, Screen::Backlinks) {
+            "XWiki — 文档分析".into()
+        } else if matches!(self.screen, Screen::Attachments) {
+            "XWiki — 附件".into()
         } else {
             "XWiki".into()
         }
@@ -5370,9 +5404,13 @@ impl Render for XWikiApp {
             window.set_window_title(&title);
             self.last_title = title;
         }
+        // gpui-component's `Root` used to paint the theme background; guise
+        // has no equivalent, so the root view paints it itself.
+        let root_theme = tokens::Cobalt::from_theme(theme(cx));
         div()
             .id("app-root")
             .size_full()
+            .bg(root_theme.paper)
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                 if event.keystroke.key != "escape" {
                     return;
@@ -5397,7 +5435,11 @@ impl Render for XWikiApp {
                     }
                 } else if matches!(
                     this.screen,
-                    Screen::Settings | Screen::ApiReference | Screen::Audit
+                    Screen::Settings
+                        | Screen::ApiReference
+                        | Screen::Audit
+                        | Screen::Backlinks
+                        | Screen::Attachments
                 ) {
                     this.screen = Screen::Workspace;
                     cx.notify();
@@ -5495,7 +5537,9 @@ impl Render for XWikiApp {
                         Screen::Settings
                         | Screen::Workspace
                         | Screen::ApiReference
-                        | Screen::Audit => self
+                        | Screen::Audit
+                        | Screen::Backlinks
+                        | Screen::Attachments => self
                             .render_authenticated_shell(window, cx)
                             .into_any_element(),
                     })

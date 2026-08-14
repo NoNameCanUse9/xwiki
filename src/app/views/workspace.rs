@@ -604,11 +604,26 @@ impl XWikiApp {
                                     .items_end()
                                     .gap_1()
                                     .child(
-                                        mono_label(format!(
-                                            "{} 个项目 · {} 个活跃",
-                                            project_count, active_count
-                                        ))
-                                        .text_color(cobalt.ink_3),
+                                        div()
+                                            .flex()
+                                            .items_center()
+                                            .gap_2()
+                                            .child(
+                                                mono_label(format!(
+                                                    "{} 个项目 · {} 个活跃",
+                                                    project_count, active_count
+                                                ))
+                                                .text_color(cobalt.ink_3),
+                                            )
+                                            .child(if self.loading && !self.projects.is_empty() {
+                                                mono_label("更新中…").text_color(cobalt.accent)
+                                            } else if self.projects_error.is_some()
+                                                && !self.projects.is_empty()
+                                            {
+                                                mono_label("刷新失败").text_color(cobalt.danger)
+                                            } else {
+                                                mono_label("")
+                                            }),
                                     )
                                     .child(
                                         mono_label("DESKTOP WORKSPACE").text_color(cobalt.accent),
@@ -653,14 +668,22 @@ impl XWikiApp {
                             )
                             .child(
                                 div()
-                                    .flex_1()
-                                    .min_w(px(180.0))
-                                    .max_w(px(420.0))
+                                    // Keep the project search field fixed-width. The
+                                    // TextInput itself is content-sized, so the inner flex
+                                    // column carries the fixed width to the rendered field.
+                                    .flex_none()
+                                    .w(px(240.0))
                                     .flex()
                                     .flex_col()
                                     .gap_1()
                                     .child(mono_label("搜索项目").text_color(cobalt.ink_3))
-                                    .child(div().w_full().child(self.filter_input.clone())),
+                                    .child(
+                                        div()
+                                            .w_full()
+                                            .flex()
+                                            .flex_col()
+                                            .child(self.filter_input.clone()),
+                                    ),
                             )
                             .child(
                                 div()
@@ -706,7 +729,7 @@ impl XWikiApp {
                                 )),
                             ),
                     )
-                    .child(if self.loading {
+                    .child(if self.loading && self.projects.is_empty() && self.project_skeleton_visible {
                         div()
                             .id("project-skeletons")
                             .flex_1()
@@ -756,7 +779,11 @@ impl XWikiApp {
                                     })),
                             )
                             .into_any_element()
-                    } else if let Some(err) = &self.projects_error {
+                    } else if self.loading && self.projects.is_empty() {
+                        // Reserve the content area during the skeleton delay so the
+                        // empty-state CTA does not flash before a fast response lands.
+                        div().flex_1().min_h(px(0.0)).into_any_element()
+                    } else if self.projects.is_empty() && let Some(err) = &self.projects_error {
                         div()
                             .flex_1()
                             .flex()

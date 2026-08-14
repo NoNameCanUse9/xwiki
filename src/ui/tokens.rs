@@ -6,8 +6,8 @@
 //! [`cobalt_dark`]) plus the semantic accessors below for the few tokens
 //! that have no slot.
 
-use gpui::{rgb, rgba, Hsla, Rgba};
-use guise::theme::{rgb as theme_rgb, Theme};
+use gpui::{Hsla, Rgba, rgb, rgba};
+use guise::theme::{Theme, rgb as theme_rgb};
 
 // ---- Radius (ruler-drawn, never pills) ----
 pub const RADIUS_SMALL: f32 = 4.0;

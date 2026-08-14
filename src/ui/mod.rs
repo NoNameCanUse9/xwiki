@@ -9,12 +9,12 @@ pub mod tokens;
 use std::sync::{Arc, OnceLock};
 
 use gpui::{
-    div, img, px, App, AppContext, Div, ElementId, Entity, EntityId, Image, ImageFormat, Img,
-    IntoElement, ParentElement as _, Styled as _,
+    App, AppContext, Div, ElementId, Entity, EntityId, Image, ImageFormat, Img, IntoElement,
+    ParentElement as _, Styled as _, div, img, px,
 };
+use guise::Button;
 use guise::input::TextInput;
 use guise::markdown::MarkdownEditor;
-use guise::Button;
 use guise::{Icon, IconName};
 
 const APP_ICON_SVG: &[u8] = include_bytes!("../../assets/xwiki-icon.svg");
@@ -137,7 +137,7 @@ pub fn clear_search_button(
 
 #[cfg(test)]
 mod tests {
-    use markdown::{mdast::Node, ParseOptions};
+    use markdown::{ParseOptions, mdast::Node};
 
     fn fenced_code(source: &str) -> (String, String) {
         let Node::Root(root) = markdown::to_mdast(source, &ParseOptions::default())
