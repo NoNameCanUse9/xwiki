@@ -1367,6 +1367,20 @@ impl XWikiApp {
                                                             });
                                                         }
                                                     })
+                                                    .item("移动", {
+                                                        let app = app.clone();
+                                                        move |window, cx| {
+                                                            app.update(cx, |app, cx| {
+                                                                if let Some(path) =
+                                                                    app.doc_path.clone()
+                                                                {
+                                                                    app.confirm_move_doc(
+                                                                        window, cx, path, false,
+                                                                    );
+                                                                }
+                                                            });
+                                                        }
+                                                    })
                                             },
                                         );
                                         div()
