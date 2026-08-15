@@ -268,7 +268,6 @@ pub struct XWikiApp {
     saving: bool,
     commit_msg: Entity<TextInput>,
     editor_input: Entity<TextArea>,
-    editor_title_input: Entity<TextInput>,
     editor_preview: bool,
     // History view state.
     history_open: bool,
@@ -418,7 +417,6 @@ impl XWikiApp {
 
         let commit_msg = cx.new(|cx| TextInput::new(cx).placeholder("提交消息…"));
         let editor_input = cx.new(|cx| TextArea::new(cx).placeholder("# 用 Markdown 写作…"));
-        let editor_title_input = cx.new(|cx| TextInput::new(cx).placeholder("文档标题"));
         let history_input = cx.new(|cx| TextInput::new(cx).placeholder("搜索版本…"));
         let attachment_source_input =
             cx.new(|cx| TextInput::new(cx).placeholder("本地文件路径（≤ 5 MiB）"));
@@ -511,14 +509,18 @@ impl XWikiApp {
                 },
             ));
         }
-        // Title and commit-message edits update dirty-state and button labels.
-        for state in [&commit_msg, &editor_title_input] {
-            subs.push(cx.subscribe(state, |app, _entity, _: &TextInputEvent, cx| {
-                if app.editing {
-                    app.persist_draft(cx);
-                }
-                cx.notify();
-            }));
+        // Commit-message edits update dirty-state and local drafts.
+        {
+            let commit = commit_msg.clone();
+            subs.push(
+                cx.subscribe(&commit_msg, move |app, _entity, _: &TextInputEvent, cx| {
+                    let _ = commit.read(cx);
+                    if app.editing {
+                        app.persist_draft(cx);
+                    }
+                    cx.notify();
+                }),
+            );
         }
         // Changing the server address invalidates the previous connection result.
         {
@@ -587,7 +589,6 @@ impl XWikiApp {
             saving: false,
             commit_msg,
             editor_input,
-            editor_title_input,
             editor_preview: false,
             history_open: false,
             history_file_path: None,
@@ -1379,8 +1380,6 @@ impl XWikiApp {
         let mut content = self.doc_content.clone();
         let editor = self.editor_input.clone();
         let commit = self.commit_msg.clone();
-        let title = self.editor_title_input.clone();
-        let mut filename = path.rsplit('/').next().unwrap_or(path).to_string();
         let mut message = String::new();
         if let Some(project) = self.selected_project.as_ref()
             && let Some(draft) = config::load_drafts().into_iter().find(|d| {
@@ -1391,9 +1390,6 @@ impl XWikiApp {
             })
         {
             content = draft.content;
-            if !draft.target_path.is_empty() {
-                filename = draft.target_path;
-            }
             message = draft.message;
             let server_revision = self.current_revision.as_deref().unwrap_or_default();
             let base_revision = draft_base_revision(server_revision, &draft.base_revision);
@@ -1406,7 +1402,6 @@ impl XWikiApp {
             let _ = cx.update_window(handle, |_view, _window, cx| {
                 editor.update(cx, |s, cx| s.set_text(&content, cx));
                 commit.update(cx, |s, cx| s.set_text(&message, cx));
-                title.update(cx, |s, cx| s.set_text(&filename, cx));
             });
         }
         self.edit_path = Some(path.to_string());
@@ -1428,18 +1423,12 @@ impl XWikiApp {
             return;
         };
         let content = self.editor_input.read(cx).text().to_string();
-        let title = self.editor_title_input.read(cx).text().trim().to_string();
-        let target = if title.is_empty() {
-            path.clone()
-        } else {
-            title
-        };
         config::upsert_draft(config::Draft {
             server: self.server_url.clone(),
             username: self.username.clone(),
             project: project.clone(),
             original_path: path.clone(),
-            target_path: target,
+            target_path: path.clone(),
             content,
             message: self.commit_msg.read(cx).text().to_string(),
             base_revision: self.edit_base_revision.clone().unwrap_or_default(),
@@ -1548,12 +1537,7 @@ impl XWikiApp {
         }
         let content_changed = self.editor_input.read(cx).text() != self.doc_content;
         let message_changed = !self.commit_msg.read(cx).text().trim().is_empty();
-        let title_changed = self
-            .edit_path
-            .as_deref()
-            .and_then(|path| path.rsplit('/').next())
-            .is_some_and(|filename| self.editor_title_input.read(cx).text().trim() != filename);
-        content_changed || message_changed || title_changed
+        content_changed || message_changed
     }
 
     fn request_cancel_edit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -1598,41 +1582,18 @@ impl XWikiApp {
             return;
         };
         let content = self.editor_input.read(cx).text().to_string();
-        let title = self.editor_title_input.read(cx).text().to_string();
         let msg = self.commit_msg.read(cx).text().to_string();
-        let title = title.trim();
-        if title.is_empty() {
-            self.save_error = Some("文档路径不能为空".into());
-            cx.notify();
-            return;
-        }
         if msg.trim().is_empty() {
             self.save_error = Some("需要提交消息".into());
             cx.notify();
             return;
         }
-        let target_path = if title.contains('/') {
-            title.to_string()
-        } else if let Some((parent, _)) = path.rsplit_once('/') {
-            format!("{parent}/{title}")
-        } else {
-            title.to_string()
-        };
-        let mut changes = Vec::new();
-        if target_path != path {
-            changes.push(dto::Change {
-                op: "move".into(),
-                path: path.clone(),
-                new_path: Some(target_path.clone()),
-                content: None,
-            });
-        }
-        changes.push(dto::Change {
+        let changes = vec![dto::Change {
             op: "update".into(),
-            path: target_path.clone(),
+            path: path.clone(),
             new_path: None,
             content: Some(content),
-        });
+        }];
         let message = msg.trim().to_string();
         self.saving = true;
         self.save_error = None;
@@ -1656,8 +1617,8 @@ impl XWikiApp {
             {
                 Ok(result) => {
                     let _ = this.update(cx, |app, cx| {
-                        app.edit_path = Some(target_path.clone());
-                        app.doc_path = Some(target_path.clone());
+                        app.edit_path = Some(path.clone());
+                        app.doc_path = Some(path.clone());
                         app.after_save(result.revision, cx);
                     });
                 }
@@ -2285,6 +2246,144 @@ impl XWikiApp {
         .detach();
     }
 
+    fn move_target_error(from: &str, to: &str, is_dir: bool) -> Option<&'static str> {
+        if to.is_empty() {
+            return Some("目标路径不能为空");
+        }
+        if to.starts_with('/')
+            || to.ends_with('/')
+            || to.contains('\\')
+            || to
+                .split('/')
+                .any(|segment| segment.is_empty() || segment == "." || segment == "..")
+        {
+            return Some("目标路径必须是相对路径，且不能包含 .、.. 或反斜杠");
+        }
+        if to == from {
+            return Some("目标路径与当前位置相同");
+        }
+        if is_dir
+            && to
+                .strip_prefix(from)
+                .is_some_and(|rest| rest.starts_with('/'))
+        {
+            return Some("不能将目录移动到自身目录中");
+        }
+        None
+    }
+
+    /// Open a safe move dialog for a doc or directory in the tree.
+    fn confirm_move_doc(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        path: String,
+        is_dir: bool,
+    ) {
+        let Some(client) = self.client.clone() else {
+            return;
+        };
+        let Some(project) = self.selected_project.clone() else {
+            return;
+        };
+        if self.editing {
+            return;
+        }
+        let handle = cx.entity();
+        let project_for_dialog = project.clone();
+        let client_for_dialog = client.clone();
+        let current_path = path.clone();
+        let host_handle = self.overlay_host.clone();
+        let host = self.overlay_host.clone();
+        host.update(cx, |host, cx| {
+            host.open_modal(window, cx, move |close, _window, cx| {
+                let initial_path = current_path.clone();
+                let path_state = cx.new(|cx| {
+                    TextInput::new(cx)
+                        .placeholder("docs/README.md")
+                        .value(&initial_path)
+                });
+                let content_theme = tokens::Cobalt::from_theme(theme(cx));
+                let submit_state = path_state.clone();
+                let submit_handle = handle.clone();
+                let submit_project = project_for_dialog.clone();
+                let submit_client = client_for_dialog.clone();
+                let submit_path = current_path.clone();
+                let submit_dir = is_dir;
+                let toast_host = host_handle.clone();
+                let close_cancel = close.clone();
+                let close_confirm = close.clone();
+                let cancel = Button::new("cancel-move-doc", "取消")
+                    .variant(Variant::Subtle)
+                    .size(Size::Xs)
+                    .left_section(Icon::new(IconName::Close).size(Size::Sm))
+                    .on_click(move |_, window, cx| close_cancel(window, cx));
+                let move_button = Button::new("confirm-move-doc", "移动")
+                    .variant(Variant::Filled)
+                    .size(Size::Xs)
+                    .left_section(Icon::new(IconName::Check).size(Size::Sm))
+                    .on_click(move |_, window, cx| {
+                        let to = submit_state.read(cx).text().trim().to_string();
+                        if let Some(error) =
+                            XWikiApp::move_target_error(&submit_path, &to, submit_dir)
+                        {
+                            let h = toast_host.clone();
+                            h.update(cx, |host, cx| host.toast(error, cx));
+                            return;
+                        }
+                        let handle = submit_handle.clone();
+                        let project_id = submit_project.clone();
+                        let c = submit_client.clone();
+                        let from = submit_path.clone();
+                        handle.update(cx, |app, cx| {
+                            app.move_tree_path(&c, &project_id, &from, &to, submit_dir, true, cx);
+                        });
+                        close_confirm(window, cx);
+                    });
+                Modal::new()
+                    .title(if is_dir {
+                        "移动目录"
+                    } else {
+                        "移动文档"
+                    })
+                    .on_close(move |_ev, window, cx| close(window, cx))
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap_2()
+                            .w_full()
+                            .child(mono_label("当前路径").text_color(content_theme.ink_3))
+                            .child(
+                                div()
+                                    .font_family(tokens::FONT_MONO)
+                                    .text_xs()
+                                    .text_color(content_theme.ink_2)
+                                    .child(current_path.clone()),
+                            )
+                            .child(mono_label("目标路径").text_color(content_theme.ink_3))
+                            .child(div().w_full().child(path_state.clone()))
+                            .child(
+                                div().text_xs().text_color(content_theme.ink_3).child(
+                                    "移动会创建一次独立提交；目标路径需填写项目内相对路径。",
+                                ),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .justify_end()
+                            .w_full()
+                            .child(cancel)
+                            .child(move_button),
+                    )
+                    .into_any_element()
+            });
+        });
+    }
+
     /// Open the rename dialog for a doc or directory in the tree.
     fn confirm_rename_doc(
         &mut self,
@@ -2360,6 +2459,7 @@ impl XWikiApp {
                                 &from_move,
                                 &to_move,
                                 submit_dir,
+                                false,
                                 cx,
                             );
                         });
@@ -2404,13 +2504,15 @@ impl XWikiApp {
         from: &str,
         to: &str,
         is_dir: bool,
+        moving: bool,
         cx: &mut Context<Self>,
     ) {
         let c = client.clone();
         let project = project.to_string();
         let from = from.to_string();
         let to = to.to_string();
-        let message = format!("重命名{}", if is_dir { "目录" } else { "文档" });
+        let action = if moving { "移动" } else { "重命名" };
+        let message = format!("{action}{}", if is_dir { "目录" } else { "文档" });
         self.tree_loading = true;
         cx.notify();
         cx.spawn(
@@ -2418,15 +2520,41 @@ impl XWikiApp {
                 Ok(_) => {
                     let _ = this.update(cx, |app, cx| {
                         app.tree_loading = false;
-                        let tree_path = app.tree_path.clone();
+                        if let Some(current) = app.doc_path.clone() {
+                            let next = if current == from {
+                                Some(to.clone())
+                            } else if is_dir {
+                                current
+                                    .strip_prefix(&from)
+                                    .filter(|rest| rest.starts_with('/'))
+                                    .map(|rest| format!("{to}{rest}"))
+                            } else {
+                                None
+                            };
+                            if let Some(next) = next {
+                                app.doc_path = Some(next);
+                            }
+                        }
+                        let tree_path = if app.tree_path == from {
+                            to.clone()
+                        } else if is_dir {
+                            app.tree_path
+                                .strip_prefix(&from)
+                                .filter(|rest| rest.starts_with('/'))
+                                .map(|rest| format!("{to}{rest}"))
+                                .unwrap_or_else(|| app.tree_path.clone())
+                        } else {
+                            app.tree_path.clone()
+                        };
+                        app.tree_path = tree_path.clone();
                         app.load_tree(&tree_path, cx);
-                        app.notify(format!("已重命名为 {to}"), cx);
+                        app.notify(format!("已{action}为 {to}"), cx);
                     });
                 }
                 Err(e) => {
                     let _ = this.update(cx, |app, cx| {
                         app.tree_loading = false;
-                        app.status_msg = Some(format!("重命名失败: {e}"));
+                        app.status_msg = Some(format!("{action}失败: {e}"));
                         cx.notify();
                     });
                 }
@@ -5678,7 +5806,7 @@ mod import_path_prompt_tests {
     #[cfg(unix)]
     use super::collect_import_files;
     use super::{
-        TokenDraft, draft_base_revision, folder_path_prompt_options, history_page_offset,
+        TokenDraft, XWikiApp, draft_base_revision, folder_path_prompt_options, history_page_offset,
         merge_history_page, read_file_limited,
     };
     use crate::api::dto::{Commit, CommitListResponse};
@@ -5691,6 +5819,14 @@ mod import_path_prompt_tests {
         assert!(options.directories);
         assert!(!options.multiple);
         assert!(options.prompt.is_some());
+    }
+
+    #[test]
+    fn move_target_validation_rejects_unsafe_paths() {
+        assert!(XWikiApp::move_target_error("docs/a.md", "", false).is_some());
+        assert!(XWikiApp::move_target_error("docs/a.md", "../a.md", false).is_some());
+        assert!(XWikiApp::move_target_error("docs", "docs/archive", true).is_some());
+        assert!(XWikiApp::move_target_error("docs/a.md", "archive/a.md", false).is_none());
     }
 
     #[test]

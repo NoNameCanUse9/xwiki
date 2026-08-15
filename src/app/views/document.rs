@@ -249,6 +249,16 @@ impl XWikiApp {
                             });
                     }
                     m = m
+                        .item("移动", {
+                            let app = app.clone();
+                            let path = path.clone();
+                            let is_dir = is_dir;
+                            move |window, cx| {
+                                app.update(cx, |app, cx| {
+                                    app.confirm_move_doc(window, cx, path.clone(), is_dir)
+                                });
+                            }
+                        })
                         .item("重命名", {
                             let app = app.clone();
                             let path = path.clone();
@@ -309,6 +319,16 @@ impl XWikiApp {
                         });
                     }
                     m = m
+                        .item("移动", {
+                            let app = app.clone();
+                            let path = path.clone();
+                            let is_dir = is_dir;
+                            move |window, cx| {
+                                app.update(cx, |app, cx| {
+                                    app.confirm_move_doc(window, cx, path.clone(), is_dir)
+                                });
+                            }
+                        })
                         .item("重命名", {
                             let app = app.clone();
                             let path = path.clone();

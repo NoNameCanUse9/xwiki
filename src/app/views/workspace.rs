@@ -12,6 +12,53 @@ use crate::config;
 use crate::ui::tokens::Cobalt;
 use crate::ui::{mono_label, split_pane, tokens};
 
+fn developer_tool_button(
+    id: &'static str,
+    label: &'static str,
+    icon: IconName,
+    cobalt: &Cobalt,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+) -> Button {
+    let content = div()
+        .flex()
+        .items_center()
+        .gap_2()
+        .child(
+            div()
+                .flex_none()
+                .w(px(16.0))
+                .flex()
+                .items_center()
+                .justify_center()
+                .text_color(cobalt.accent)
+                .child(Icon::new(icon).size(GSize::Sm)),
+        )
+        .child(
+            div()
+                .flex_none()
+                .w(px(88.0))
+                .whitespace_nowrap()
+                .child(label),
+        )
+        .child(
+            div()
+                .flex_none()
+                .w(px(12.0))
+                .flex()
+                .items_center()
+                .justify_end()
+                .text_color(cobalt.ink_3)
+                .child(Icon::new(IconName::ChevronRight).size(GSize::Xs)),
+        );
+    Button::new(id, "")
+        .variant(Variant::Outline)
+        .size(GSize::Xs)
+        .radius(GSize::Sm)
+        .full_width(true)
+        .left_section(content)
+        .on_click(on_click)
+}
+
 impl XWikiApp {
     pub(crate) fn render_project_cards(
         &self,
@@ -526,20 +573,15 @@ impl XWikiApp {
                                     .id("sidebar-api-reference-wrap")
                                     .tooltip(tooltip("查看服务器 API 接口定义"))
                                     .child(
-                                        Button::new("sidebar-api-reference", "API Reference")
-                                            .variant(Variant::Outline)
-                                            .size(GSize::Xs)
-                                            .radius(GSize::Sm)
-                                            .full_width(true)
-                                            .left_section(div().text_color(cobalt.accent).child(
-                                                Icon::new(IconName::BookOpen).size(GSize::Sm),
-                                            ))
-                                            .right_section(div().text_color(cobalt.ink_3).child(
-                                                Icon::new(IconName::ChevronRight).size(GSize::Xs),
-                                            ))
-                                            .on_click(cx.listener(|this, _, _, cx| {
+                                        developer_tool_button(
+                                            "sidebar-api-reference",
+                                            "API Reference",
+                                            IconName::BookOpen,
+                                            &cobalt,
+                                            cx.listener(|this, _, _, cx| {
                                                 this.open_api_reference(cx)
-                                            })),
+                                            }),
+                                        ),
                                     ),
                             )
                             .child(
@@ -547,22 +589,13 @@ impl XWikiApp {
                                     .id("sidebar-audit-wrap")
                                     .tooltip(tooltip("查看项目操作审计记录"))
                                     .child(
-                                        Button::new("sidebar-audit", "Audit Log")
-                                            .variant(Variant::Outline)
-                                            .size(GSize::Xs)
-                                            .radius(GSize::Sm)
-                                            .full_width(true)
-                                            .left_section(
-                                                div().text_color(cobalt.accent).child(
-                                                    Icon::new(IconName::Inbox).size(GSize::Sm),
-                                                ),
-                                            )
-                                            .right_section(div().text_color(cobalt.ink_3).child(
-                                                Icon::new(IconName::ChevronRight).size(GSize::Xs),
-                                            ))
-                                            .on_click(
-                                                cx.listener(|this, _, _, cx| this.open_audit(cx)),
-                                            ),
+                                        developer_tool_button(
+                                            "sidebar-audit",
+                                            "Audit Log",
+                                            IconName::Inbox,
+                                            &cobalt,
+                                            cx.listener(|this, _, _, cx| this.open_audit(cx)),
+                                        ),
                                     ),
                             ),
                     ),

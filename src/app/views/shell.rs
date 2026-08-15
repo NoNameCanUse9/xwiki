@@ -961,8 +961,14 @@ impl XWikiApp {
             _ => self
                 .selected_project
                 .as_deref()
-                .unwrap_or("workspace")
-                .to_string(),
+                .map(|project_id| {
+                    self.projects
+                        .iter()
+                        .find(|project| project.id == project_id)
+                        .map(|project| project.name.clone())
+                        .unwrap_or_else(|| project_id.to_string())
+                })
+                .unwrap_or_else(|| "workspace".to_string()),
         };
         let document = self
             .doc_path

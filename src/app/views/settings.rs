@@ -14,6 +14,89 @@ use guise::theme::Size;
 use crate::app::{Screen, XWikiApp};
 use crate::ui::{mono_label, tokens};
 
+const SETTINGS_ACTION_WIDTH: f32 = 116.0;
+const SETTINGS_COMPACT_ACTION_WIDTH: f32 = SETTINGS_ACTION_WIDTH;
+const SETTINGS_LABEL_WIDTH: f32 = 48.0;
+
+#[derive(Clone, Copy)]
+struct SettingsActionStyle {
+    width: f32,
+    color: Hsla,
+    variant: Variant,
+    disabled: bool,
+}
+
+impl SettingsActionStyle {
+    fn outline(width: f32, color: Hsla, disabled: bool) -> Self {
+        Self {
+            width,
+            color,
+            variant: Variant::Outline,
+            disabled,
+        }
+    }
+
+    fn subtle(width: f32, color: Hsla, disabled: bool) -> Self {
+        Self {
+            width,
+            color,
+            variant: Variant::Subtle,
+            disabled,
+        }
+    }
+
+    fn filled(width: f32, color: Hsla, disabled: bool) -> Self {
+        Self {
+            width,
+            color,
+            variant: Variant::Filled,
+            disabled,
+        }
+    }
+}
+
+/// Keep settings actions on the native guise button for keyboard/focus
+/// behavior, while giving every action the same icon and label columns.
+fn settings_action_button(
+    id: impl Into<ElementId>,
+    label: impl Into<SharedString>,
+    icon: IconName,
+    style: SettingsActionStyle,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+) -> Div {
+    let label: SharedString = label.into();
+    let content = div()
+        .flex()
+        .items_center()
+        .gap_2()
+        .child(
+            div()
+                .flex_none()
+                .w(px(20.0))
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(Icon::new(icon)),
+        )
+        .child(
+            div()
+                .flex_none()
+                .w(px(SETTINGS_LABEL_WIDTH))
+                .whitespace_nowrap()
+                .child(label),
+        );
+    div().flex_none().w(px(style.width)).child(
+        Button::new(id, "")
+            .variant(style.variant)
+            .color(style.color)
+            .size(Size::Xs)
+            .full_width(true)
+            .left_section(content)
+            .disabled(style.disabled)
+            .on_click(on_click),
+    )
+}
+
 impl XWikiApp {
     pub(crate) fn render_settings(&self, cx: &mut Context<Self>) -> Div {
         let theme = theme(cx).clone();
@@ -165,31 +248,33 @@ impl XWikiApp {
                         div()
                             .id("settings-test-tip")
                             .tooltip(guise::tooltip("检查服务器是否可达"))
-                            .child(
-                                Button::new(
-                                    "settings-test",
-                                    if test_busy {
-                                        "测试中…"
-                                    } else {
-                                        "测试连接"
-                                    },
-                                )
-                                .variant(Variant::Outline)
-                                .size(Size::Xs)
-                                .left_section(Icon::new(IconName::Network))
-                                .disabled(test_busy)
-                                .on_click(cx.listener(|this, _, _, cx| this.test_connection(cx))),
-                            ),
+                            .child(settings_action_button(
+                                "settings-test",
+                                if test_busy {
+                                    "测试中…"
+                                } else {
+                                    "测试连接"
+                                },
+                                IconName::Network,
+                                SettingsActionStyle::outline(
+                                    SETTINGS_ACTION_WIDTH,
+                                    theme.primary().hsla(),
+                                    test_busy,
+                                ),
+                                cx.listener(|this, _, _, cx| this.test_connection(cx)),
+                            )),
                     )
-                    .child(
-                        Button::new("settings-save", "保存")
-                            .variant(Variant::Filled)
-                            .color(ColorName::Blue)
-                            .size(Size::Xs)
-                            .left_section(Icon::new(IconName::Check))
-                            .disabled(test_busy || test_failed)
-                            .on_click(cx.listener(|this, _, _, cx| this.save_server_settings(cx))),
-                    ),
+                    .child(settings_action_button(
+                        "settings-save",
+                        "保存",
+                        IconName::Check,
+                        SettingsActionStyle::filled(
+                            SETTINGS_ACTION_WIDTH,
+                            theme.primary().hsla(),
+                            test_busy || test_failed,
+                        ),
+                        cx.listener(|this, _, _, cx| this.save_server_settings(cx)),
+                    )),
             )
             .child(status)
     }
@@ -217,6 +302,7 @@ impl XWikiApp {
             .flex_col()
             .gap_2()
             .pt_4()
+            .px_4()
             .border_t_1()
             .border_color(theme.border().hsla())
             .child(
@@ -243,21 +329,21 @@ impl XWikiApp {
                         div()
                             .id("settings-ota-tip")
                             .tooltip(guise::tooltip("检查 GitHub Releases 最新版本"))
-                            .child(
-                                Button::new(
-                                    "settings-ota-check",
-                                    if ota_busy {
-                                        "检查中…"
-                                    } else {
-                                        "检查更新"
-                                    },
-                                )
-                                .variant(Variant::Outline)
-                                .size(Size::Xs)
-                                .left_section(Icon::new(IconName::Redo2))
-                                .disabled(ota_busy)
-                                .on_click(cx.listener(|this, _, _, cx| this.check_ota_update(cx))),
-                            ),
+                            .child(settings_action_button(
+                                "settings-ota-check",
+                                if ota_busy {
+                                    "检查中…"
+                                } else {
+                                    "检查更新"
+                                },
+                                IconName::Redo2,
+                                SettingsActionStyle::outline(
+                                    SETTINGS_ACTION_WIDTH,
+                                    theme.primary().hsla(),
+                                    ota_busy,
+                                ),
+                                cx.listener(|this, _, _, cx| this.check_ota_update(cx)),
+                            )),
                     ),
             )
             .child(status)
@@ -302,22 +388,19 @@ impl XWikiApp {
                                     .child(format!("{} · {}", token.scope, token.created_at)),
                             ),
                     )
-                    .child(
-                        Button::new(ElementId::named_usize("revoke-token", i), "撤销")
-                            .variant(Variant::Outline)
-                            .color(ColorName::Red)
-                            .size(Size::Xs)
-                            .left_section(Icon::new(IconName::Delete))
-                            .disabled(access_busy)
-                            .on_click(cx.listener(move |this, _, window, cx| {
-                                this.confirm_revoke_token(
-                                    window,
-                                    cx,
-                                    id.clone(),
-                                    token_name.clone(),
-                                );
-                            })),
-                    )
+                    .child(settings_action_button(
+                        ElementId::named_usize("revoke-token", i),
+                        "撤销",
+                        IconName::Delete,
+                        SettingsActionStyle::outline(
+                            SETTINGS_COMPACT_ACTION_WIDTH,
+                            theme.danger().hsla(),
+                            access_busy,
+                        ),
+                        cx.listener(move |this, _, window, cx| {
+                            this.confirm_revoke_token(window, cx, id.clone(), token_name.clone());
+                        }),
+                    ))
                     .into_any_element()
             })
             .collect();
@@ -402,14 +485,17 @@ impl XWikiApp {
                         .text_color(theme.danger().hsla())
                         .child(error.clone()),
                 )
-                .child(
-                    Button::new("retry-access", "重试")
-                        .variant(Variant::Outline)
-                        .size(Size::Xs)
-                        .left_section(Icon::new(IconName::Redo2))
-                        .disabled(access_busy)
-                        .on_click(cx.listener(|this, _, _, cx| this.load_settings_access(cx))),
-                )
+                .child(settings_action_button(
+                    "retry-access",
+                    "重试",
+                    IconName::Redo2,
+                    SettingsActionStyle::outline(
+                        SETTINGS_COMPACT_ACTION_WIDTH,
+                        theme.primary().hsla(),
+                        access_busy,
+                    ),
+                    cx.listener(|this, _, _, cx| this.load_settings_access(cx)),
+                ))
                 .into_any_element()
         } else {
             div().into_any_element()
@@ -431,33 +517,34 @@ impl XWikiApp {
                         div()
                             .flex()
                             .gap_2()
-                            .child(
-                                Button::new("create-token", "新建")
-                                    .variant(Variant::Outline)
-                                    .size(Size::Xs)
-                                    .left_section(Icon::new(IconName::Plus))
-                                    .disabled(access_busy || test_busy)
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.open_create_token_dialog(window, cx)
-                                    })),
-                            )
-                            .child(
-                                Button::new(
-                                    "refresh-access",
-                                    if access_busy {
-                                        "加载中…"
-                                    } else {
-                                        "刷新"
-                                    },
-                                )
-                                .variant(Variant::Outline)
-                                .size(Size::Xs)
-                                .left_section(Icon::new(IconName::Redo2))
-                                .disabled(access_busy || test_busy)
-                                .on_click(
-                                    cx.listener(|this, _, _, cx| this.load_settings_access(cx)),
+                            .child(settings_action_button(
+                                "create-token",
+                                "新建",
+                                IconName::Plus,
+                                SettingsActionStyle::outline(
+                                    SETTINGS_COMPACT_ACTION_WIDTH,
+                                    theme.primary().hsla(),
+                                    access_busy || test_busy,
                                 ),
-                            ),
+                                cx.listener(|this, _, window, cx| {
+                                    this.open_create_token_dialog(window, cx)
+                                }),
+                            ))
+                            .child(settings_action_button(
+                                "refresh-access",
+                                if access_busy {
+                                    "加载中…"
+                                } else {
+                                    "刷新"
+                                },
+                                IconName::Redo2,
+                                SettingsActionStyle::outline(
+                                    SETTINGS_COMPACT_ACTION_WIDTH,
+                                    theme.primary().hsla(),
+                                    access_busy || test_busy,
+                                ),
+                                cx.listener(|this, _, _, cx| this.load_settings_access(cx)),
+                            )),
                     ),
             )
             .child(status)
@@ -513,39 +600,40 @@ impl XWikiApp {
                                     }),
                             ),
                     )
-                    .child(
-                        Button::new(
-                            ElementId::named_usize("toggle-user", i),
-                            if enabled { "停用" } else { "启用" },
-                        )
-                        .variant(if enabled {
-                            Variant::Outline
-                        } else {
-                            Variant::Subtle
-                        })
-                        .color(ColorName::Red)
-                        .size(Size::Xs)
-                        .left_section(Icon::new(if enabled {
+                    .child(settings_action_button(
+                        ElementId::named_usize("toggle-user", i),
+                        if enabled { "停用" } else { "启用" },
+                        if enabled {
                             IconName::CircleX
                         } else {
                             IconName::CircleCheck
-                        }))
-                        .disabled(access_busy)
-                        .on_click(cx.listener(
-                            move |this, _, window, cx| {
-                                if enabled {
-                                    this.confirm_disable_user(
-                                        window,
-                                        cx,
-                                        id.clone(),
-                                        user_name.clone(),
-                                    );
-                                } else {
-                                    this.set_user_enabled(&id, true, cx);
-                                }
-                            },
-                        )),
-                    )
+                        },
+                        if enabled {
+                            SettingsActionStyle::outline(
+                                SETTINGS_ACTION_WIDTH,
+                                theme.danger().hsla(),
+                                access_busy,
+                            )
+                        } else {
+                            SettingsActionStyle::subtle(
+                                SETTINGS_ACTION_WIDTH,
+                                theme.danger().hsla(),
+                                access_busy,
+                            )
+                        },
+                        cx.listener(move |this, _, window, cx| {
+                            if enabled {
+                                this.confirm_disable_user(
+                                    window,
+                                    cx,
+                                    id.clone(),
+                                    user_name.clone(),
+                                );
+                            } else {
+                                this.set_user_enabled(&id, true, cx);
+                            }
+                        }),
+                    ))
                     .into_any_element()
             })
             .collect();
@@ -586,16 +674,17 @@ impl XWikiApp {
                     .justify_between()
                     .gap_3()
                     .child(mono_label("用户管理").text_color(theme.dimmed().hsla()))
-                    .child(
-                        Button::new("create-user", "新建用户")
-                            .variant(Variant::Outline)
-                            .size(Size::Xs)
-                            .left_section(Icon::new(IconName::Plus))
-                            .disabled(access_busy || test_busy)
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.open_create_user_dialog(window, cx)
-                            })),
-                    ),
+                    .child(settings_action_button(
+                        "create-user",
+                        "新建用户",
+                        IconName::Plus,
+                        SettingsActionStyle::outline(
+                            SETTINGS_ACTION_WIDTH,
+                            theme.primary().hsla(),
+                            access_busy || test_busy,
+                        ),
+                        cx.listener(|this, _, window, cx| this.open_create_user_dialog(window, cx)),
+                    )),
             )
             .child(
                 div()
@@ -637,15 +726,17 @@ impl XWikiApp {
                         div()
                             .id("settings-logout-tip")
                             .tooltip(guise::tooltip("退出登录"))
-                            .child(
-                                Button::new("settings-logout", "退出登录")
-                                    .variant(Variant::Outline)
-                                    .color(ColorName::Red)
-                                    .size(Size::Xs)
-                                    .left_section(Icon::new(IconName::CircleX))
-                                    .disabled(self.editing || self.saving)
-                                    .on_click(cx.listener(|this, _, _, cx| this.logout(cx))),
-                            ),
+                            .child(settings_action_button(
+                                "settings-logout",
+                                "退出登录",
+                                IconName::CircleX,
+                                SettingsActionStyle::outline(
+                                    SETTINGS_ACTION_WIDTH,
+                                    theme.danger().hsla(),
+                                    self.editing || self.saving,
+                                ),
+                                cx.listener(|this, _, _, cx| this.logout(cx)),
+                            )),
                     ),
             )
             .child(
@@ -658,17 +749,17 @@ impl XWikiApp {
                     .border_t_1()
                     .border_color(theme.border().hsla())
                     .child(mono_label("界面主题").text_color(theme.dimmed().hsla()))
-                    .child(
-                        Button::new("settings-theme", if dark { "浅色模式" } else { "深色模式" })
-                            .variant(Variant::Outline)
-                            .size(Size::Xs)
-                            .left_section(Icon::new(if dark {
-                                IconName::Sun
-                            } else {
-                                IconName::Moon
-                            }))
-                            .on_click(cx.listener(|this, _, _, cx| this.toggle_theme(cx))),
-                    ),
+                    .child(settings_action_button(
+                        "settings-theme",
+                        if dark { "浅色模式" } else { "深色模式" },
+                        if dark { IconName::Sun } else { IconName::Moon },
+                        SettingsActionStyle::outline(
+                            SETTINGS_ACTION_WIDTH,
+                            theme.primary().hsla(),
+                            false,
+                        ),
+                        cx.listener(|this, _, _, cx| this.toggle_theme(cx)),
+                    )),
             )
     }
 }

@@ -9,9 +9,9 @@
 
 use gpui::*;
 use guise::{
-    Button, Icon, IconName,
     style::Variant,
-    theme::{ColorName, Size as GuiseSize, theme},
+    theme::{theme, ColorName, Size as GuiseSize},
+    Button, Icon, IconName,
 };
 
 use crate::app::{ConflictInfo, XWikiApp};
@@ -214,21 +214,6 @@ impl XWikiApp {
             } else {
                 div()
             })
-            // ── Document title ───────────────────────────────────
-            // Matches: [editable input: "XWiki Core Documentation"]
-            .child(
-                div()
-                    .px_6()
-                    .pt_5()
-                    .pb_3()
-                    .border_b_1()
-                    .border_color(cobalt.rule)
-                    .flex()
-                    .flex_col()
-                    .gap_2()
-                    .child(mono_label("文档路径").text_color(cobalt.ink_3))
-                    .child(div().w_full().child(self.editor_title_input.clone())),
-            )
             // ── Editor content / Preview ─────────────────────────
             .child(if self.editor_preview {
                 let content = self.editor_input.read(cx).text();
