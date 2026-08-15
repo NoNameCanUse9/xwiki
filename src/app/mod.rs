@@ -2246,7 +2246,7 @@ impl XWikiApp {
         .detach();
     }
 
-    fn move_target_error(from: &str, to: &str, is_dir: bool) -> Option<&'static str> {
+    fn move_target_error(from: &str, to: &str) -> Option<&'static str> {
         if to.is_empty() {
             return Some("目标路径不能为空");
         }
@@ -2262,12 +2262,31 @@ impl XWikiApp {
         if to == from {
             return Some("目标路径与当前位置相同");
         }
-        if is_dir
-            && to
-                .strip_prefix(from)
-                .is_some_and(|rest| rest.starts_with('/'))
+        // A path cannot live under itself: this also rejects files moved to
+        // their own "sub-path" (e.g. `a.md` -> `a.md/x`), which the server
+        // would reject anyway.
+        if to
+            .strip_prefix(from)
+            .is_some_and(|rest| rest.starts_with('/'))
         {
-            return Some("不能将目录移动到自身目录中");
+            return Some("不能移动到自身子路径");
+        }
+        None
+    }
+
+    /// Map `current` to its location after `from` is moved to `to`.
+    /// Returns `None` when `current` is not inside the moved subtree.
+    /// Prefix matches are guarded by a following `/` so `docs` does not
+    /// capture `docs2/...`.
+    fn mapped_path(from: &str, to: &str, is_dir: bool, current: &str) -> Option<String> {
+        if current == from {
+            return Some(to.to_string());
+        }
+        if is_dir {
+            return current
+                .strip_prefix(from)
+                .filter(|rest| rest.starts_with('/'))
+                .map(|rest| format!("{to}{rest}"));
         }
         None
     }
@@ -2297,12 +2316,9 @@ impl XWikiApp {
         let host = self.overlay_host.clone();
         host.update(cx, |host, cx| {
             host.open_modal(window, cx, move |close, _window, cx| {
-                let initial_path = current_path.clone();
-                let path_state = cx.new(|cx| {
-                    TextInput::new(cx)
-                        .placeholder("docs/README.md")
-                        .value(&initial_path)
-                });
+                // Start empty: pre-filling the current path would make a
+                // direct confirm collide with the same-path guard.
+                let path_state = cx.new(|cx| TextInput::new(cx).placeholder("docs/README.md"));
                 let content_theme = tokens::Cobalt::from_theme(theme(cx));
                 let submit_state = path_state.clone();
                 let submit_handle = handle.clone();
@@ -2324,9 +2340,7 @@ impl XWikiApp {
                     .left_section(Icon::new(IconName::Check).size(Size::Sm))
                     .on_click(move |_, window, cx| {
                         let to = submit_state.read(cx).text().trim().to_string();
-                        if let Some(error) =
-                            XWikiApp::move_target_error(&submit_path, &to, submit_dir)
-                        {
+                        if let Some(error) = XWikiApp::move_target_error(&submit_path, &to) {
                             let h = toast_host.clone();
                             h.update(cx, |host, cx| host.toast(error, cx));
                             return;
@@ -2520,34 +2534,19 @@ impl XWikiApp {
                 Ok(_) => {
                     let _ = this.update(cx, |app, cx| {
                         app.tree_loading = false;
-                        if let Some(current) = app.doc_path.clone() {
-                            let next = if current == from {
-                                Some(to.clone())
-                            } else if is_dir {
-                                current
-                                    .strip_prefix(&from)
-                                    .filter(|rest| rest.starts_with('/'))
-                                    .map(|rest| format!("{to}{rest}"))
-                            } else {
-                                None
-                            };
-                            if let Some(next) = next {
-                                app.doc_path = Some(next);
-                            }
-                        }
-                        let tree_path = if app.tree_path == from {
-                            to.clone()
-                        } else if is_dir {
-                            app.tree_path
-                                .strip_prefix(&from)
-                                .filter(|rest| rest.starts_with('/'))
-                                .map(|rest| format!("{to}{rest}"))
-                                .unwrap_or_else(|| app.tree_path.clone())
-                        } else {
-                            app.tree_path.clone()
-                        };
-                        app.tree_path = tree_path.clone();
+                        // Keep the doc being viewed open after the move:
+                        // map its path into the new location and reload it,
+                        // because load_tree clears the document state.
+                        let keep_doc = app
+                            .doc_path
+                            .clone()
+                            .and_then(|current| Self::mapped_path(&from, &to, is_dir, &current));
+                        let tree_path = Self::mapped_path(&from, &to, is_dir, &app.tree_path)
+                            .unwrap_or_else(|| app.tree_path.clone());
                         app.load_tree(&tree_path, cx);
+                        if let Some(new_doc) = keep_doc {
+                            app.open_doc(&new_doc, cx);
+                        }
                         app.notify(format!("已{action}为 {to}"), cx);
                     });
                 }
@@ -5823,10 +5822,43 @@ mod import_path_prompt_tests {
 
     #[test]
     fn move_target_validation_rejects_unsafe_paths() {
-        assert!(XWikiApp::move_target_error("docs/a.md", "", false).is_some());
-        assert!(XWikiApp::move_target_error("docs/a.md", "../a.md", false).is_some());
-        assert!(XWikiApp::move_target_error("docs", "docs/archive", true).is_some());
-        assert!(XWikiApp::move_target_error("docs/a.md", "archive/a.md", false).is_none());
+        assert!(XWikiApp::move_target_error("docs/a.md", "").is_some());
+        assert!(XWikiApp::move_target_error("docs/a.md", "../a.md").is_some());
+        assert!(XWikiApp::move_target_error("docs/a.md", "/abs.md").is_some());
+        assert!(XWikiApp::move_target_error("docs/a.md", "docs/a.md").is_some());
+        assert!(XWikiApp::move_target_error("docs", "docs/archive").is_some());
+        assert!(XWikiApp::move_target_error("a.md", "a.md/x").is_some());
+        assert!(XWikiApp::move_target_error("docs/a.md", "archive/a.md").is_none());
+    }
+
+    #[test]
+    fn move_path_mapping_follows_moved_subtree() {
+        // A moved file remaps only itself.
+        assert_eq!(
+            XWikiApp::mapped_path("docs/a.md", "archive/a.md", false, "docs/a.md"),
+            Some("archive/a.md".to_string())
+        );
+        assert_eq!(
+            XWikiApp::mapped_path("docs/a.md", "archive/a.md", false, "docs/b.md"),
+            None
+        );
+        // A moved directory remaps its subtree but not look-alike prefixes.
+        assert_eq!(
+            XWikiApp::mapped_path("docs", "archive", true, "docs/a.md"),
+            Some("archive/a.md".to_string())
+        );
+        assert_eq!(
+            XWikiApp::mapped_path("docs", "archive", true, "docs/sub/x.md"),
+            Some("archive/sub/x.md".to_string())
+        );
+        assert_eq!(
+            XWikiApp::mapped_path("docs", "archive", true, "docs2/a.md"),
+            None
+        );
+        assert_eq!(
+            XWikiApp::mapped_path("docs", "archive", true, "docs"),
+            Some("archive".to_string())
+        );
     }
 
     #[test]
