@@ -1026,7 +1026,7 @@ impl XWikiApp {
                             .child(
                                 ActionIcon::new("shell-quick-open", IconName::Search)
                                     .variant(Variant::Subtle)
-                                    .size(GuiseSize::Xs)
+                                    .size(GuiseSize::Md)
                                     .on_click(cx.listener(|this, _, window, cx| {
                                         this.toggle_quick_open(window, cx)
                                     })),
@@ -1064,7 +1064,7 @@ impl XWikiApp {
                                     },
                                 )
                                 .variant(Variant::Subtle)
-                                .size(GuiseSize::Xs)
+                                .size(GuiseSize::Md)
                                 .on_click(cx.listener(|this, _, _, cx| this.toggle_theme(cx))),
                             )
                             .tooltip(guise_tooltip(format!(
@@ -1082,7 +1082,7 @@ impl XWikiApp {
                                     } else {
                                         Variant::Subtle
                                     })
-                                    .size(GuiseSize::Xs)
+                                    .size(GuiseSize::Md)
                                     .disabled(self.editing)
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.screen = Screen::Settings;

@@ -63,6 +63,45 @@ fn server_status_network_error_is_6() {
 }
 
 #[test]
+fn positional_parser_keeps_command_arguments_and_drops_options() {
+    let args = vec![
+        "update".into(),
+        "prj_1".into(),
+        "docs/guide.md".into(),
+        "--file".into(),
+        "guide.md".into(),
+        "--message".into(),
+        "release notes".into(),
+        "--dry-run".into(),
+        "--json".into(),
+    ];
+    assert_eq!(
+        positional_args(&args),
+        vec!["update", "prj_1", "docs/guide.md"]
+    );
+    assert_eq!(
+        option_value(&args, "--message").as_deref(),
+        Some("release notes")
+    );
+    assert!(has_flag(&args, "--dry-run"));
+}
+
+#[test]
+fn exit_codes_follow_api_error_contract() {
+    let error = |code: &str, status| crate::api::ApiError {
+        code: code.into(),
+        message: String::new(),
+        request_id: None,
+        status,
+    };
+    assert_eq!(exit_code(&error("invalid_query", 400)), 2);
+    assert_eq!(exit_code(&error("authentication_required", 401)), 3);
+    assert_eq!(exit_code(&error("doc_not_found", 404)), 4);
+    assert_eq!(exit_code(&error("page_locked", 409)), 5);
+    assert_eq!(exit_code(&error("internal_error", 500)), 6);
+}
+
+#[test]
 fn history_json_keeps_pagination_metadata() {
     let page = crate::api::dto::CommitListResponse {
         commits: vec![crate::api::dto::Commit {

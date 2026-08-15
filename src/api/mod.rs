@@ -67,6 +67,14 @@ mod tests {
         assert_eq!(c.files.len(), 1);
         assert_eq!(c.files[0].status, "A");
     }
+
+    #[test]
+    fn wildcard_paths_are_url_encoded_without_losing_slashes() {
+        assert_eq!(
+            super::Client::encode_path("docs/a guide#.md"),
+            "docs/a%20guide%23.md"
+        );
+    }
 }
 
 use serde::de::DeserializeOwned;
@@ -183,6 +191,24 @@ impl Client {
 
     fn url(&self, path: &str) -> String {
         format!("{}{}", self.base, path)
+    }
+
+    /// Escapes a wildcard path parameter while preserving `/` separators.
+    /// Reqwest accepts spaces in query values but rejects them in a raw URL,
+    /// so document and attachment paths must be encoded before construction.
+    fn encode_path(path: &str) -> String {
+        const HEX: &[u8; 16] = b"0123456789ABCDEF";
+        let mut out = String::with_capacity(path.len());
+        for byte in path.bytes() {
+            if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~' | b'/') {
+                out.push(byte as char);
+            } else {
+                out.push('%');
+                out.push(HEX[(byte >> 4) as usize] as char);
+                out.push(HEX[(byte & 0x0f) as usize] as char);
+            }
+        }
+        out
     }
 
     /// Turns a non-success response into the uniform `ApiError`, extracting
@@ -336,6 +362,34 @@ impl Client {
             .map(|(user, _)| user)
     }
 
+    pub async fn logout(&self) -> Result<(), ApiError> {
+        let _: serde_json::Value =
+            Self::send(self.http.post(self.url("/api/v1/auth/logout"))).await?;
+        Ok(())
+    }
+
+    pub async fn change_password(
+        &self,
+        current_password: &str,
+        new_password: &str,
+    ) -> Result<(), ApiError> {
+        #[derive(Serialize)]
+        struct Body<'a> {
+            current_password: &'a str,
+            new_password: &'a str,
+        }
+        let _: serde_json::Value = Self::send(
+            self.http
+                .post(self.url("/api/v1/auth/password"))
+                .json(&Body {
+                    current_password,
+                    new_password,
+                }),
+        )
+        .await?;
+        Ok(())
+    }
+
     /// Login and return the server-issued cookie so the GUI can persist it.
     pub async fn login_with_session(
         &self,
@@ -363,8 +417,18 @@ impl Client {
     }
 
     pub async fn projects(&self) -> Result<Vec<dto::Project>, ApiError> {
-        let resp: dto::ProjectsResponse =
-            Self::send(self.http.get(self.url("/api/v1/projects"))).await?;
+        self.projects_status(None).await
+    }
+
+    pub async fn projects_status(
+        &self,
+        status: Option<&str>,
+    ) -> Result<Vec<dto::Project>, ApiError> {
+        let mut req = self.http.get(self.url("/api/v1/projects"));
+        if let Some(status) = status {
+            req = req.query(&[("status", status)]);
+        }
+        let resp: dto::ProjectsResponse = Self::send(req).await?;
         Ok(resp.projects)
     }
 
@@ -402,17 +466,28 @@ impl Client {
         Ok(resp.tree)
     }
 
-    /// Reads a doc as markdown source (format=raw).
-    pub async fn page(&self, project_id: &str, path: &str) -> Result<dto::DocPage, ApiError> {
+    pub async fn home(&self, project_id: &str) -> Result<dto::DocPage, ApiError> {
         Self::send(
             self.http
-                .get(self.url(&format!(
-                    "/api/v1/projects/{}/docs/pages/{}",
-                    project_id, path
-                )))
-                .query(&[("format", "raw")]),
+                .get(self.url(&format!("/api/v1/projects/{project_id}/docs/home"))),
         )
         .await
+    }
+
+    /// Reads a doc as markdown source (format=raw).
+    pub async fn page(&self, project_id: &str, path: &str) -> Result<dto::DocPage, ApiError> {
+        self.page_with_format_at(project_id, path, "raw", None)
+            .await
+    }
+
+    pub async fn page_with_format(
+        &self,
+        project_id: &str,
+        path: &str,
+        format: &str,
+    ) -> Result<dto::DocPage, ApiError> {
+        self.page_with_format_at(project_id, path, format, None)
+            .await
     }
 
     pub async fn page_at(
@@ -421,13 +496,29 @@ impl Client {
         path: &str,
         revision: &str,
     ) -> Result<dto::DocPage, ApiError> {
+        self.page_with_format_at(project_id, path, "raw", Some(revision))
+            .await
+    }
+
+    pub async fn page_with_format_at(
+        &self,
+        project_id: &str,
+        path: &str,
+        format: &str,
+        revision: Option<&str>,
+    ) -> Result<dto::DocPage, ApiError> {
+        let mut query = vec![("format", format.to_string())];
+        if let Some(revision) = revision {
+            query.push(("at", revision.to_string()));
+        }
         Self::send(
             self.http
                 .get(self.url(&format!(
                     "/api/v1/projects/{}/docs/pages/{}",
-                    project_id, path
+                    project_id,
+                    Self::encode_path(path)
                 )))
-                .query(&[("format", "raw"), ("at", revision)]),
+                .query(&query),
         )
         .await
     }
@@ -448,17 +539,35 @@ impl Client {
         message: &str,
         changes: Vec<dto::Change>,
     ) -> Result<dto::ChangesetResult, ApiError> {
+        self.apply_changeset_with_options(project_id, base_revision, message, changes, false, None)
+            .await
+    }
+
+    pub async fn apply_changeset_with_options(
+        &self,
+        project_id: &str,
+        base_revision: &str,
+        message: &str,
+        changes: Vec<dto::Change>,
+        dry_run: bool,
+        idempotency_key: Option<&str>,
+    ) -> Result<dto::ChangesetResult, ApiError> {
         let body = dto::ChangesetRequest {
             base_revision: base_revision.to_string(),
             message: message.to_string(),
             changes,
         };
-        Self::send(
-            self.http
-                .post(self.url(&format!("/api/v1/projects/{}/changesets", project_id)))
-                .json(&body),
-        )
-        .await
+        let mut req = self
+            .http
+            .post(self.url(&format!("/api/v1/projects/{}/changesets", project_id)))
+            .json(&body);
+        if dry_run {
+            req = req.query(&[("dry_run", "true")]);
+        }
+        if let Some(key) = idempotency_key {
+            req = req.header("Idempotency-Key", key);
+        }
+        Self::send(req).await
     }
 
     pub async fn acquire_lock(&self, project_id: &str, path: &str) -> Result<dto::Lock, ApiError> {
@@ -505,6 +614,19 @@ impl Client {
         Ok(resp.released)
     }
 
+    pub async fn force_release_lock(&self, project_id: &str, path: &str) -> Result<bool, ApiError> {
+        let resp: dto::ReleasedResponse = Self::send(
+            self.http
+                .post(self.url(&format!(
+                    "/api/v1/projects/{}/locks/force-release",
+                    project_id
+                )))
+                .query(&[("path", path)]),
+        )
+        .await?;
+        Ok(resp.released)
+    }
+
     pub async fn lock_status(
         &self,
         project_id: &str,
@@ -519,6 +641,7 @@ impl Client {
         Ok(resp.lock)
     }
 
+    #[allow(dead_code)]
     pub async fn commits(
         &self,
         project_id: &str,
@@ -593,6 +716,27 @@ impl Client {
         )
         .await?;
         Ok(resp.project)
+    }
+
+    pub async fn restore_deleted_project(
+        &self,
+        project_id: &str,
+    ) -> Result<dto::Project, ApiError> {
+        let resp: dto::ProjectResponse = Self::send(
+            self.http
+                .post(self.url(&format!("/api/v1/projects/{project_id}/restore"))),
+        )
+        .await?;
+        Ok(resp.project)
+    }
+
+    pub async fn purge_deleted_project(&self, project_id: &str) -> Result<(), ApiError> {
+        let _: serde_json::Value = Self::send(
+            self.http
+                .delete(self.url(&format!("/api/v1/projects/{project_id}/purge"))),
+        )
+        .await?;
+        Ok(())
     }
 
     /// Rename a project. The server updates metadata and refreshes the
@@ -675,6 +819,7 @@ impl Client {
         .await
     }
 
+    #[allow(dead_code)]
     pub async fn edit_doc(
         &self,
         project_id: &str,
@@ -727,13 +872,37 @@ impl Client {
         project_id: &str,
         q: &str,
     ) -> Result<Vec<dto::SearchResult>, ApiError> {
-        let resp: dto::SearchResponse = Self::send(
+        self.search_with_limit(project_id, q, None).await
+    }
+
+    pub async fn search_with_limit(
+        &self,
+        project_id: &str,
+        q: &str,
+        limit: Option<u32>,
+    ) -> Result<Vec<dto::SearchResult>, ApiError> {
+        Ok(self
+            .search_detail_with_limit(project_id, q, limit)
+            .await?
+            .results)
+    }
+
+    pub async fn search_detail_with_limit(
+        &self,
+        project_id: &str,
+        q: &str,
+        limit: Option<u32>,
+    ) -> Result<dto::SearchResponse, ApiError> {
+        let mut query = vec![("q", q.to_string())];
+        if let Some(limit) = limit {
+            query.push(("limit", limit.to_string()));
+        }
+        Self::send(
             self.http
                 .get(self.url(&format!("/api/v1/projects/{project_id}/search")))
-                .query(&[("q", q)]),
+                .query(&query),
         )
-        .await?;
-        Ok(resp.results)
+        .await
     }
 
     /// Create (or reuse) the public share for one document.
@@ -755,13 +924,20 @@ impl Client {
         project_id: &str,
         path: &str,
     ) -> Result<Vec<dto::Backlink>, ApiError> {
-        let resp: dto::BacklinksResponse = Self::send(
+        Ok(self.backlinks_detail(project_id, path).await?.backlinks)
+    }
+
+    pub async fn backlinks_detail(
+        &self,
+        project_id: &str,
+        path: &str,
+    ) -> Result<dto::BacklinksResponse, ApiError> {
+        Self::send(
             self.http
                 .get(self.url(&format!("/api/v1/projects/{project_id}/backlinks")))
                 .query(&[("path", path)]),
         )
-        .await?;
-        Ok(resp.backlinks)
+        .await
     }
 
     pub async fn file_history(
@@ -770,7 +946,8 @@ impl Client {
         path: &str,
     ) -> Result<Vec<dto::Commit>, ApiError> {
         let resp: dto::FileHistoryResponse = Self::send(self.http.get(self.url(&format!(
-            "/api/v1/projects/{project_id}/files/history/{path}"
+            "/api/v1/projects/{project_id}/files/history/{}",
+            Self::encode_path(path)
         ))))
         .await?;
         Ok(resp.commits)
@@ -797,10 +974,10 @@ impl Client {
         project_id: &str,
         path: &str,
     ) -> Result<Vec<u8>, ApiError> {
-        Self::send_bytes(
-            self.http
-                .get(self.url(&format!("/api/v1/projects/{project_id}/attachments/{path}"))),
-        )
+        Self::send_bytes(self.http.get(self.url(&format!(
+            "/api/v1/projects/{project_id}/attachments/{}",
+            Self::encode_path(path)
+        ))))
         .await
     }
 
@@ -815,17 +992,31 @@ impl Client {
         message: &str,
         files: Vec<dto::ImportFile>,
     ) -> Result<dto::ImportResult, ApiError> {
+        self.import_files_with_options(project_id, base_revision, message, files, None)
+            .await
+    }
+
+    pub async fn import_files_with_options(
+        &self,
+        project_id: &str,
+        base_revision: &str,
+        message: &str,
+        files: Vec<dto::ImportFile>,
+        idempotency_key: Option<&str>,
+    ) -> Result<dto::ImportResult, ApiError> {
         let body = dto::ImportRequest {
             base_revision: base_revision.to_string(),
             message: message.to_string(),
             files,
         };
-        Self::send(
-            self.http
-                .post(self.url(&format!("/api/v1/projects/{project_id}/import")))
-                .json(&body),
-        )
-        .await
+        let mut req = self
+            .http
+            .post(self.url(&format!("/api/v1/projects/{project_id}/import")))
+            .json(&body);
+        if let Some(key) = idempotency_key {
+            req = req.header("Idempotency-Key", key);
+        }
+        Self::send(req).await
     }
 
     /// Backwards-compatible name for callers that used the original import
@@ -896,6 +1087,26 @@ impl Client {
         path: &str,
         content_base64: &str,
     ) -> Result<dto::ChangesetResult, ApiError> {
+        self.upload_attachment_with_options(
+            project_id,
+            base_revision,
+            path,
+            content_base64,
+            "",
+            None,
+        )
+        .await
+    }
+
+    pub async fn upload_attachment_with_options(
+        &self,
+        project_id: &str,
+        base_revision: &str,
+        path: &str,
+        content_base64: &str,
+        message: &str,
+        idempotency_key: Option<&str>,
+    ) -> Result<dto::ChangesetResult, ApiError> {
         #[derive(Serialize)]
         struct EncodedChange<'a> {
             op: &'a str,
@@ -909,21 +1120,23 @@ impl Client {
             message: &'a str,
             changes: Vec<EncodedChange<'a>>,
         }
-        Self::send(
-            self.http
-                .post(self.url(&format!("/api/v1/projects/{project_id}/changesets")))
-                .json(&Body {
-                    base_revision,
-                    message: "",
-                    changes: vec![EncodedChange {
-                        op: "create",
-                        path,
-                        content: content_base64,
-                        encoding: "base64",
-                    }],
-                }),
-        )
-        .await
+        let mut req = self
+            .http
+            .post(self.url(&format!("/api/v1/projects/{project_id}/changesets")))
+            .json(&Body {
+                base_revision,
+                message,
+                changes: vec![EncodedChange {
+                    op: "create",
+                    path,
+                    content: content_base64,
+                    encoding: "base64",
+                }],
+            });
+        if let Some(key) = idempotency_key {
+            req = req.header("Idempotency-Key", key);
+        }
+        Self::send(req).await
     }
 
     pub async fn delete_attachment(
@@ -932,7 +1145,18 @@ impl Client {
         base_revision: &str,
         path: &str,
     ) -> Result<dto::ChangesetResult, ApiError> {
-        self.apply_changeset(
+        self.delete_attachment_with_options(project_id, base_revision, path, None)
+            .await
+    }
+
+    pub async fn delete_attachment_with_options(
+        &self,
+        project_id: &str,
+        base_revision: &str,
+        path: &str,
+        idempotency_key: Option<&str>,
+    ) -> Result<dto::ChangesetResult, ApiError> {
+        self.apply_changeset_with_options(
             project_id,
             base_revision,
             "删除附件",
@@ -942,6 +1166,8 @@ impl Client {
                 new_path: None,
                 content: None,
             }],
+            false,
+            idempotency_key,
         )
         .await
     }
@@ -975,7 +1201,9 @@ impl Client {
     }
 
     pub async fn revoke_token(&self, id: &str) -> Result<(), ApiError> {
-        Self::send(self.http.delete(self.url(&format!("/api/v1/tokens/{id}")))).await
+        let _: serde_json::Value =
+            Self::send(self.http.delete(self.url(&format!("/api/v1/tokens/{id}")))).await?;
+        Ok(())
     }
 
     pub async fn users(&self) -> Result<Vec<dto::User>, ApiError> {
@@ -984,17 +1212,34 @@ impl Client {
     }
 
     pub async fn create_user(&self, username: &str, password: &str) -> Result<dto::User, ApiError> {
+        self.create_user_with_options(username, password, "", false)
+            .await
+    }
+
+    pub async fn create_user_with_options(
+        &self,
+        username: &str,
+        password: &str,
+        display_name: &str,
+        is_admin: bool,
+    ) -> Result<dto::User, ApiError> {
         #[derive(Serialize)]
         struct Body<'a> {
             username: &'a str,
             password: &'a str,
+            #[serde(skip_serializing_if = "str::is_empty")]
+            display_name: &'a str,
+            #[serde(skip_serializing_if = "std::ops::Not::not")]
+            is_admin: bool,
         }
-        let resp: dto::UserResponse = Self::send(
-            self.http
-                .post(self.url("/api/v1/users"))
-                .json(&Body { username, password }),
-        )
-        .await?;
+        let resp: dto::UserResponse =
+            Self::send(self.http.post(self.url("/api/v1/users")).json(&Body {
+                username,
+                password,
+                display_name,
+                is_admin,
+            }))
+            .await?;
         Ok(resp.user)
     }
 
@@ -1006,6 +1251,12 @@ impl Client {
         )
         .await?;
         Ok(resp.user)
+    }
+
+    pub async fn delete_user(&self, id: &str) -> Result<(), ApiError> {
+        let _: serde_json::Value =
+            Self::send(self.http.delete(self.url(&format!("/api/v1/users/{id}")))).await?;
+        Ok(())
     }
 
     pub async fn audit(&self, project_id: &str) -> Result<Vec<dto::AuditEntry>, ApiError> {
@@ -1022,7 +1273,15 @@ impl Client {
         project_id: &str,
         sha: &str,
     ) -> Result<Vec<dto::DiffStat>, ApiError> {
-        let resp: dto::DiffStatsResponse = Self::send(
+        Ok(self.diff_stats_detail(project_id, sha).await?.stats)
+    }
+
+    pub async fn diff_stats_detail(
+        &self,
+        project_id: &str,
+        sha: &str,
+    ) -> Result<dto::DiffStatsResponse, ApiError> {
+        Self::send(
             self.http
                 .get(self.url(&format!(
                     "/api/v1/projects/{}/commits/{}/diff",
@@ -1030,8 +1289,7 @@ impl Client {
                 )))
                 .query(&[("format", "numstat")]),
         )
-        .await?;
-        Ok(resp.stats)
+        .await
     }
 
     /// Full patch diff for a commit (file-level unified diff lines).
@@ -1164,7 +1422,7 @@ pub mod dto {
         pub request_id: Option<String>,
     }
 
-    #[derive(Debug, Deserialize)]
+    #[derive(Debug, Deserialize, Serialize)]
     pub struct User {
         pub id: String,
         pub username: String,
@@ -1174,9 +1432,11 @@ pub mod dto {
         pub is_admin: bool,
         #[serde(default)]
         pub disabled: bool,
+        #[serde(default)]
+        pub created_at: String,
     }
 
-    #[derive(Debug, Deserialize)]
+    #[derive(Debug, Deserialize, Serialize)]
     pub struct UserResponse {
         pub user: User,
     }
@@ -1188,21 +1448,27 @@ pub mod dto {
         #[serde(default)]
         pub description: String,
         #[serde(default)]
+        pub repo_dir: String,
+        #[serde(default)]
         pub archived: bool,
+        #[serde(default)]
+        pub deleted: bool,
+        #[serde(default)]
+        pub deleted_at: Option<String>,
         #[serde(default)]
         pub created_at: String,
         #[serde(default)]
         pub updated_at: String,
     }
 
-    #[derive(Debug, Deserialize)]
+    #[derive(Debug, Deserialize, Serialize)]
     pub struct ProjectsResponse {
         // Go marshals nil slices as null; treat it as an empty list.
         #[serde(default, deserialize_with = "crate::api::de_null_default")]
         pub projects: Vec<Project>,
     }
 
-    #[derive(Debug, Deserialize)]
+    #[derive(Debug, Deserialize, Serialize)]
     pub struct ProjectResponse {
         pub project: Project,
     }
@@ -1223,7 +1489,7 @@ pub mod dto {
         pub tree: Vec<TreeEntry>,
     }
 
-    #[derive(Debug, Deserialize)]
+    #[derive(Debug, Deserialize, Serialize)]
     pub struct DocPage {
         pub path: String,
         pub format: String,
@@ -1235,7 +1501,7 @@ pub mod dto {
         pub encoding: String,
     }
 
-    #[derive(Debug, Deserialize)]
+    #[derive(Debug, Deserialize, Serialize)]
     pub struct RevisionResponse {
         pub revision: String,
     }
@@ -1257,7 +1523,7 @@ pub mod dto {
         pub changes: Vec<Change>,
     }
 
-    #[derive(Debug, Deserialize)]
+    #[derive(Debug, Deserialize, Serialize)]
     pub struct ChangesetResult {
         pub commit: String,
         pub revision: String,
@@ -1265,7 +1531,7 @@ pub mod dto {
         pub preview: Option<serde_json::Value>,
     }
 
-    #[derive(Debug, Deserialize)]
+    #[derive(Debug, Deserialize, Serialize)]
     pub struct Lock {
         pub path: String,
         pub user_id: String,
@@ -1274,12 +1540,12 @@ pub mod dto {
         pub expires_at: String,
     }
 
-    #[derive(Debug, Deserialize)]
+    #[derive(Debug, Deserialize, Serialize)]
     pub struct LockResponse {
         pub lock: Option<Lock>,
     }
 
-    #[derive(Debug, Deserialize)]
+    #[derive(Debug, Deserialize, Serialize)]
     pub struct ReleasedResponse {
         pub released: bool,
     }
@@ -1300,13 +1566,13 @@ pub mod dto {
         pub has_more: bool,
     }
 
-    #[derive(Debug, Deserialize)]
+    #[derive(Debug, Deserialize, Serialize)]
     pub struct CommitFile {
         pub status: String,
         pub path: String,
     }
 
-    #[derive(Debug, Deserialize)]
+    #[derive(Debug, Deserialize, Serialize)]
     pub struct CommitDetail {
         pub sha: String,
         pub message: String,
@@ -1316,19 +1582,19 @@ pub mod dto {
         pub files: Vec<CommitFile>,
     }
 
-    #[derive(Debug, Deserialize)]
+    #[derive(Debug, Deserialize, Serialize)]
     pub struct CommitDetailResponse {
         pub commit: CommitDetail,
     }
 
-    #[derive(Debug, Deserialize)]
+    #[derive(Debug, Deserialize, Serialize)]
     pub struct DiffStat {
         pub path: String,
         pub added: u32,
         pub deleted: u32,
     }
 
-    #[derive(Debug, Deserialize)]
+    #[derive(Debug, Deserialize, Serialize)]
     pub struct DiffStatsResponse {
         pub sha: String,
         pub format: String,
@@ -1338,7 +1604,7 @@ pub mod dto {
 
     /// Patch diff for one commit (`format=patch`): server returns the
     /// unified diff as a single text block.
-    #[derive(Debug, Deserialize)]
+    #[derive(Debug, Deserialize, Serialize)]
     pub struct CommitPatchResponse {
         pub sha: String,
         pub format: String,
@@ -1346,7 +1612,7 @@ pub mod dto {
         pub patch: String,
     }
 
-    #[derive(Debug, Clone)]
+    #[derive(Debug, Clone, Serialize)]
     pub struct CommitPatch {
         pub sha: String,
         pub format: String,
@@ -1358,31 +1624,33 @@ pub mod dto {
         pub commit: Commit,
     }
 
-    #[derive(Debug, Deserialize)]
+    #[derive(Debug, Deserialize, Serialize)]
     pub struct SearchResult {
         pub path: String,
         pub snippet: String,
     }
 
-    #[derive(Debug, Deserialize)]
+    #[derive(Debug, Deserialize, Serialize)]
     pub struct SearchResponse {
+        #[serde(default)]
+        pub query: String,
         #[serde(default, deserialize_with = "crate::api::de_null_default")]
         pub results: Vec<SearchResult>,
     }
 
-    #[derive(Debug, Deserialize, Clone)]
+    #[derive(Debug, Deserialize, Serialize, Clone)]
     pub struct Share {
         pub token: String,
         pub url: String,
     }
 
-    #[derive(Debug, Deserialize, Clone)]
+    #[derive(Debug, Deserialize, Serialize, Clone)]
     pub struct Backlink {
         pub source: String,
         pub snippet: String,
     }
 
-    #[derive(Debug, Deserialize)]
+    #[derive(Debug, Deserialize, Serialize)]
     pub struct BacklinksResponse {
         #[serde(default)]
         pub path: String,
@@ -1390,7 +1658,7 @@ pub mod dto {
         pub backlinks: Vec<Backlink>,
     }
 
-    #[derive(Debug, Deserialize)]
+    #[derive(Debug, Deserialize, Serialize)]
     pub struct FileHistoryResponse {
         pub path: String,
         #[serde(default, deserialize_with = "crate::api::de_null_default")]
@@ -1410,14 +1678,14 @@ pub mod dto {
         pub files: Vec<ImportFile>,
     }
 
-    #[derive(Debug, Deserialize)]
+    #[derive(Debug, Deserialize, Serialize)]
     pub struct ImportResult {
         pub commit: String,
         pub revision: String,
         pub imported: u32,
     }
 
-    #[derive(Debug, Deserialize)]
+    #[derive(Debug, Deserialize, Serialize)]
     pub struct ImportProjectResult {
         pub project: Project,
         pub commits: u32,
@@ -1429,7 +1697,7 @@ pub mod dto {
         pub content: Vec<u8>,
     }
 
-    #[derive(Debug, Deserialize)]
+    #[derive(Debug, Deserialize, Serialize)]
     pub struct Token {
         pub id: String,
         pub name: String,
@@ -1439,47 +1707,55 @@ pub mod dto {
         #[serde(default)]
         pub created_at: String,
         #[serde(default)]
+        pub last_used_at: String,
+        #[serde(default)]
         pub revoked_at: String,
     }
 
-    #[derive(Debug, Deserialize)]
+    #[derive(Debug, Deserialize, Serialize)]
     pub struct TokenListResponse {
         #[serde(default, deserialize_with = "crate::api::de_null_default")]
         pub tokens: Vec<Token>,
     }
 
-    #[derive(Debug, Deserialize)]
+    #[derive(Debug, Deserialize, Serialize)]
     pub struct TokenCreateResponse {
         pub token: Token,
         pub secret: String,
     }
 
-    #[derive(Debug, Deserialize)]
+    #[derive(Debug, Deserialize, Serialize)]
     pub struct UsersResponse {
         #[serde(default, deserialize_with = "crate::api::de_null_default")]
         pub users: Vec<User>,
     }
 
-    #[derive(Debug, Deserialize)]
+    #[derive(Debug, Deserialize, Serialize)]
     pub struct AuditEntry {
         pub id: String,
         pub actor_type: String,
         pub actor_id: String,
         #[serde(default)]
+        pub project_id: String,
+        #[serde(default)]
         pub action: String,
         #[serde(default)]
         pub path: String,
         #[serde(default)]
+        pub detail: String,
+        #[serde(default)]
+        pub request_id: String,
+        #[serde(default)]
         pub created_at: String,
     }
 
-    #[derive(Debug, Deserialize)]
+    #[derive(Debug, Deserialize, Serialize)]
     pub struct AuditResponse {
         #[serde(default, deserialize_with = "crate::api::de_null_default")]
         pub entries: Vec<AuditEntry>,
     }
 
-    #[derive(Debug, Deserialize)]
+    #[derive(Debug, Deserialize, Serialize)]
     pub struct Meta {
         pub version: String,
         pub api_version: String,
@@ -1497,7 +1773,7 @@ pub mod dto {
         pub published_at: Option<String>,
     }
 
-    #[derive(Debug, Deserialize)]
+    #[derive(Debug, Deserialize, Serialize)]
     pub struct MetaLimits {
         pub max_doc_bytes: u64,
         pub max_import_bytes: u64,

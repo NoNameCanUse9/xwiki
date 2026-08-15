@@ -3045,7 +3045,7 @@ impl XWikiApp {
         // Do not flash a skeleton for fast local/server responses. Existing
         // project cards remain visible while a refresh is in flight.
         cx.spawn(async move |this, cx| {
-            Timer::after(Duration::from_millis(150)).await;
+            Timer::after(Duration::from_millis(250)).await;
             let _ = this.update(cx, |app, cx| {
                 if app.loading && app.projects.is_empty() && app.projects_error.is_none() {
                     app.project_skeleton_visible = true;

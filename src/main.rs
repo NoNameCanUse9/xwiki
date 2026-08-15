@@ -72,7 +72,7 @@ fn main() {
 
         cx.spawn(async move |cx| {
             let start_bounds = cx
-                .update(|cx| Bounds::centered(None, size(px(1280.0), px(680.0)), cx))
+                .update(|cx| Bounds::centered(None, size(px(1230.0), px(680.0)), cx))
                 .expect("app was released");
             cx.open_window(
                 WindowOptions {

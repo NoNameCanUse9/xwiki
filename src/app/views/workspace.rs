@@ -353,6 +353,9 @@ impl XWikiApp {
         let row = div()
             .id(id)
             .h_full()
+            // Fixed width so 全部/活跃/已归档 render as equal segments
+            // (they differ in character count and are content-sized).
+            .w(px(64.0))
             .flex()
             .items_center()
             .justify_center()
@@ -721,6 +724,7 @@ impl XWikiApp {
                                     },
                                 )
                                 .variant(Variant::Filled)
+                                .size(GSize::Xs)
                                 .radius(GSize::Sm)
                                 .left_section(Icon::new(IconName::Plus).size(GSize::Sm))
                                 .disabled(self.project_action.is_some())
