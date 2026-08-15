@@ -90,6 +90,14 @@ var projectMutationCoordinator mutationCoordinator
 // ErrArchived reports writes to an archived project.
 var ErrArchived = errors.New("project is archived")
 
+// ErrPathExists reports a move whose target path is already occupied. The
+// server never overwrites an existing path, so clients can preflight moves
+// with a dry run and surface the conflict before submitting.
+var ErrPathExists = errors.New("target path already exists")
+
+// ErrSourceMissing reports a move whose source path does not exist.
+var ErrSourceMissing = errors.New("source path does not exist")
+
 // ApplyChangeset applies a set of file changes in one atomic commit. A dry
 // run returns a preview without touching any ref. Concurrent stale writes are
 // rejected with ErrConflict by Git's compare-and-swap update-ref.
@@ -252,6 +260,9 @@ func validateChangeset(input ChangesetInput) error {
 			if c.NewPath == "" || !validateDocPathInternal(c.NewPath) {
 				return fmt.Errorf("invalid new_path %q", c.NewPath)
 			}
+			if path.Clean(c.Path) == path.Clean(c.NewPath) {
+				return fmt.Errorf("new_path must differ from path")
+			}
 		default:
 			return fmt.Errorf("unsupported op %q", c.Op)
 		}
@@ -289,9 +300,21 @@ func applyOne(wtDir string, c Change) (ChangeOutcome, error) {
 		}
 		return ChangeOutcome{Op: c.Op, Path: c.Path, Status: "deleted"}, nil
 	case "move":
+		if _, err := os.Lstat(abs); err != nil {
+			if os.IsNotExist(err) {
+				return ChangeOutcome{}, ErrSourceMissing
+			}
+			return ChangeOutcome{}, fmt.Errorf("stat %s: %w", c.Path, err)
+		}
 		newAbs := filepath.Join(wtDir, filepath.FromSlash(c.NewPath))
 		if err := os.MkdirAll(filepath.Dir(newAbs), 0o755); err != nil {
 			return ChangeOutcome{}, err
+		}
+		// Never overwrite: os.Rename would silently replace an existing file
+		// (and an existing empty directory), which is data loss. Reject with
+		// a typed error so the API maps it to a distinct conflict code.
+		if _, err := os.Lstat(newAbs); err == nil {
+			return ChangeOutcome{}, ErrPathExists
 		}
 		if err := os.Rename(abs, newAbs); err != nil {
 			return ChangeOutcome{}, fmt.Errorf("move %s: %w", c.Path, err)

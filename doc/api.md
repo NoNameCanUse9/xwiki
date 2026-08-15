@@ -129,6 +129,8 @@ invalid_doc_path / invalid_format / doc_not_found / doc_too_large
 - 200 `{"commit":"<40-hex>","revision":"<40-hex>","preview":null}`
 - `?dry_run=true` → 200 `{"commit":"","revision":"<当前>","preview":{"tree":"<40-hex>","changes":[...]}}`（不写任何 ref）
 - 400 invalid_changeset / invalid_doc_path · 404 project_not_found · 409 revision_conflict（base 过期，需重读）· 410 project_archived
+- move 专用冲突码：409 `path_exists`（目标已存在，绝不覆盖）· 409 `source_missing`（源不存在）
+- `?dry_run=true` 与正式提交走同一校验：目标冲突在 dry-run 阶段即返回 409，可用作客户端预检
 
 语义：
 
@@ -139,7 +141,7 @@ invalid_doc_path / invalid_format / doc_not_found / doc_too_large
 
 ## 错误码（本阶段新增）
 
-invalid_changeset / revision_conflict / project_archived
+invalid_changeset / revision_conflict / path_exists / source_missing / project_archived
 
 ---
 

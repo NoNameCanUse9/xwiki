@@ -223,6 +223,151 @@ func TestApplyChangesetRejectsInvalidOpsAndPaths(t *testing.T) {
 	_ = time.Now
 }
 
+func TestApplyChangesetMoveRejectsExistingTarget(t *testing.T) {
+	svc, pid, repo := newServiceWithRepo(t)
+
+	mustApply := func(changes ...Change) {
+		t.Helper()
+		b := headOf(t, repo)
+		if _, err := svc.ApplyChangeset(context.Background(), pid, ChangesetInput{
+			BaseRevision: b, Message: "seed", Changes: changes,
+		}, CommitAuthor{Name: "Test Author", Email: "test@xwiki.local"}); err != nil {
+			t.Fatalf("seed changeset: %v", err)
+		}
+	}
+	mustApply(
+		Change{Op: "create", Path: "a.md", Content: "a"},
+		Change{Op: "create", Path: "b.md", Content: "B"},
+		Change{Op: "create", Path: "dir/x.md", Content: "x"},
+		Change{Op: "create", Path: "dir/sub/y.md", Content: "y"},
+		Change{Op: "create", Path: "dir3/occupied.md", Content: "keep"},
+	)
+
+	cases := []struct {
+		name string
+		from string
+		to   string
+	}{
+		{"file over file", "a.md", "b.md"},
+		{"dir over non-empty dir", "dir", "dir3"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			head := headOf(t, repo)
+			_, err := svc.ApplyChangeset(context.Background(), pid, ChangesetInput{
+				BaseRevision: head, Message: "move",
+				Changes: []Change{{Op: "move", Path: tc.from, NewPath: tc.to}},
+			}, CommitAuthor{Name: "Test Author", Email: "test@xwiki.local"})
+			if !errors.Is(err, ErrPathExists) {
+				t.Fatalf("want ErrPathExists, got %v", err)
+			}
+			if headOf(t, repo) != head {
+				t.Fatal("rejected move must not move HEAD")
+			}
+		})
+	}
+	// The rejected moves must not have clobbered anything: b.md keeps its
+	// content, dir/sub/y.md and the empty dir2 are intact.
+	blob, err := repo.ReadBlob(context.Background(), "main", "b.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(blob) != "B" {
+		t.Fatalf("target file was clobbered: %q", blob)
+	}
+	if _, err := repo.ReadBlob(context.Background(), "main", "dir/sub/y.md"); err != nil {
+		t.Fatalf("dir subtree damaged: %v", err)
+	}
+	if _, err := repo.ReadBlob(context.Background(), "main", "dir3/occupied.md"); err != nil {
+		t.Fatalf("non-empty dir damaged: %v", err)
+	}
+	if _, err := repo.ReadBlob(context.Background(), "main", "dir/x.md"); err != nil {
+		t.Fatalf("source dir damaged: %v", err)
+	}
+}
+
+func TestApplyChangesetMoveSourceMissing(t *testing.T) {
+	svc, pid, repo := newServiceWithRepo(t)
+	base := headOf(t, repo)
+
+	_, err := svc.ApplyChangeset(context.Background(), pid, ChangesetInput{
+		BaseRevision: base, Message: "move ghost",
+		Changes: []Change{{Op: "move", Path: "ghost.md", NewPath: "gone.md"}},
+	}, CommitAuthor{Name: "Test Author", Email: "test@xwiki.local"})
+	if !errors.Is(err, ErrSourceMissing) {
+		t.Fatalf("want ErrSourceMissing, got %v", err)
+	}
+	if headOf(t, repo) != base {
+		t.Fatal("rejected move must not move HEAD")
+	}
+}
+
+func TestApplyChangesetMoveSamePathRejected(t *testing.T) {
+	svc, pid, repo := newServiceWithRepo(t)
+	base := headOf(t, repo)
+
+	cases := []Change{
+		{Op: "move", Path: "a.md", NewPath: "a.md"},
+		{Op: "move", Path: "docs/a.md", NewPath: "docs/../docs/a.md"},
+	}
+	for i, c := range cases {
+		if _, err := svc.ApplyChangeset(context.Background(), pid, ChangesetInput{
+			BaseRevision: base, Message: "same path", Changes: []Change{c},
+		}, CommitAuthor{Name: "Test Author", Email: "test@xwiki.local"}); err == nil {
+			t.Fatalf("case %d: same-path move accepted", i)
+		}
+	}
+	if headOf(t, repo) != base {
+		t.Fatal("rejected move must not move HEAD")
+	}
+}
+
+func TestApplyChangesetMoveDryRunPreflight(t *testing.T) {
+	svc, pid, repo := newServiceWithRepo(t)
+	base := headOf(t, repo)
+	if _, err := svc.ApplyChangeset(context.Background(), pid, ChangesetInput{
+		BaseRevision: base, Message: "seed",
+		Changes: []Change{
+			{Op: "create", Path: "a.md", Content: "a"},
+			{Op: "create", Path: "b.md", Content: "B"},
+		},
+	}, CommitAuthor{Name: "Test Author", Email: "test@xwiki.local"}); err != nil {
+		t.Fatal(err)
+	}
+	head := headOf(t, repo)
+
+	// A dry run must catch the conflict without writing anything.
+	_, err := svc.ApplyChangeset(context.Background(), pid, ChangesetInput{
+		BaseRevision: head, Message: "preflight", DryRun: true,
+		Changes: []Change{{Op: "move", Path: "a.md", NewPath: "b.md"}},
+	}, CommitAuthor{Name: "Test Author", Email: "test@xwiki.local"})
+	if !errors.Is(err, ErrPathExists) {
+		t.Fatalf("dry run must reject existing target, got %v", err)
+	}
+	if headOf(t, repo) != head {
+		t.Fatal("failed dry run must not move HEAD")
+	}
+
+	// A dry run to a free target succeeds with a preview and writes nothing.
+	res, err := svc.ApplyChangeset(context.Background(), pid, ChangesetInput{
+		BaseRevision: head, Message: "preflight ok", DryRun: true,
+		Changes: []Change{{Op: "move", Path: "a.md", NewPath: "c.md"}},
+	}, CommitAuthor{Name: "Test Author", Email: "test@xwiki.local"})
+	if err != nil {
+		t.Fatalf("dry run to free target: %v", err)
+	}
+	if res.Commit != "" || res.Preview == nil {
+		t.Fatalf("dry run result wrong: %+v", res)
+	}
+	if len(res.Preview.Changes) != 1 || res.Preview.Changes[0].Status != "moved" {
+		t.Fatalf("preview changes wrong: %+v", res.Preview.Changes)
+	}
+	if headOf(t, repo) != head {
+		t.Fatal("successful dry run must not move HEAD")
+	}
+}
+
 func TestDefaultMessageAndAuthorIdentity(t *testing.T) {
 	svc, pid, repo := newServiceWithRepo(t)
 	base := headOf(t, repo)

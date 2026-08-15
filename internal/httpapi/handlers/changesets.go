@@ -154,6 +154,12 @@ func (h *ChangesetHandler) writeApplyError(w http.ResponseWriter, r *http.Reques
 	case errors.Is(err, project.ErrConflict):
 		response.WriteError(w, r, http.StatusConflict, "revision_conflict",
 			"base revision is stale; reload and retry")
+	case errors.Is(err, project.ErrPathExists):
+		response.WriteError(w, r, http.StatusConflict, "path_exists",
+			"target path already exists")
+	case errors.Is(err, project.ErrSourceMissing):
+		response.WriteError(w, r, http.StatusConflict, "source_missing",
+			"source path does not exist")
 	case errors.Is(err, project.ErrArchived):
 		response.WriteError(w, r, http.StatusGone, "project_archived", "project is archived")
 	default:
