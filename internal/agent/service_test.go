@@ -146,15 +146,55 @@ func TestAuditAppendAndList(t *testing.T) {
 	if err := svc.Audit(context.Background(), "token", "tok_1", "prj_1", "change", "docs/a.md", "", "req_1"); err != nil {
 		t.Fatal(err)
 	}
-	entries, err := svc.store.RecentAudit(context.Background(), "prj_1", 10)
+	entries, hasMore, err := svc.store.RecentAudit(context.Background(), "prj_1", 10, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(entries) != 1 || entries[0].Action != "change" || entries[0].ActorType != "token" {
 		t.Fatalf("audit wrong: %+v", entries)
 	}
-	all, err := svc.store.RecentAudit(context.Background(), "", 10)
-	if err != nil || len(all) != 1 {
-		t.Fatalf("all audit: %v %d", err, len(all))
+	if hasMore {
+		t.Fatal("single entry must not report has_more")
+	}
+	all, hasMore, err := svc.store.RecentAudit(context.Background(), "", 10, 0)
+	if err != nil || len(all) != 1 || hasMore {
+		t.Fatalf("all audit: %v %d %v", err, len(all), hasMore)
+	}
+}
+
+func TestAuditPagination(t *testing.T) {
+	svc := newService(t)
+	for i := 0; i < 5; i++ {
+		if err := svc.Audit(context.Background(), "user", "u_1", "prj_1",
+			"change", "docs/a.md", "", "req_x"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Page 1 of 2: newest first, has_more set.
+	page1, hasMore, err := svc.store.RecentAudit(context.Background(), "prj_1", 2, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page1) != 2 || !hasMore {
+		t.Fatalf("page1: %d entries, hasMore=%v", len(page1), hasMore)
+	}
+	// Page 2: remaining entries, no more after it.
+	page2, hasMore, err := svc.store.RecentAudit(context.Background(), "prj_1", 2, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page2) != 2 || !hasMore {
+		t.Fatalf("page2: %d entries, hasMore=%v", len(page2), hasMore)
+	}
+	page3, hasMore, err := svc.store.RecentAudit(context.Background(), "prj_1", 2, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page3) != 1 || hasMore {
+		t.Fatalf("page3: %d entries, hasMore=%v", len(page3), hasMore)
+	}
+	// No overlap across pages.
+	if page1[0].ID == page2[0].ID || page2[0].ID == page3[0].ID {
+		t.Fatal("pages must not overlap")
 	}
 }

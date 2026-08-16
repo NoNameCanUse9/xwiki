@@ -147,8 +147,8 @@ func (s *Service) Audit(ctx context.Context, actorType, actorID, projectID, acti
 }
 
 // StoreRecent exposes the audit store for handlers.
-func (s *Service) StoreRecent(ctx context.Context, projectID string, limit int) ([]AuditEntry, error) {
-	return s.store.RecentAudit(ctx, projectID, limit)
+func (s *Service) StoreRecent(ctx context.Context, projectID string, limit, offset int) ([]AuditEntry, bool, error) {
+	return s.store.RecentAudit(ctx, projectID, limit, offset)
 }
 
 // MarshalResult serializes an idempotency result for storage.

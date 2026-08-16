@@ -4,6 +4,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
 
 	"xwiki/internal/agent"
 	"xwiki/internal/config"
@@ -84,16 +85,20 @@ func (h *TokenHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 }
 
 // Audit handles GET /api/v1/projects/{id}/audit (session only).
+// Pagination mirrors the commits endpoint: limit (default 20, max 100),
+// offset, and a has_more flag.
 func (h *TokenHandler) Audit(w http.ResponseWriter, r *http.Request) {
 	if !sessionOnly(w, r) {
 		return
 	}
 	projectID := request.PathParam(r, "id")
-	entries, err := h.svc.StoreRecent(r.Context(), projectID, 50)
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+	entries, hasMore, err := h.svc.StoreRecent(r.Context(), projectID, limit, offset)
 	if err != nil {
 		h.log.Error("audit failed", "error", err, "request_id", request.RequestID(r))
 		response.WriteError(w, r, http.StatusInternalServerError, "internal_error", "could not read audit log")
 		return
 	}
-	response.WriteJSON(w, http.StatusOK, map[string]any{"entries": entries})
+	response.WriteJSON(w, http.StatusOK, map[string]any{"entries": entries, "has_more": hasMore})
 }

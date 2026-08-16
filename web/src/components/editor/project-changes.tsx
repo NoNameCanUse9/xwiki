@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { useQuery } from "@tanstack/react-query";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { listCommits, type CommitSummary } from "@/lib/api/history";
+
+const TIMELINE_PAGE = 5;
 
 function formatDateTime(iso: string): string {
 	return new Date(iso).toLocaleString("zh-CN", {
@@ -93,14 +94,50 @@ function CommitNode({
 	);
 }
 
-/** Compact project timeline showing the five latest commits. */
+/** Compact project timeline; pages through commits with a load-more button. */
 export function ProjectChanges({ projectId }: { projectId: string }) {
-	const { data, isLoading, isError } = useQuery({
-		queryKey: ["commits", projectId],
-		queryFn: () => listCommits(projectId, 5, 0),
-		enabled: projectId.length > 0,
-	});
-	const commits = (data?.commits ?? []).slice(0, 5).reverse();
+	const [commits, setCommits] = useState<CommitSummary[]>([]);
+	const [hasMore, setHasMore] = useState(false);
+	const [loading, setLoading] = useState(false);
+	const [loadingMore, setLoadingMore] = useState(false);
+	const [error, setError] = useState(false);
+
+	const load = useCallback(
+		async (offset: number, append: boolean) => {
+			setError(false);
+			if (append) setLoadingMore(true);
+			else setLoading(true);
+			try {
+				const res = await listCommits(projectId, TIMELINE_PAGE, offset);
+				setCommits((prev) => {
+					const next = append ? [...prev, ...res.commits] : res.commits;
+					return [...next].reverse();
+				});
+				setHasMore(Boolean(res.has_more));
+			} catch {
+				setError(true);
+			} finally {
+				setLoading(false);
+				setLoadingMore(false);
+			}
+		},
+		[projectId],
+	);
+
+	// 切换项目 → 重置并加载第一页（最新 5 条）。
+	useEffect(() => {
+		if (!projectId) return;
+		setCommits([]);
+		setHasMore(false);
+		void load(0, false);
+	}, [projectId, load]);
+
+	const loadMore = () => {
+		if (hasMore && !loadingMore && !loading) {
+			void load(commits.length, true);
+		}
+	};
+
 	const scrollRef = useRef<HTMLDivElement>(null);
 	const [canScroll, setCanScroll] = useState(false);
 	const [atStart, setAtStart] = useState(true);
@@ -129,15 +166,15 @@ export function ProjectChanges({ projectId }: { projectId: string }) {
 
 	return (
 		<section className="mt-auto space-y-3 pt-24" aria-label="项目变更记录">
-			{isLoading && (
+			{loading && commits.length === 0 && (
 				<p className="py-4 text-center text-sm text-[var(--color-ink-3)]">loading…</p>
 			)}
-			{isError && (
+			{error && (
 				<p className="py-4 text-center text-sm text-[var(--color-destructive)]">
 					变更记录加载失败
 				</p>
 			)}
-			{data && commits.length === 0 && (
+			{!loading && !error && commits.length === 0 && (
 				<p className="py-4 text-center text-sm text-[var(--color-ink-2)]">
 					还没有文档变更
 				</p>
@@ -190,6 +227,18 @@ export function ProjectChanges({ projectId }: { projectId: string }) {
 							<ChevronRight className="size-4" />
 						</button>
 					)}
+				</div>
+			)}
+			{hasMore && (
+				<div className="flex justify-center">
+					<button
+						type="button"
+						onClick={loadMore}
+						disabled={loadingMore}
+						className="rounded-full border border-[var(--color-rule)] px-3 py-1 text-xs text-[var(--color-ink-2)] hover:bg-[var(--color-surface-accent)] hover:text-[var(--color-accent)] disabled:opacity-50"
+					>
+						{loadingMore ? "加载中…" : "加载更多"}
+					</button>
 				</div>
 			)}
 		</section>

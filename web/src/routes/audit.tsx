@@ -1,10 +1,12 @@
-import { useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useCallback, useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { ArrowLeft, RefreshCw } from "lucide-react";
+import { ArrowLeft, ChevronDown, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { listProjects } from "@/lib/api/projects";
-import { listAudit } from "@/lib/api/audit";
+import { listAudit, type AuditEntry } from "@/lib/api/audit";
+
+const AUDIT_PAGE_SIZE = 20;
 
 function formatTime(iso: string): string {
   const d = new Date(iso);
@@ -13,23 +15,49 @@ function formatTime(iso: string): string {
 }
 
 export default function AuditPage() {
-  const queryClient = useQueryClient();
   const projectsQuery = useQuery({ queryKey: ["projects"], queryFn: listProjects });
   const projects = projectsQuery.data?.projects ?? [];
   const [projectId, setProjectId] = useState("");
   // 未手动选择时默认第一个项目；select 用受控 value 落到相同结果。
   const activeProjectId = projectId || projects[0]?.id || "";
 
-  const auditQuery = useQuery({
-    queryKey: ["audit", activeProjectId],
-    queryFn: () => listAudit(activeProjectId),
-    enabled: activeProjectId.length > 0,
-  });
-  const entries = auditQuery.data?.entries ?? [];
+  const [entries, setEntries] = useState<AuditEntry[]>([]);
+  const [hasMore, setHasMore] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [error, setError] = useState(false);
+
+  const load = useCallback(async (pid: string, offset: number, append: boolean) => {
+    setError(false);
+    if (append) setLoadingMore(true);
+    else setLoading(true);
+    try {
+      const res = await listAudit(pid, AUDIT_PAGE_SIZE, offset);
+      setEntries((prev) => (append ? [...prev, ...res.entries] : res.entries));
+      setHasMore(res.has_more);
+    } catch {
+      setError(true);
+    } finally {
+      setLoading(false);
+      setLoadingMore(false);
+    }
+  }, []);
+
+  // 切换项目 → 重置并加载第一页。
+  useEffect(() => {
+    if (!activeProjectId) return;
+    setEntries([]);
+    setHasMore(false);
+    void load(activeProjectId, 0, false);
+  }, [activeProjectId, load]);
 
   const refresh = () => {
-    if (activeProjectId) {
-      void queryClient.invalidateQueries({ queryKey: ["audit", activeProjectId] });
+    if (activeProjectId) void load(activeProjectId, 0, false);
+  };
+
+  const loadMore = () => {
+    if (hasMore && !loadingMore && !loading) {
+      void load(activeProjectId, entries.length, true);
     }
   };
 
@@ -88,7 +116,7 @@ export default function AuditPage() {
                 size="sm"
                 className="gap-1.5"
                 onClick={refresh}
-                disabled={!activeProjectId || auditQuery.isFetching}
+                disabled={!activeProjectId || loading}
               >
                 <RefreshCw className="size-3.5" />
                 刷新
@@ -100,52 +128,58 @@ export default function AuditPage() {
             <p className="mono-label text-[var(--color-ink-3)]">
               entries · {entries.length}
             </p>
-            {auditQuery.isLoading && (
+            {loading && entries.length === 0 && (
               <p className="mono-label text-[var(--color-ink-3)]">loading…</p>
             )}
-            {auditQuery.isError && (
+            {error && (
               <p className="text-sm text-[var(--color-destructive)]">
                 审计日志加载失败。
               </p>
             )}
-            {!auditQuery.isLoading &&
-              !auditQuery.isError &&
-              activeProjectId &&
-              entries.length === 0 && (
-                <p className="hairline-panel px-6 py-10 text-center text-sm text-[var(--color-ink-2)]">
-                  暂无审计记录
-                </p>
-              )}
-            {!auditQuery.isLoading &&
-              !auditQuery.isError &&
-              activeProjectId &&
-              entries.length > 0 && (
-                <div className="hairline-panel divide-y divide-[var(--color-rule)] px-5">
-                  {entries.map((e) => (
-                    <div
-                      key={e.id}
-                      className="flex flex-wrap items-center gap-3 py-3"
-                    >
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium text-[var(--color-ink)]">
-                          <span className="font-mono text-xs text-[var(--color-accent)]">
-                            {e.action}
-                          </span>
-                          <span className="ml-2 text-[var(--color-ink-2)]">
-                            {e.actor_type}:{e.actor_id}
-                          </span>
-                        </p>
-                        <p className="mono-label mt-0.5 truncate text-[var(--color-ink-3)]">
-                          {e.path || "—"}
-                        </p>
-                      </div>
-                      <span className="mono-label shrink-0 text-[var(--color-ink-3)]">
-                        {formatTime(e.created_at)}
-                      </span>
+            {!loading && !error && activeProjectId && entries.length === 0 && (
+              <p className="hairline-panel px-6 py-10 text-center text-sm text-[var(--color-ink-2)]">
+                暂无审计记录
+              </p>
+            )}
+            {!loading && !error && activeProjectId && entries.length > 0 && (
+              <div className="hairline-panel divide-y divide-[var(--color-rule)] px-5">
+                {entries.map((e) => (
+                  <div
+                    key={e.id}
+                    className="flex flex-wrap items-center gap-3 py-3"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium text-[var(--color-ink)]">
+                        <span className="font-mono text-xs text-[var(--color-accent)]">
+                          {e.action}
+                        </span>
+                        <span className="ml-2 text-[var(--color-ink-2)]">
+                          {e.actor_type}:{e.actor_id}
+                        </span>
+                      </p>
+                      <p className="mono-label mt-0.5 truncate text-[var(--color-ink-3)]">
+                        {e.path || "—"}
+                      </p>
                     </div>
-                  ))}
-                </div>
-              )}
+                    <span className="mono-label shrink-0 text-[var(--color-ink-3)]">
+                      {formatTime(e.created_at)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+            {hasMore && !loading && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5"
+                onClick={loadMore}
+                disabled={loadingMore}
+              >
+                <ChevronDown className="size-3.5" />
+                {loadingMore ? "加载中…" : "加载更多"}
+              </Button>
+            )}
           </section>
         </div>
       </main>

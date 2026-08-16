@@ -241,10 +241,14 @@ func (s *Store) AppendAudit(ctx context.Context, e *AuditEntry) error {
 	return err
 }
 
-// RecentAudit returns the latest audit entries (project-scoped when set).
-func (s *Store) RecentAudit(ctx context.Context, projectID string, limit int) ([]AuditEntry, error) {
+// RecentAudit returns the latest audit entries (project-scoped when set),
+// newest first, plus whether more entries exist beyond this page.
+func (s *Store) RecentAudit(ctx context.Context, projectID string, limit, offset int) ([]AuditEntry, bool, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 20
+	}
+	if offset < 0 {
+		offset = 0
 	}
 	q := `SELECT id, actor_type, actor_id, project_id, action, path, detail, request_id, created_at
 	      FROM audit_logs`
@@ -253,21 +257,21 @@ func (s *Store) RecentAudit(ctx context.Context, projectID string, limit int) ([
 		q += ` WHERE project_id = ?`
 		args = append(args, projectID)
 	}
-	q += ` ORDER BY created_at DESC LIMIT ?`
-	args = append(args, limit)
+	q += ` ORDER BY created_at DESC LIMIT ? OFFSET ?`
+	args = append(args, limit+1, offset)
 	rows, err := s.db.QueryContext(ctx, q, args...)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	defer rows.Close()
-	out := make([]AuditEntry, 0)
+	out := make([]AuditEntry, 0, limit)
 	for rows.Next() {
 		var e AuditEntry
 		var projectID, path, detail, requestID sql.NullString
 		var createdAt string
 		if err := rows.Scan(&e.ID, &e.ActorType, &e.ActorID, &projectID, &e.Action,
 			&path, &detail, &requestID, &createdAt); err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		e.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
 		e.ProjectID = projectID.String
@@ -276,7 +280,14 @@ func (s *Store) RecentAudit(ctx context.Context, projectID string, limit int) ([
 		e.RequestID = requestID.String
 		out = append(out, e)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, false, err
+	}
+	hasMore := len(out) > limit
+	if hasMore {
+		out = out[:limit]
+	}
+	return out, hasMore, nil
 }
 
 func nullable(s string) any {

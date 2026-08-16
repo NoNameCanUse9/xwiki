@@ -205,6 +205,7 @@ Token 让 AI Agent 以 Bearer 认证访问。库中只存 SHA-256 哈希，明�
   - scope 必须 write；Token 可在绑定的项目内写入
   - 可选 `Idempotency-Key` 头：同 key 同 body 重放 → 返回首次结果（不新建 commit）；同 key 不同 body → 409 idempotency_conflict
 - 全部 token 操作写入 audit_logs（`GET /api/v1/projects/{id}/audit` 可查，session 登录）
+- 审计分页与 commits 一致：`GET /api/v1/projects/{id}/audit?limit=&offset=`，limit 默认 20 最大 100，返回 `{"entries":[...],"has_more":bool}`
 
 ## 错误码（本阶段新增）
 
