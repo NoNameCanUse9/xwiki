@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
 	FileText,
+	FolderInput,
 	FolderPlus,
 	MoreHorizontal,
 	Pencil,
@@ -10,6 +11,7 @@ import {
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import MoveDialog from "@/components/editor/move-dialog";
 import {
 	getRevision,
 	submitChangeset,
@@ -46,6 +48,7 @@ export default function RowActions({
 	const [busy, setBusy] = useState(false);
 	const [creatingSubfolder, setCreatingSubfolder] = useState(false);
 	const [subfolderName, setSubfolderName] = useState("");
+	const [moveOpen, setMoveOpen] = useState(false);
 
 	const run = async (changes: ChangeInput[], msg: string) => {
 		setBusy(true);
@@ -209,6 +212,17 @@ export default function RowActions({
 						</button>
 						<button
 							type="button"
+							className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-[var(--color-surface-accent)]"
+							onClick={() => {
+								setOpen(false);
+								setMoveOpen(true);
+							}}
+						>
+							<FolderInput className="size-3.5" />
+							移动
+						</button>
+						<button
+							type="button"
 							className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-[var(--color-destructive)] hover:bg-[var(--color-surface-accent)]"
 							onClick={() => void remove()}
 							disabled={busy}
@@ -219,6 +233,14 @@ export default function RowActions({
 					</div>
 				</>
 			)}
+			<MoveDialog
+				projectId={projectId}
+				source={path}
+				isDir={type === "folder"}
+				open={moveOpen}
+				onOpenChange={setMoveOpen}
+				onDone={onDone}
+			/>
 		</span>
 	);
 }

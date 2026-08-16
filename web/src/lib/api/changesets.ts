@@ -35,9 +35,14 @@ export function getRevision(projectId: string) {
   );
 }
 
-export function submitChangeset(projectId: string, input: ChangesetInput) {
+export function submitChangeset(
+  projectId: string,
+  input: ChangesetInput,
+  dryRun = false,
+) {
+  const q = dryRun ? "?dry_run=true" : "";
   return api<ChangesetResult>(
-    `/projects/${encodeURIComponent(projectId)}/changesets`,
+    `/projects/${encodeURIComponent(projectId)}/changesets${q}`,
     {
       method: "POST",
       body: JSON.stringify(input),
