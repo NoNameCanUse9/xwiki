@@ -28,6 +28,9 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 
 [dev-dependencies]
 tempfile = "3"
+# gpui's headless test platform (TestAppContext / simulate_click / debug_bounds).
+# Dev-only: feature unification keeps test-support out of release builds.
+gpui = { version = "0.2.2", features = ["test-support", "runtime_shaders"] }
 
 [build-dependencies]
 embed-resource = "3.0"

@@ -2196,19 +2196,46 @@ async fn cmd_audit(args: &[String]) -> i32 {
     let Some(project) = project else {
         return usage();
     };
+    let limit = match parse_u32_option(args, "--limit") {
+        Ok(Some(limit)) if (1..=100).contains(&limit) => limit,
+        Ok(None) => 20,
+        Ok(Some(_)) => {
+            eprintln!("--limit must be between 1 and 100");
+            return 2;
+        }
+        Err(error) => {
+            eprintln!("{error}");
+            return 2;
+        }
+    };
+    let offset = match parse_u32_option(args, "--offset") {
+        Ok(Some(offset)) => offset,
+        Ok(None) => 0,
+        Err(error) => {
+            eprintln!("{error}");
+            return 2;
+        }
+    };
+    let json = wants_json(args);
     let c = client(args);
-    match c.audit(project).await {
-        Ok(entries) => {
-            if wants_json(args) {
-                print_json(&entries);
+    match c.audit_page(project, limit, offset).await {
+        Ok(page) => {
+            if json {
+                print_json(&page);
             } else {
-                for entry in entries {
+                for entry in &page.entries {
                     println!(
                         "{}  {:<10} {} {}",
                         entry.created_at.split('T').next().unwrap_or(""),
                         entry.action,
                         entry.actor_id,
                         entry.path
+                    );
+                }
+                if page.has_more {
+                    eprintln!(
+                        "…还有更多（已显示 {} 条，用 --limit/--offset 翻页）",
+                        page.entries.len()
                     );
                 }
             }

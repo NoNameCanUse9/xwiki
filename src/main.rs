@@ -1,4 +1,6 @@
 #![cfg_attr(target_family = "wasm", no_main)]
+// gpui's #[test] attribute macro nests deeply; default 128 is too low.
+#![recursion_limit = "512"]
 
 use gpui::*;
 

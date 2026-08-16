@@ -842,7 +842,9 @@ impl XWikiApp {
         } else if self.audit_projects.is_empty() {
             // No projects on the server: the web page renders nothing here.
             div().into_any_element()
-        } else if self.audit_loading {
+        } else if self.audit_loading && self.audit_entries.is_empty() {
+            // Initial page load only: an in-flight "load more" keeps the
+            // list visible (the button itself shows the loading state).
             div()
                 .py_4()
                 .text_sm()
@@ -899,6 +901,24 @@ impl XWikiApp {
                                 .flex_shrink_0()
                                 .text_color(cobalt.ink_3),
                         ),
+                );
+            }
+            if self.audit_has_more {
+                rows = rows.child(
+                    div().pt_4().flex().items_center().justify_center().child(
+                        Button::new(
+                            "load-more-audit",
+                            if self.audit_loading {
+                                "加载中…"
+                            } else {
+                                "加载更多"
+                            },
+                        )
+                        .variant(Variant::Outline)
+                        .size(GuiseSize::Xs)
+                        .disabled(self.audit_loading)
+                        .on_click(cx.listener(|this, _, _, cx| this.load_more_audit(cx))),
+                    ),
                 );
             }
             rows.into_any_element()

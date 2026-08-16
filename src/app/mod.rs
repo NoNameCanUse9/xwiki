@@ -16,6 +16,8 @@ use crate::api::{Client, dto};
 use crate::config;
 mod outline;
 pub mod views;
+#[cfg(test)]
+mod tests;
 use crate::ui::{mono_label, tokens};
 use crate::{QuickOpen, SaveEditor, TogglePalette, ToggleTheme};
 
@@ -24,6 +26,9 @@ const MAX_IMPORT_TOTAL_BYTES: usize = 128 * 1024 * 1024;
 const MAX_IMPORT_FILES: usize = 10_000;
 const MAX_IMPORT_DIRECTORIES: usize = 100_000;
 const HISTORY_PAGE_SIZE: u32 = 20;
+/// Audit page size. The server caps limit at 100; 50 keeps the first page
+/// consistent with the pre-pagination behavior.
+const AUDIT_PAGE_SIZE: u32 = 50;
 
 const OTA_GITHUB_OWNER: &str = "NoNameCanUse9";
 const OTA_GITHUB_REPO: &str = "xwiki";
@@ -62,6 +67,23 @@ impl TokenDraft {
 
 fn history_page_offset(reset: bool, loaded: usize) -> u32 {
     if reset { 0 } else { loaded as u32 }
+}
+
+fn audit_page_offset(reset: bool, loaded: usize) -> u32 {
+    if reset { 0 } else { loaded as u32 }
+}
+
+fn merge_audit_page(
+    entries: &mut Vec<dto::AuditEntry>,
+    page: dto::AuditResponse,
+    reset: bool,
+) -> bool {
+    if reset {
+        *entries = page.entries;
+    } else {
+        entries.extend(page.entries);
+    }
+    page.has_more
 }
 
 fn merge_history_page(
@@ -338,6 +360,10 @@ pub struct XWikiApp {
     /// Audit log page (project picker + entries, mirrors the web audit page).
     audit_entries: Vec<dto::AuditEntry>,
     audit_loading: bool,
+    audit_has_more: bool,
+    /// Bumped on every page reset so in-flight appends from an older page
+    /// cannot land after a project switch or reload.
+    audit_generation: u64,
     audit_error: Option<String>,
     audit_projects: Vec<dto::Project>,
     audit_selected_project: Option<String>,
@@ -665,6 +691,8 @@ impl XWikiApp {
             search_error: None,
             audit_entries: Vec::new(),
             audit_loading: false,
+            audit_has_more: false,
+            audit_generation: 0,
             audit_error: None,
             audit_projects: Vec::new(),
             audit_selected_project: None,
@@ -2154,6 +2182,7 @@ impl XWikiApp {
                     .on_close(move |_ev, window, cx| close(window, cx))
                     .child(
                         div()
+                            .debug_selector(|| "project-rename-modal".into())
                             .flex()
                             .flex_col()
                             .gap_2()
@@ -2408,6 +2437,7 @@ impl XWikiApp {
                     .on_close(move |_ev, window, cx| close(window, cx))
                     .child(
                         div()
+                            .debug_selector(|| "move-modal".into())
                             .flex()
                             .flex_col()
                             .gap_2()
@@ -2533,6 +2563,7 @@ impl XWikiApp {
                     .on_close(move |_ev, window, cx| close(window, cx))
                     .child(
                         div()
+                            .debug_selector(|| "rename-modal".into())
                             .flex()
                             .flex_col()
                             .gap_2()
@@ -2638,10 +2669,12 @@ impl XWikiApp {
                 let content_theme = tokens::Cobalt::from_theme(theme(cx));
                 let content_name = confirm_name.clone();
                 let content_dir = confirm_dir;
-                // Hard-delete gate: the user must type the full path to enable
-                // the irreversible purge button.
+                // Delete gate: both delete actions (保留历史 / 彻底删除)
+                // require typing 「确认删除」 into the confirm input.
+                // Client-side UX only — the API's changeset/purge endpoints
+                // have no confirmation field.
                 let confirm_input = cx.new(|cx| {
-                    TextInput::new(cx).placeholder("输入完整路径以确认")
+                    TextInput::new(cx).placeholder("输入「确认删除」")
                 });
                 let gate_state = confirm_input.clone();
                 let gate_handle = action_handle.clone();
@@ -2651,18 +2684,21 @@ impl XWikiApp {
                 let gate_dir = confirm_dir;
                 let gate_toast = host_handle.clone();
                 let gate_close = close.clone();
-                let hard_delete = Button::new("confirm-delete-doc-hard", "彻底删除（重写历史）")
+                // Shared by both delete buttons (gate_state is moved into the
+                // hard-delete closure below, so clone before it).
+                let confirm_gate = gate_state.clone();
+                let _confirm_gate_path = gate_path.clone();
+                let confirm_gate_toast = gate_toast.clone();
+                let hard_delete = Button::new("confirm-delete-doc-hard", "彻底删除")
                     .variant(Variant::Outline)
                     .color(ColorName::Red)
                     .size(Size::Xs)
                     .left_section(Icon::new(IconName::CircleX).size(Size::Sm).color(ColorName::Red))
                     .on_click(move |_, window, cx| {
                         let typed = gate_state.read(cx).text().trim().to_string();
-                        if typed != gate_path {
+                        if let Some(error) = Self::delete_confirmation_error(&typed) {
                             let h = gate_toast.clone();
-                            h.update(cx, |host, cx| {
-                                host.toast("请输入完整的路径以确认彻底删除", cx)
-                            });
+                            h.update(cx, |host, cx| host.toast(error, cx));
                             return;
                         }
                         let handle = gate_handle.clone();
@@ -2687,12 +2723,18 @@ impl XWikiApp {
                 let delete_path = confirm_path.clone();
                 let delete_dir = confirm_dir;
                 let confirm_close = close.clone();
-                let confirm = Button::new("confirm-delete-doc", "删除（保留历史）")
+                let confirm = Button::new("confirm-delete-doc", "删除")
                     .variant(Variant::Filled)
                     .color(ColorName::Red)
                     .size(Size::Xs)
                     .left_section(Icon::new(IconName::Delete).size(Size::Sm).color(ColorName::Red))
                     .on_click(move |_, window, cx| {
+                        let typed = confirm_gate.read(cx).text().trim().to_string();
+                        if let Some(error) = Self::delete_confirmation_error(&typed) {
+                            let h = confirm_gate_toast.clone();
+                            h.update(cx, |host, cx| host.toast(error, cx));
+                            return;
+                        }
                         let handle = confirm_handle.clone();
                         let c = delete_client.clone();
                         let project = delete_project.clone();
@@ -2708,6 +2750,7 @@ impl XWikiApp {
                     .on_close(move |_ev, window, cx| close(window, cx))
                     .child(
                         div()
+                            .debug_selector(|| "delete-modal".into())
                             .flex().flex_col()
                             .gap_3()
                             .w_full()
@@ -2731,9 +2774,8 @@ impl XWikiApp {
                                     .gap_1()
                                     .w_full()
                                     .child(
-                                        mono_label("彻底删除需输入完整路径").text_color(
-                                            content_theme.danger,
-                                        ),
+                                        mono_label("输入「确认删除」以确认")
+                                            .text_color(content_theme.danger),
                                     )
                                     .child(div().w_full().child(confirm_input.clone())),
                             ),
@@ -2751,6 +2793,18 @@ impl XWikiApp {
                     .into_any_element()
             });
         });
+    }
+
+    /// Delete confirmation gate: the typed text must be exactly 「确认删除」.
+    /// Client-side UX only — the API's changeset/purge endpoints take no
+    /// confirmation field. Applies to both delete actions in the dialog.
+    /// Returns the toast message when the gate fails.
+    fn delete_confirmation_error(typed: &str) -> Option<&'static str> {
+        if typed.trim() == "确认删除" {
+            None
+        } else {
+            Some("请输入「确认删除」以确认删除")
+        }
     }
 
     /// Execute a tree delete (recursive for directories) and refresh.
@@ -3259,7 +3313,15 @@ impl XWikiApp {
     }
 
     fn logout(&mut self, cx: &mut Context<Self>) {
+        if self.editing || self.saving {
+            return;
+        }
+        self.release_current_lock(cx);
         self.stop_heartbeat();
+        self.edit_path = None;
+        self.edit_base_revision = None;
+        self.lock_held = false;
+        self.editor_preview = false;
         config::clear_session();
         self.screen = Screen::Login;
         self.client = None;
@@ -3287,6 +3349,8 @@ impl XWikiApp {
         self.audit_entries.clear();
         self.audit_projects.clear();
         self.audit_selected_project = None;
+        self.audit_has_more = false;
+        self.audit_generation = self.audit_generation.wrapping_add(1);
         self.api_reference = None;
         self.search_results.clear();
         self.search_open = false;
@@ -4060,48 +4124,79 @@ impl XWikiApp {
         .detach();
     }
 
-    /// Load the audit log for the project selected on the audit page.
-    /// With no projects on the server there is nothing to show, so stay
-    /// silent (no error) instead of surfacing a red error — the web audit
-    /// page renders nothing in that case.
+    /// Load the first audit page (offset 0, replaces the list) for the
+    /// project selected on the audit page. With no projects on the server
+    /// there is nothing to show, so stay silent (no error) instead of
+    /// surfacing a red error — the web audit page renders nothing in that
+    /// case.
     fn load_audit(&mut self, cx: &mut Context<Self>) {
+        self.load_audit_page(true, cx);
+    }
+
+    /// Fetch the next audit page (offset = loaded count) and append it.
+    fn load_more_audit(&mut self, cx: &mut Context<Self>) {
+        if !self.audit_has_more || self.audit_loading {
+            return;
+        }
+        self.load_audit_page(false, cx);
+    }
+
+    fn load_audit_page(&mut self, reset: bool, cx: &mut Context<Self>) {
         let (Some(client), Some(project)) =
             (self.client.clone(), self.audit_selected_project.clone())
         else {
             self.audit_entries.clear();
             self.audit_loading = false;
+            self.audit_has_more = false;
             self.audit_error = None;
             cx.notify();
             return;
         };
+        if reset {
+            // Bump so in-flight appends from an older page cannot land after
+            // a project switch or reload.
+            self.audit_generation = self.audit_generation.wrapping_add(1);
+            self.audit_entries.clear();
+            self.audit_has_more = false;
+        }
+        let generation = self.audit_generation;
+        let offset = audit_page_offset(reset, self.audit_entries.len());
         self.audit_loading = true;
         self.audit_error = None;
         cx.notify();
-        cx.spawn(async move |this, cx| match client.audit(&project).await {
-            Ok(entries) => {
-                let _ = this.update(cx, |app, cx| {
-                    // Discard stale responses: the user may have switched the
-                    // project picker while the request was in flight.
-                    if app.audit_selected_project.as_deref() != Some(project.as_str()) {
-                        return;
-                    }
-                    app.audit_loading = false;
-                    app.audit_entries = entries;
-                    cx.notify();
-                });
-            }
-            Err(e) => {
-                let _ = this.update(cx, |app, cx| {
-                    if app.audit_selected_project.as_deref() != Some(project.as_str()) {
-                        return;
-                    }
-                    app.audit_loading = false;
-                    app.audit_error = Some(format!(
-                        "审计日志加载失败：{}",
-                        Self::friendly_api_error(&e)
-                    ));
-                    cx.notify();
-                });
+        cx.spawn(async move |this, cx| {
+            match client.audit_page(&project, AUDIT_PAGE_SIZE, offset).await {
+                Ok(page) => {
+                    let _ = this.update(cx, |app, cx| {
+                        // Discard stale responses: the user may have switched
+                        // the project picker while the request was in flight.
+                        if app.audit_selected_project.as_deref() != Some(project.as_str())
+                            || app.audit_generation != generation
+                        {
+                            return;
+                        }
+                        app.audit_loading = false;
+                        app.audit_error = None;
+                        app.audit_has_more =
+                            merge_audit_page(&mut app.audit_entries, page, reset);
+                        cx.notify();
+                    });
+                }
+                Err(e) => {
+                    let _ = this.update(cx, |app, cx| {
+                        if app.audit_selected_project.as_deref() != Some(project.as_str())
+                            || app.audit_generation != generation
+                        {
+                            return;
+                        }
+                        app.audit_loading = false;
+                        app.audit_error = Some(format!(
+                            "审计日志加载失败：{}",
+                            Self::friendly_api_error(&e)
+                        ));
+                        cx.notify();
+                    });
+                }
             }
         })
         .detach();
@@ -5144,6 +5239,7 @@ impl XWikiApp {
                     .on_close(move |_ev, window, cx| close(window, cx))
                     .child(
                         div()
+                            .debug_selector(|| "export-modal".into())
                             .flex().flex_col()
                             .gap_2()
                             .w_full()
@@ -5582,6 +5678,11 @@ impl Render for XWikiApp {
         div()
             .id("app-root")
             .size_full()
+            // Positioned: modal/toast layers inside the OverlayHost resolve
+            // their absolute backdrops against this box (the window), not
+            // against the zero-height host div at the bottom of the page.
+            // Without this, every dialog renders below the visible window.
+            .relative()
             .bg(root_theme.paper)
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                 if event.keystroke.key != "escape" {
@@ -5725,6 +5826,21 @@ impl Render for XWikiApp {
                     } else {
                         div().into_any_element()
                     }),
+            )
+            // Overlay host last: modals and toasts must paint above the
+            // whole app. Without this mount every open_modal/toast call
+            // (move/rename/delete/export/archive dialogs, notifications)
+            // is silently invisible. Pinned to the window origin: the host
+            // div itself has zero height at the bottom of the page, and
+            // modal backdrops are absolute — they would resolve against a
+            // box below the visible window instead.
+            .child(
+                div()
+                    .absolute()
+                    .top(px(0.0))
+                    .left(px(0.0))
+                    .size_full()
+                    .child(self.overlay_host.clone()),
             )
     }
 }

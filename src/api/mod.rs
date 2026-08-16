@@ -1259,13 +1259,24 @@ impl Client {
         Ok(())
     }
 
-    pub async fn audit(&self, project_id: &str) -> Result<Vec<dto::AuditEntry>, ApiError> {
-        let resp: dto::AuditResponse = Self::send(
+    /// One audit page, newest first. `has_more` on the response tells the
+    /// caller whether another page exists (server default limit: 20, max
+    /// 100).
+    pub async fn audit_page(
+        &self,
+        project_id: &str,
+        limit: u32,
+        offset: u32,
+    ) -> Result<dto::AuditResponse, ApiError> {
+        Self::send(
             self.http
-                .get(self.url(&format!("/api/v1/projects/{project_id}/audit"))),
+                .get(self.url(&format!("/api/v1/projects/{project_id}/audit")))
+                .query(&[
+                    ("limit", limit.to_string()),
+                    ("offset", offset.to_string()),
+                ]),
         )
-        .await?;
-        Ok(resp.entries)
+        .await
     }
 
     pub async fn diff_stats(
@@ -1753,6 +1764,8 @@ pub mod dto {
     pub struct AuditResponse {
         #[serde(default, deserialize_with = "crate::api::de_null_default")]
         pub entries: Vec<AuditEntry>,
+        #[serde(default)]
+        pub has_more: bool,
     }
 
     #[derive(Debug, Deserialize, Serialize)]

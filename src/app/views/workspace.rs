@@ -289,6 +289,10 @@ impl XWikiApp {
                                         let menu2 = menu.clone();
                                         div()
                                             .id(SharedString::from(format!("project-menu-{id}")))
+                                            .debug_selector({
+                                                let id = id.clone();
+                                                move || format!("project-menu-btn-{id}")
+                                            })
                                             .tooltip(tooltip("项目操作"))
                                             .child(
                                                 ActionIcon::new(

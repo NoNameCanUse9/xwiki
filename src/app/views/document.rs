@@ -457,6 +457,7 @@ impl XWikiApp {
                                 menu.update(cx, |menu, cx| menu.show(position, window, cx));
                             }),
                         )
+                        .debug_selector(move || format!("tree-ellipsis-{i}"))
                         .child(Icon::new(IconName::EllipsisVertical).size(Size::Xs))
                 })
                 .on_click({
