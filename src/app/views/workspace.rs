@@ -576,31 +576,25 @@ impl XWikiApp {
                                 div()
                                     .id("sidebar-api-reference-wrap")
                                     .tooltip(tooltip("查看服务器 API 接口定义"))
-                                    .child(
-                                        developer_tool_button(
-                                            "sidebar-api-reference",
-                                            "API Reference",
-                                            IconName::BookOpen,
-                                            &cobalt,
-                                            cx.listener(|this, _, _, cx| {
-                                                this.open_api_reference(cx)
-                                            }),
-                                        ),
-                                    ),
+                                    .child(developer_tool_button(
+                                        "sidebar-api-reference",
+                                        "API Reference",
+                                        IconName::BookOpen,
+                                        &cobalt,
+                                        cx.listener(|this, _, _, cx| this.open_api_reference(cx)),
+                                    )),
                             )
                             .child(
                                 div()
                                     .id("sidebar-audit-wrap")
                                     .tooltip(tooltip("查看项目操作审计记录"))
-                                    .child(
-                                        developer_tool_button(
-                                            "sidebar-audit",
-                                            "Audit Log",
-                                            IconName::Inbox,
-                                            &cobalt,
-                                            cx.listener(|this, _, _, cx| this.open_audit(cx)),
-                                        ),
-                                    ),
+                                    .child(developer_tool_button(
+                                        "sidebar-audit",
+                                        "Audit Log",
+                                        IconName::Inbox,
+                                        &cobalt,
+                                        cx.listener(|this, _, _, cx| this.open_audit(cx)),
+                                    )),
                             ),
                     ),
                 div()
@@ -770,96 +764,105 @@ impl XWikiApp {
                                 )),
                             ),
                     )
-                    .child(if self.loading && self.projects.is_empty() && self.project_skeleton_visible {
-                        div()
-                            .id("project-skeletons")
-                            .flex_1()
-                            .min_h(px(0.0))
-                            .overflow_y_scroll()
-                            .child(
-                                div()
-                                    .flex()
-                                    .flex_wrap()
-                                    .content_start()
-                                    .items_start()
-                                    .gap_3()
-                                    .children((0..3).map(|i| {
-                                        div()
-                                            .id(SharedString::from(format!("skeleton-card-{i}")))
-                                            .flex_none()
-                                            .w(px(card_width))
-                                            .h(px(tokens::CARD_HEIGHT))
-                                            .p_4()
-                                            .rounded(px(tokens::RADIUS))
-                                            .border_1()
-                                            .border_color(cobalt.rule)
-                                            .flex()
-                                            .flex_col()
-                                            .gap_3()
-                                            .child(
-                                                div()
-                                                    .w(px(180.0))
-                                                    .h(px(16.0))
-                                                    .rounded(px(tokens::RADIUS_SMALL))
-                                                    .bg(cobalt.rule),
-                                            )
-                                            .child(
-                                                div()
-                                                    .w_full()
-                                                    .h(px(12.0))
-                                                    .rounded(px(tokens::RADIUS_SMALL))
-                                                    .bg(cobalt.rule),
-                                            )
-                                            .child(
-                                                div()
-                                                    .w(px(120.0))
-                                                    .h(px(12.0))
-                                                    .rounded(px(tokens::RADIUS_SMALL))
-                                                    .bg(cobalt.rule),
-                                            )
-                                    })),
-                            )
-                            .into_any_element()
-                    } else if self.loading && self.projects.is_empty() {
-                        // Reserve the content area during the skeleton delay so the
-                        // empty-state CTA does not flash before a fast response lands.
-                        div().flex_1().min_h(px(0.0)).into_any_element()
-                    } else if self.projects.is_empty() && let Some(err) = &self.projects_error {
-                        div()
-                            .flex_1()
-                            .flex()
-                            .flex_col()
-                            .items_center()
-                            .justify_center()
-                            .gap_4()
-                            .child(mono_label("加载失败").text_color(cobalt.danger))
-                            .child(
-                                div()
-                                    .px_4()
-                                    .text_center()
-                                    .text_sm()
-                                    .text_color(cobalt.ink_3)
-                                    .child(err.clone()),
-                            )
-                            .child(
-                                Button::new("retry-projects", "重试")
-                                    .variant(Variant::Filled)
-                                    .radius(GSize::Sm)
-                                    .left_section(Icon::new(IconName::Redo2).size(GSize::Sm))
-                                    .on_click(cx.listener(|this, _, _, cx| this.load_projects(cx))),
-                            )
-                            .into_any_element()
-                    } else {
-                        div()
-                            .id("project-grid")
-                            .flex_1()
-                            .min_h(px(0.0))
-                            .flex()
-                            .flex_col()
-                            .overflow_y_scroll()
-                            .child(cards_content)
-                            .into_any_element()
-                    }),
+                    .child(
+                        if self.loading && self.projects.is_empty() && self.project_skeleton_visible
+                        {
+                            div()
+                                .id("project-skeletons")
+                                .flex_1()
+                                .min_h(px(0.0))
+                                .overflow_y_scroll()
+                                .child(
+                                    div()
+                                        .flex()
+                                        .flex_wrap()
+                                        .content_start()
+                                        .items_start()
+                                        .gap_3()
+                                        .children((0..3).map(|i| {
+                                            div()
+                                                .id(SharedString::from(format!(
+                                                    "skeleton-card-{i}"
+                                                )))
+                                                .flex_none()
+                                                .w(px(card_width))
+                                                .h(px(tokens::CARD_HEIGHT))
+                                                .p_4()
+                                                .rounded(px(tokens::RADIUS))
+                                                .border_1()
+                                                .border_color(cobalt.rule)
+                                                .flex()
+                                                .flex_col()
+                                                .gap_3()
+                                                .child(
+                                                    div()
+                                                        .w(px(180.0))
+                                                        .h(px(16.0))
+                                                        .rounded(px(tokens::RADIUS_SMALL))
+                                                        .bg(cobalt.rule),
+                                                )
+                                                .child(
+                                                    div()
+                                                        .w_full()
+                                                        .h(px(12.0))
+                                                        .rounded(px(tokens::RADIUS_SMALL))
+                                                        .bg(cobalt.rule),
+                                                )
+                                                .child(
+                                                    div()
+                                                        .w(px(120.0))
+                                                        .h(px(12.0))
+                                                        .rounded(px(tokens::RADIUS_SMALL))
+                                                        .bg(cobalt.rule),
+                                                )
+                                        })),
+                                )
+                                .into_any_element()
+                        } else if self.loading && self.projects.is_empty() {
+                            // Reserve the content area during the skeleton delay so the
+                            // empty-state CTA does not flash before a fast response lands.
+                            div().flex_1().min_h(px(0.0)).into_any_element()
+                        } else if self.projects.is_empty()
+                            && let Some(err) = &self.projects_error
+                        {
+                            div()
+                                .flex_1()
+                                .flex()
+                                .flex_col()
+                                .items_center()
+                                .justify_center()
+                                .gap_4()
+                                .child(mono_label("加载失败").text_color(cobalt.danger))
+                                .child(
+                                    div()
+                                        .px_4()
+                                        .text_center()
+                                        .text_sm()
+                                        .text_color(cobalt.ink_3)
+                                        .child(err.clone()),
+                                )
+                                .child(
+                                    Button::new("retry-projects", "重试")
+                                        .variant(Variant::Filled)
+                                        .radius(GSize::Sm)
+                                        .left_section(Icon::new(IconName::Redo2).size(GSize::Sm))
+                                        .on_click(
+                                            cx.listener(|this, _, _, cx| this.load_projects(cx)),
+                                        ),
+                                )
+                                .into_any_element()
+                        } else {
+                            div()
+                                .id("project-grid")
+                                .flex_1()
+                                .min_h(px(0.0))
+                                .flex()
+                                .flex_col()
+                                .overflow_y_scroll()
+                                .child(cards_content)
+                                .into_any_element()
+                        },
+                    ),
                 move |w, _window, cx| {
                     app_handle.update(cx, |app, cx| {
                         app.layout.projects_rail = w;

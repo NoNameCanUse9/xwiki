@@ -15,9 +15,7 @@
 //! `#[test]` that `#[gpui::test]` generates would then expand to itself
 //! recursively (rustc stack overflow). Import names explicitly.
 
-use super::{
-    Client, ProjectRow, Screen, XWikiApp, audit_page_offset, dto, merge_audit_page,
-};
+use super::{Client, ProjectRow, Screen, XWikiApp, audit_page_offset, dto, merge_audit_page};
 use gpui::{Entity, Modifiers, Pixels, Point, TestAppContext, VisualTestContext, point, px};
 
 /// File-row ellipsis menu layout (打开, 编辑, 导出项目, 移动, 重命名, 删除).
@@ -219,7 +217,11 @@ async fn file_row_ellipsis_menu_opens_every_dialog(cx: &mut TestAppContext) {
     );
     assert_eq!(modal_count(&app, cx), 1, "exactly one modal must be open");
     close_modal(cx);
-    assert_eq!(modal_count(&app, cx), 0, "modal must close on backdrop click");
+    assert_eq!(
+        modal_count(&app, cx),
+        0,
+        "modal must close on backdrop click"
+    );
 
     // 重命名
     click_row_menu_item(cx, 1, FILE_ITEM_RENAME);

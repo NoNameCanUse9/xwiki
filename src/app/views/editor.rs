@@ -9,9 +9,9 @@
 
 use gpui::*;
 use guise::{
-    style::Variant,
-    theme::{theme, ColorName, Size as GuiseSize},
     Button, Icon, IconName,
+    style::Variant,
+    theme::{ColorName, Size as GuiseSize, theme},
 };
 
 use crate::app::{ConflictInfo, XWikiApp};

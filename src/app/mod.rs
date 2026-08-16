@@ -15,9 +15,9 @@ use guise::theme::{Size, theme};
 use crate::api::{Client, dto};
 use crate::config;
 mod outline;
-pub mod views;
 #[cfg(test)]
 mod tests;
+pub mod views;
 use crate::ui::{mono_label, tokens};
 use crate::{QuickOpen, SaveEditor, TogglePalette, ToggleTheme};
 
@@ -438,8 +438,7 @@ impl XWikiApp {
         // starts empty. Plain Vec — every access happens on the main thread
         // inside update callbacks, so no lock is needed.
         // Match the compact action buttons in the workspace toolbar.
-        let filter_input =
-            cx.new(|cx| TextInput::new(cx).size(Size::Xs).placeholder("搜索项目…"));
+        let filter_input = cx.new(|cx| TextInput::new(cx).size(Size::Xs).placeholder("搜索项目…"));
 
         let commit_msg = cx.new(|cx| TextInput::new(cx).placeholder("提交消息…"));
         let editor_input = cx.new(|cx| {
@@ -514,8 +513,9 @@ impl XWikiApp {
         // invalidate the app even while the editor is open.
         {
             let editor = editor_input.clone();
-            subs.push(
-                cx.subscribe(&editor_input, move |app, _entity, event: &EditorEvent, cx| {
+            subs.push(cx.subscribe(
+                &editor_input,
+                move |app, _entity, event: &EditorEvent, cx| {
                     if matches!(event, EditorEvent::Change(_)) {
                         let _ = editor.read(cx);
                         if app.editing {
@@ -523,8 +523,8 @@ impl XWikiApp {
                         }
                         cx.notify();
                     }
-                }),
-            );
+                },
+            ));
         }
         // History search is server-backed so it covers every ref and commit,
         // not only the currently loaded page.
@@ -4177,8 +4177,7 @@ impl XWikiApp {
                         }
                         app.audit_loading = false;
                         app.audit_error = None;
-                        app.audit_has_more =
-                            merge_audit_page(&mut app.audit_entries, page, reset);
+                        app.audit_has_more = merge_audit_page(&mut app.audit_entries, page, reset);
                         cx.notify();
                     });
                 }

@@ -3,8 +3,8 @@
 
 use gpui::InteractiveElement;
 use gpui::*;
-use guise::theme::{theme, ColorName, Size};
-use guise::{tooltip, ActionIcon, Button, ContextMenu, Icon, IconName, Variant};
+use guise::theme::{ColorName, Size, theme};
+use guise::{ActionIcon, Button, ContextMenu, Icon, IconName, Variant, tooltip};
 
 use crate::app::XWikiApp;
 use crate::config;
@@ -1813,7 +1813,7 @@ impl XWikiApp {
 
 #[cfg(test)]
 mod tests {
-    use super::{document_view_mode, DocumentViewMode};
+    use super::{DocumentViewMode, document_view_mode};
 
     #[test]
     fn document_layout_keeps_browser_reading_and_editing_separate() {

@@ -1271,10 +1271,7 @@ impl Client {
         Self::send(
             self.http
                 .get(self.url(&format!("/api/v1/projects/{project_id}/audit")))
-                .query(&[
-                    ("limit", limit.to_string()),
-                    ("offset", offset.to_string()),
-                ]),
+                .query(&[("limit", limit.to_string()), ("offset", offset.to_string())]),
         )
         .await
     }

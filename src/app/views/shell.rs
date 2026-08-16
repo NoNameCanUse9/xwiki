@@ -3,10 +3,10 @@
 use gpui::prelude::*;
 use gpui::*;
 use guise::{
+    ActionIcon, Button, Icon, IconName,
     overlay::tooltip as guise_tooltip,
     style::Variant,
-    theme::{theme, Size as GuiseSize, Theme},
-    ActionIcon, Button, Icon, IconName,
+    theme::{Size as GuiseSize, Theme, theme},
 };
 
 use crate::app::{Screen, XWikiApp};
