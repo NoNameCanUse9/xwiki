@@ -50,6 +50,7 @@ impl XWikiApp {
         };
         div()
             .flex_1()
+            .min_h(px(0.0))
             .h_full()
             .flex()
             .flex_col()
@@ -220,6 +221,7 @@ impl XWikiApp {
                 div()
                     .id("editor-preview-scroll")
                     .flex_1()
+                    .min_h(px(0.0))
                     .p_6()
                     .overflow_y_scroll()
                     .child(
@@ -232,12 +234,25 @@ impl XWikiApp {
                 div()
                     .id("editor-input-scroll")
                     .flex_1()
+                    .min_h(px(0.0))
                     .p_6()
                     .flex()
                     .flex_col()
                     .gap_2()
-                    .child(mono_label("MARKDOWN CONTENT").text_color(cobalt.ink_3))
-                    .child(div().h_full().w_full().child(self.editor_input.clone()))
+                    .overflow_hidden()
+                    .child(
+                        mono_label("MARKDOWN CONTENT")
+                            .text_color(cobalt.ink_3)
+                            .flex_none(),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_h(px(0.0))
+                            .h_full()
+                            .w_full()
+                            .child(self.editor_input.clone()),
+                    )
             })
             // ── Status bar ───────────────────────────────────────
             // Matches: [Markdown] [UTF-8] [LF] | [Ln 1, Col 1] [Spaces: 2] [● Saved]

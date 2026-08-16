@@ -267,7 +267,7 @@ pub struct XWikiApp {
     save_error: Option<String>,
     saving: bool,
     commit_msg: Entity<TextInput>,
-    editor_input: Entity<TextArea>,
+    editor_input: Entity<Editor>,
     editor_preview: bool,
     // History view state.
     history_open: bool,
@@ -416,7 +416,12 @@ impl XWikiApp {
             cx.new(|cx| TextInput::new(cx).size(Size::Xs).placeholder("搜索项目…"));
 
         let commit_msg = cx.new(|cx| TextInput::new(cx).placeholder("提交消息…"));
-        let editor_input = cx.new(|cx| TextArea::new(cx).placeholder("# 用 Markdown 写作…"));
+        let editor_input = cx.new(|cx| {
+            Editor::new(cx)
+                .line_numbers(false)
+                .font_size(14.0)
+                .placeholder("# 用 Markdown 写作…")
+        });
         let history_input = cx.new(|cx| TextInput::new(cx).placeholder("搜索版本…"));
         let attachment_source_input =
             cx.new(|cx| TextInput::new(cx).placeholder("本地文件路径（≤ 5 MiB）"));
@@ -484,12 +489,14 @@ impl XWikiApp {
         {
             let editor = editor_input.clone();
             subs.push(
-                cx.subscribe(&editor_input, move |app, _entity, _: &TextAreaEvent, cx| {
-                    let _ = editor.read(cx);
-                    if app.editing {
-                        app.persist_draft(cx);
+                cx.subscribe(&editor_input, move |app, _entity, event: &EditorEvent, cx| {
+                    if matches!(event, EditorEvent::Change(_)) {
+                        let _ = editor.read(cx);
+                        if app.editing {
+                            app.persist_draft(cx);
+                        }
+                        cx.notify();
                     }
-                    cx.notify();
                 }),
             );
         }
@@ -536,6 +543,23 @@ impl XWikiApp {
                 },
             ));
         }
+        // A window close bypasses the editor's Cancel button. Stop the lease
+        // loop and make the same best-effort release request before the root
+        // entity disappears. Use a weak handle to avoid a subscription cycle.
+        let app_handle = cx.entity().downgrade();
+        subs.push(cx.on_window_closed(move |cx| {
+            if let Some(app_handle) = app_handle.upgrade() {
+                app_handle.update(cx, |app, cx| {
+                    app.stop_heartbeat();
+                    app.release_current_lock(cx);
+                    app.editing = false;
+                    app.saving = false;
+                    app.lock_held = false;
+                    app.edit_base_revision = None;
+                    app.edit_path = None;
+                });
+            }
+        }));
 
         let mut app = Self {
             screen: Screen::Login,
@@ -710,7 +734,13 @@ impl XWikiApp {
     }
 
     fn open_project(&mut self, project_id: &str, cx: &mut Context<Self>) {
+        if self.editing {
+            return;
+        }
+        self.release_current_lock(cx);
         self.stop_heartbeat();
+        self.edit_path = None;
+        self.lock_held = false;
         self.reset_project_changes();
         self.selected_project = Some(project_id.to_string());
         self.selected_sha = None;
@@ -1288,7 +1318,13 @@ impl XWikiApp {
     }
 
     fn back_to_projects(&mut self, cx: &mut Context<Self>) {
+        if self.editing {
+            return;
+        }
+        self.release_current_lock(cx);
         self.stop_heartbeat();
+        self.edit_path = None;
+        self.lock_held = false;
         self.reset_project_changes();
         self.selected_project = None;
         self.current_revision = None;
@@ -1320,6 +1356,10 @@ impl XWikiApp {
         if self.editing {
             return;
         }
+        self.release_current_lock(cx);
+        self.stop_heartbeat();
+        self.edit_path = None;
+        self.lock_held = false;
         let path = self.tree_path.clone();
         self.doc_path = None;
         self.doc_content.clear();
@@ -1476,6 +1516,23 @@ impl XWikiApp {
         self.heartbeat_generation.fetch_add(1, Ordering::Relaxed);
     }
 
+    /// Best-effort release of the current server-side document lock.
+    /// Callers clear local edit state separately so the request can still use
+    /// the cloned project/path after navigation or logout.
+    fn release_current_lock(&self, cx: &mut Context<Self>) {
+        let (Some(client), Some(project), Some(path)) = (
+            self.client.clone(),
+            self.selected_project.clone(),
+            self.edit_path.clone(),
+        ) else {
+            return;
+        };
+        cx.spawn(async move |_this, _cx| {
+            let _ = client.release_lock(&project, &path).await;
+        })
+        .detach();
+    }
+
     fn reacquire_lock(&mut self, cx: &mut Context<Self>) {
         let (Some(client), Some(project), Some(path)) = (
             self.client.clone(),
@@ -1515,17 +1572,11 @@ impl XWikiApp {
         self.lock_held = false;
         self.saving = false;
         self.save_error = None;
-        let (client, project, path) = (
-            self.client.clone(),
-            self.selected_project.clone(),
-            self.edit_path.take(),
-        );
-        if let (Some(client), Some(project), Some(path)) = (client, project, path) {
-            config::remove_draft(&self.server_url, &self.username, &project, &path);
-            cx.spawn(async move |_this, _cx| {
-                let _ = client.release_lock(&project, &path).await;
-            })
-            .detach();
+        let path = self.edit_path.clone();
+        self.release_current_lock(cx);
+        self.edit_path = None;
+        if let (Some(project), Some(path)) = (self.selected_project.as_deref(), path.as_deref()) {
+            config::remove_draft(&self.server_url, &self.username, project, path);
         }
         self.status_msg = None;
         cx.notify();
@@ -1653,17 +1704,11 @@ impl XWikiApp {
         self.editing = false;
         self.editor_preview = false;
         self.lock_held = false;
-        let (client, project, path) = (
-            self.client.clone(),
-            self.selected_project.clone(),
-            self.edit_path.take(),
-        );
-        if let (Some(client), Some(project), Some(path)) = (client, project, path) {
-            config::remove_draft(&self.server_url, &self.username, &project, &path);
-            cx.spawn(async move |_this, _cx| {
-                let _ = client.release_lock(&project, &path).await;
-            })
-            .detach();
+        let path = self.edit_path.clone();
+        self.release_current_lock(cx);
+        self.edit_path = None;
+        if let (Some(project), Some(path)) = (self.selected_project.as_deref(), path.as_deref()) {
+            config::remove_draft(&self.server_url, &self.username, project, path);
         }
         let path = self.doc_path.clone().unwrap_or_default();
         self.open_doc(&path, cx);
