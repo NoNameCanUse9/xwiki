@@ -1,4 +1,9 @@
 #![cfg_attr(target_family = "wasm", no_main)]
+// GUI-subsystem binary on Windows: without this the exe links against the
+// console subsystem, so launching xwiki from Explorer/Startup also spawns
+// a terminal window. CLI subcommands still work when run from an existing
+// terminal (stdout/stderr attach to the caller's console).
+#![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 // gpui's #[test] attribute macro nests deeply; default 128 is too low.
 #![recursion_limit = "512"]
 
